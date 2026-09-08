@@ -1101,7 +1101,6 @@ fn render_defenses(
     ui.columns(1, "##end_defense", false);
 }
 
-/// Render a table row for integer stats with diff.
 fn render_int_row(ui: &Ui, name: &str, cur: i32, sug: i32) {
     ui.text(name);
     ui.next_column();
@@ -1116,7 +1115,6 @@ fn render_int_row(ui: &Ui, name: &str, cur: i32, sug: i32) {
     ui.next_column();
 }
 
-/// Render a stat comparison table with 4 columns.
 fn render_stat_table(ui: &Ui, id: &str, stats: &[(&str, i32, i32)]) {
     ui.columns(4, id, true);
 
@@ -1172,9 +1170,8 @@ fn render_rotation_breakdown(ui: &Ui, rotation: &RotationBreakdown, db: Option<&
     }
 }
 
-// ─── Trust UI helpers ────────────────────────────────────────────────────────
+// Trust UI helpers
 
-/// Render data quality badge in comparison header.
 fn render_data_quality_badge(ui: &Ui, suggestion: &BuildSuggestion) {
     use gw2_optimizer::data::DataQuality;
     let (label, col, tooltip_header) = match suggestion.data_quality {
@@ -1217,7 +1214,6 @@ fn render_data_quality_badge(ui: &Ui, suggestion: &BuildSuggestion) {
     }
 }
 
-/// Render benchmark delta vs community reference.
 fn render_benchmark_delta(ui: &Ui, suggestion: &BuildSuggestion) {
     match &suggestion.benchmark_delta {
         None => {

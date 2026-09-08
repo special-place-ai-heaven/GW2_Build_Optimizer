@@ -204,7 +204,6 @@ pub fn validate_manifest_set(manifests: &[PatchManifest]) -> Result<(), Manifest
             current = id_map.get(id).and_then(|m| m.inherits_from.as_deref());
         }
 
-        // Check if any other active manifest is in this lineage
         for &other_id in &active_ids {
             if other_id != active_id && lineage.contains(other_id) {
                 return Err(ManifestError::ValidationError(format!(

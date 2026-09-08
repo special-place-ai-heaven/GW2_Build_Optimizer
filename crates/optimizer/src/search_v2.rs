@@ -22,7 +22,7 @@ use crate::validation::{
 use gw2_api::models::{Profession, Skill, Specialization};
 use gw2_core::types::{BuildLocks, GearSlot, PrefixRef};
 
-// ─── Core types ──────────────────────────────────────────────────────────────
+// Core types
 
 /// A single candidate on the beam: a fully-validated build together with its
 /// referee evaluation (score, viability, stats, …).
@@ -308,7 +308,7 @@ pub(crate) fn refine_piece_swaps_within(
     current
 }
 
-// ─── Mutation operators ───────────────────────────────────────────────────────
+// Mutation operators
 
 /// Generate all immediate neighbours of `candidate` by applying each of the
 /// six atomic mutation operators in turn and collecting the results.
@@ -619,7 +619,7 @@ fn shortfall_key(report: &RefereeReport) -> i64 {
     (report.viability.shortfall * 1_000_000.0).round() as i64
 }
 
-// ─── Beam search entry point ──────────────────────────────────────────────────
+// Beam search entry point
 
 /// Run the beam/evolutionary search over complete build states.
 ///
@@ -647,11 +647,10 @@ pub fn optimize_v2_search(
         return Err("Cancelled".into());
     }
 
-    // Step 1: select gear prefix (cosine sim).
+    // Cosine similarity against the weight vector.
     let gear_match = scoring::select_gear_prefix(weights);
     let prefix_name = gear_match.primary;
 
-    // Step 2: seed from synergy pipeline.
     on_progress(OptimizeProgress {
         stage: "Seeding from synergy pipeline...".into(),
         done: false,
@@ -708,7 +707,6 @@ pub fn optimize_v2_search(
         seed_result.validated = validated;
     }
 
-    // Step 3: evaluate seed.
     let seed_report = referee::evaluate_validated_build(
         &seed_result.validated,
         db,
@@ -718,7 +716,6 @@ pub fn optimize_v2_search(
         scenario,
     );
 
-    // Step 4: initialise beam.
     let mut beam: Vec<BeamCandidate> = vec![BeamCandidate {
         validated: seed_result.validated,
         report: seed_report,
@@ -784,7 +781,7 @@ pub fn optimize_v2_search(
     // Index of the FIRST rank key that differs from the seed; 9 = identical.
     let mut fn_first_diff = [0usize; 10];
 
-    // Step 5: beam loop — keep permuting until the clock or eval budget is gone.
+    // Permute until the clock or eval budget is gone.
     while eval_count < config.eval_budget && Instant::now() < deadline && !is_cancelled() {
         generation += 1;
         on_progress(OptimizeProgress {
@@ -985,7 +982,7 @@ fn finish_search(beam: Vec<BeamCandidate>) -> Result<ValidatedBuild, String> {
     Ok(best.validated)
 }
 
-// ─── Individual mutation operators (private helpers) ─────────────────────────
+// Individual mutation operators (private helpers)
 
 /// May a gear operator move this slot?
 ///
@@ -1538,7 +1535,6 @@ fn swap_utility_skills(
                 None => continue,
             };
             let mut b = candidate.validated.clone();
-            // Ensure utilities vec has enough entries.
             while b.skills.utilities.len() <= slot_idx {
                 b.skills.utilities.push(None);
             }
@@ -2007,8 +2003,6 @@ fn swap_weapons(
     }
     out
 }
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -2681,7 +2675,6 @@ mod tests {
     /// prefix pool, and it stops when its budget is gone.
     #[test]
     fn nudge_uses_canonical_pool_and_budget() {
-        // ── the pool ────────────────────────────────────────────────────────────
         let mut db = empty_db();
         let power = |id: u32, name: &str, multiplier: f64| gw2_api::models::ItemStat {
             id,
@@ -2747,7 +2740,6 @@ mod tests {
             );
         }
 
-        // ── the budget ──────────────────────────────────────────────────────────
         use crate::synergy_pipeline::runtime_diagnostics_tests::make_diag_db;
 
         let diag = make_diag_db();

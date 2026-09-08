@@ -340,7 +340,7 @@ pub(crate) fn as_transport_error(status: u16, message: String) -> LlmError {
     }
 }
 
-// ─── OpenAI wire types ───
+// OpenAI wire types
 
 #[derive(Serialize)]
 pub(crate) struct ChatRequest {

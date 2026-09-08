@@ -78,9 +78,7 @@ pub(in crate::ui::main_view) fn render_radio_tab(ui: &Ui, state: &mut AddonState
     player_bar(ui, state);
 }
 
-// ---------------------------------------------------------------------------
 // Search + genres
-// ---------------------------------------------------------------------------
 
 fn search_row(ui: &Ui, state: &mut AddonState) {
     let btn = t("radio.search");
@@ -482,9 +480,7 @@ fn kick_search(state: &mut AddonState, kind: SearchKind) {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Favorites + station list
-// ---------------------------------------------------------------------------
 
 fn favorites(ui: &Ui, state: &mut AddonState) {
     if state.config.radio.favorites.is_empty() {
@@ -1127,9 +1123,7 @@ fn heart_glyph(dl: &DrawListMut, c: [f32; 2], r: f32, color: [f32; 4]) {
     .build();
 }
 
-// ---------------------------------------------------------------------------
 // Player bar
-// ---------------------------------------------------------------------------
 
 /// Bar height: the status line plus the big now-playing marquee line (1.5x
 /// scale), and — only when the controls are NOT on the active station's row —
@@ -1547,9 +1541,7 @@ fn status_line(status: &RadioStatus) -> (String, [f32; 4]) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Actions + small pure helpers
-// ---------------------------------------------------------------------------
+// Actions
 
 /// Tune in and reflect it immediately; the playback thread confirms (or
 /// corrects) the status a moment later through `with_state`.

@@ -339,8 +339,6 @@ mod tests {
         assert_eq!(v["context"]["game_build"], Value::from(174122));
     }
 
-    // T009 — privacy guards.
-
     #[test]
     fn optional_fields_are_null_for_every_category() {
         // `Report` has no field that could carry an API key, a character name, or the

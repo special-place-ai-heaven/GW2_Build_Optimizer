@@ -91,7 +91,6 @@ fn download_steps(
     let build = client.get_build_number()?;
     let mut step = 0;
 
-    // 1. Item stats
     check()?;
     if cache.is_stale("itemstats", build) {
         let data: Vec<models::ItemStat> = client.fetch_all("itemstats")?;
@@ -101,7 +100,6 @@ fn download_steps(
     }
     report(&mut on_progress, &mut step, "Item stats", None);
 
-    // 2. Specializations
     check()?;
     if cache.is_stale("specializations", build) {
         let data: Vec<models::Specialization> = client.fetch_all("specializations")?;
@@ -111,7 +109,6 @@ fn download_steps(
     }
     report(&mut on_progress, &mut step, "Specializations", None);
 
-    // 3. Traits
     check()?;
     if cache.is_stale("traits", build) {
         let data: Vec<models::Trait> = client.fetch_all("traits")?;
@@ -121,7 +118,6 @@ fn download_steps(
     }
     report(&mut on_progress, &mut step, "Traits", None);
 
-    // 4. Skills
     check()?;
     if cache.is_stale("skills", build) {
         let data: Vec<models::Skill> = client.fetch_all("skills")?;
@@ -131,7 +127,7 @@ fn download_steps(
     }
     report(&mut on_progress, &mut step, "Skills", None);
 
-    // 5. Professions (use schema version that includes skills_by_palette)
+    // Schema version that includes skills_by_palette.
     check()?;
     if cache.is_stale("professions", build) {
         let data: Vec<models::Profession> = client.get_with_params(
@@ -144,7 +140,7 @@ fn download_steps(
     }
     report(&mut on_progress, &mut step, "Professions", None);
 
-    // 6. Legends (schema that includes template `code`)
+    // Schema version that includes template `code`.
     check()?;
     if cache.is_stale("legends", build) {
         let data: Vec<models::Legend> = client.get_with_params(
@@ -157,7 +153,6 @@ fn download_steps(
     }
     report(&mut on_progress, &mut step, "Legends", None);
 
-    // 7. Pets (ranger terrestrial/aquatic companions)
     check()?;
     if cache.is_stale("pets", build) {
         let data: Vec<models::Pet> = client.fetch_all("pets")?;
@@ -167,7 +162,6 @@ fn download_steps(
     }
     report(&mut on_progress, &mut step, "Pets", None);
 
-    // 8. PvP Amulets
     check()?;
     if cache.is_stale("pvp_amulets", build) {
         let data: Vec<models::PvpAmulet> = client.fetch_all("pvp/amulets")?;
@@ -177,8 +171,8 @@ fn download_steps(
     }
     report(&mut on_progress, &mut step, "PvP Amulets", None);
 
-    // 9. Items (filtered to equipment-relevant types) — largest step, ~100k items
-    // Uses fetch_by_ids (200-ID batches, 5 concurrent) with lenient per-item deserialization.
+    // Equipment-relevant types only; ~100k items. Batched fetch_by_ids with
+    // lenient per-item deserialization.
     check()?;
     if cache.is_stale("items", build) {
         let relevant_types = [
@@ -191,7 +185,6 @@ fn download_steps(
         ];
         let relevant_rarities = ["Exotic", "Ascended", "Legendary"];
 
-        // Get all item IDs first
         on_progress(DownloadProgress {
             current_step: step,
             total_steps: TOTAL_STEPS,
@@ -242,7 +235,7 @@ fn download_steps(
     }
     report(&mut on_progress, &mut step, "Items (equipment)", None);
 
-    // 10. Icons — separate from JSON. Skip files already on disk.
+    // Icons are separate from JSON. Skip files already on disk.
     check()?;
     let urls = crate::graphics::collect_from_cache(cache);
     let gfx = cache.graphics_dir();
@@ -444,11 +437,9 @@ mod tests {
     fn test_full_download_pipeline() {
         let client = Gw2Client::without_key().unwrap();
 
-        // Build number
         let build = client.get_build_number().unwrap();
         println!("[OK] Build: {}", build);
 
-        // Traits
         let start = Instant::now();
         let traits: Vec<models::Trait> = client.fetch_all("traits").unwrap();
         println!(
@@ -462,7 +453,6 @@ mod tests {
             traits.len()
         );
 
-        // Skills
         let start = Instant::now();
         let skills: Vec<models::Skill> = client.fetch_all("skills").unwrap();
         println!(
@@ -476,7 +466,6 @@ mod tests {
             skills.len()
         );
 
-        // Specializations
         let start = Instant::now();
         let specs: Vec<models::Specialization> = client.fetch_all("specializations").unwrap();
         println!(
@@ -486,7 +475,6 @@ mod tests {
         );
         assert!(specs.len() > 30, "Expected >30 specs, got {}", specs.len());
 
-        // Itemstats
         let start = Instant::now();
         let itemstats: Vec<models::ItemStat> = client.fetch_all("itemstats").unwrap();
         println!(
@@ -500,7 +488,7 @@ mod tests {
             itemstats.len()
         );
 
-        // Items (first 2000 only — full download too slow for test)
+        // Full item download is too slow for this test; first 2000 IDs only.
         let start = Instant::now();
         let all_ids: Vec<serde_json::Value> = client.get("items").unwrap();
         println!(
@@ -523,7 +511,6 @@ mod tests {
             items.len()
         );
 
-        // Professions
         let start = Instant::now();
         let profs: Vec<models::Profession> = client
             .get_with_params(

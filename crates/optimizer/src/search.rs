@@ -210,7 +210,7 @@ pub fn search_spec_combos(
         .collect();
 
     let locked_elite = locks.locked_elite_id();
-    // Check if slot 0 and slot 1 are locked to specific core specs
+    // Core-spec locks on slots 0 and 1.
     let locked_slot0 = locks.specs[0];
     let locked_slot1 = locks.specs[1];
 

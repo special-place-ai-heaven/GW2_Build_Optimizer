@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use super::{try_load, DataLoadError, EvidenceLevel};
 
-// ─── Embedded baseline JSON (compile-time) ───
+// Embedded baseline JSON (compile-time)
 
 const PVE_OVERRIDES_JSON: &str =
     include_str!("../../../../data/balance_overrides/2026-07-15/pve.json");
@@ -35,8 +35,6 @@ pub fn try_load_balance_overrides() -> Result<BalanceOverrides, Vec<DataLoadErro
     )
 }
 
-// ─── Error type ───
-
 #[derive(Debug, Error)]
 pub enum BalanceOverrideError {
     #[error("JSON parse error: {0}")]
@@ -45,7 +43,7 @@ pub enum BalanceOverrideError {
     ValidationError(String),
 }
 
-// ─── Override file schema ───
+// Override file schema
 
 /// A single override file for one game mode in a specific patch.
 #[derive(Debug, Clone, Deserialize)]
@@ -81,7 +79,7 @@ pub struct OverrideEntry {
     pub source: Option<String>,
 }
 
-// ─── Lookup result ───
+// Lookup result
 
 /// Result of looking up an override. Distinguishes between:
 /// - No override exists (None from lookup) → no quality degradation
@@ -98,7 +96,7 @@ pub enum OverrideResult {
     Unknown { evidence_level: EvidenceLevel },
 }
 
-// ─── BalanceOverrides container ───
+// BalanceOverrides container
 
 /// Container for all loaded balance overrides, keyed by (patch_id, mode).
 #[derive(Debug)]
@@ -141,7 +139,6 @@ impl BalanceOverrides {
         })
     }
 
-    /// Number of loaded override files.
     pub fn file_count(&self) -> usize {
         self.files.len()
     }
@@ -151,8 +148,6 @@ impl BalanceOverrides {
         self.files.values().map(|f| f.entities.len()).sum()
     }
 }
-
-// ─── Loading ───
 
 /// Parse and validate a single override file from JSON text.
 pub fn load_override_file(json: &str) -> Result<OverrideFile, BalanceOverrideError> {
@@ -222,7 +217,7 @@ fn load_all_overrides() -> Result<BalanceOverrides, BalanceOverrideError> {
     Ok(BalanceOverrides { files })
 }
 
-// ─── Known Mode Splits ───
+// Known Mode Splits
 
 /// A coefficient known to differ between game modes.
 /// Used to detect when a WvW-specific value is missing from the override system.
@@ -295,7 +290,7 @@ pub fn known_mode_splits() -> &'static [KnownModeSplit] {
 mod tests {
     use super::*;
 
-    // ─── Embedded baseline loads successfully ───
+    // Embedded baseline loads successfully
 
     #[test]
     fn test_embedded_overrides_load_successfully() {
@@ -323,7 +318,7 @@ mod tests {
         );
     }
 
-    // ─── Lookup on empty baseline returns None ───
+    // Lookup on empty baseline returns None
 
     #[test]
     fn test_lookup_empty_baseline_returns_none() {
@@ -353,7 +348,7 @@ mod tests {
         );
     }
 
-    // ─── Parsing tests with inline JSON ───
+    // Parsing tests with inline JSON
 
     #[test]
     fn test_parse_valid_override_file() {
@@ -411,7 +406,7 @@ mod tests {
         assert_eq!(coeff.evidence_level, EvidenceLevel::Unknown);
     }
 
-    // ─── Lookup with populated overrides ───
+    // Lookup with populated overrides
 
     #[test]
     fn test_lookup_value_override() {
@@ -494,7 +489,7 @@ mod tests {
         );
     }
 
-    // ─── Error paths ───
+    // Error paths
 
     #[test]
     fn test_malformed_json_returns_error() {
@@ -579,7 +574,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("empty name"));
     }
 
-    // ─── None vs Unknown semantics ───
+    // None vs Unknown semantics
 
     #[test]
     fn test_none_vs_unknown_semantics() {
@@ -630,7 +625,7 @@ mod tests {
         );
     }
 
-    // ─── P3-12: WvW Non-Fallback Integration Tests ───
+    // P3-12: WvW Non-Fallback Integration Tests
 
     /// WvW lookup with a WvW-specific override returns the WvW value.
     #[test]

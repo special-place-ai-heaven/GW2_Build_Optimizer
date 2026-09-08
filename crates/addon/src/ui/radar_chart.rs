@@ -138,13 +138,11 @@ pub fn render_radar_chart(
         WEIGHTS_OUTLINE,
     );
 
-    // Handle dragging
     let mouse_pos = ui.io().mouse_pos;
     let mouse_down = ui.io().mouse_down[0];
 
     if mouse_down {
         if dragging.is_none() {
-            // Check if mouse is near a handle (start drag)
             for (i, &wi) in w.iter().enumerate() {
                 let handle_pos = axis_point(center, radius, i, wi as f32);
                 let dx = mouse_pos[0] - handle_pos[0];
@@ -174,7 +172,6 @@ pub fn render_radar_chart(
         *dragging = None;
     }
 
-    // Draw handles (filled circles at each weight point)
     for i in 0..NUM_AXES {
         let handle_pos = axis_point(center, radius, i, w[i] as f32);
         let is_dragged = *dragging == Some(i);
@@ -221,7 +218,6 @@ pub fn render_radar_chart(
         .filled(true)
         .build();
 
-    // Fill
     let bar_color = if budget_pct > 0.95 {
         [1.0, 0.4, 0.2, 0.9] // near max -- orange
     } else {
@@ -241,7 +237,6 @@ pub fn render_radar_chart(
     modified
 }
 
-/// Draw a filled polygon with outline for 6 axis values.
 fn draw_filled_polygon(
     draw_list: &nexus::imgui::DrawListMut,
     center: [f32; 2],
@@ -281,7 +276,6 @@ fn draw_filled_polygon(
     }
 }
 
-/// Render the legend showing what each polygon color represents.
 pub fn render_legend(ui: &Ui, show_current: bool, show_optimized: bool) {
     if show_current {
         ui.text_colored(CURRENT_OUTLINE, t("legend.current"));

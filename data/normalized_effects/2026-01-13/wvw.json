@@ -11,7 +11,9 @@
       "value": 120.0,
       "stacking_rule": "Additive",
       "trigger_rule": "Passive",
-      "uptime_model": { "kind": "AlwaysOn" },
+      "uptime_model": {
+        "kind": "AlwaysOn"
+      },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Forceful_Greatsword"
     },
@@ -24,7 +26,9 @@
       "value": 175.0,
       "stacking_rule": "Additive",
       "trigger_rule": "Passive",
-      "uptime_model": { "kind": "AlwaysOn" },
+      "uptime_model": {
+        "kind": "AlwaysOn"
+      },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Superior_Rune_of_the_Scholar (read 2026-09-08: +5% strike damage while health is above 90%)"
     },
@@ -37,8 +41,13 @@
       "value": 5.0,
       "stacking_rule": "Multiplicative",
       "trigger_rule": "OnHealthThreshold",
-      "health_threshold": { "above": true, "percent": 90.0 },
-      "uptime_model": { "kind": "Unknown" },
+      "health_threshold": {
+        "above": true,
+        "percent": 90.0
+      },
+      "uptime_model": {
+        "kind": "Unknown"
+      },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Superior_Rune_of_the_Scholar (read 2026-09-08: +5% strike damage while health is above 90%)",
       "inner_category": "StrikeDamagePct"
@@ -52,7 +61,9 @@
       "value": 5.0,
       "stacking_rule": "Multiplicative",
       "trigger_rule": "Passive",
-      "uptime_model": { "kind": "AlwaysOn" },
+      "uptime_model": {
+        "kind": "AlwaysOn"
+      },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Force"
     },
@@ -62,12 +73,14 @@
       "source_id": 44944,
       "source_name": "Superior Sigil of Bursting",
       "category": "ConditionDamagePct",
-      "value": 6.0,
+      "value": 5.0,
       "stacking_rule": "Multiplicative",
       "trigger_rule": "Passive",
-      "uptime_model": { "kind": "AlwaysOn" },
+      "uptime_model": {
+        "kind": "AlwaysOn"
+      },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Bursting"
+      "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Bursting (read 2026-09-08: +5% condition damage; the Sprint 2 record said 6)"
     },
     {
       "effect_id": "trait:1711:0",
@@ -138,7 +151,9 @@
       "value": 0.85,
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnCrit",
-      "uptime_model": { "kind": "Unknown" },
+      "uptime_model": {
+        "kind": "Unknown"
+      },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Fire (read 2026-09-08: flame blast on critical hit, 0.85 coefficient on the unequipped 690.5 weapon strength, cannot crit, 5 s cooldown)",
       "internal_cooldown": 5.0,
@@ -153,7 +168,9 @@
       "value": 2.0,
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnSkillUse",
-      "uptime_model": { "kind": "Unknown" },
+      "uptime_model": {
+        "kind": "Unknown"
+      },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Vicious_Expression",
       "status_operation": {
@@ -201,7 +218,9 @@
       "value": 2.0,
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnSkillUse",
-      "uptime_model": { "kind": "Unknown" },
+      "uptime_model": {
+        "kind": "Unknown"
+      },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Virtue_of_Resolve",
       "status_operation": {
@@ -222,7 +241,9 @@
       "value": 2.0,
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnSkillUse",
-      "uptime_model": { "kind": "Unknown" },
+      "uptime_model": {
+        "kind": "Unknown"
+      },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Plague_Sending",
       "status_operation": {
@@ -243,7 +264,9 @@
       "value": 1.0,
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnSkillUse",
-      "uptime_model": { "kind": "Unknown" },
+      "uptime_model": {
+        "kind": "Unknown"
+      },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Pure_of_Voice",
       "status_operation": {
@@ -264,13 +287,2893 @@
       "value": 1.0,
       "stacking_rule": "Multiplicative",
       "trigger_rule": "OnHit",
-      "uptime_model": { "kind": "Unknown" },
+      "uptime_model": {
+        "kind": "Unknown"
+      },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Relic_of_the_Thief (read 2026-09-08: +1% strike damage per stack for 6 s, max 5 stacks, on striking with a weapon skill that has a recharge or resource cost, refresh on trigger)",
       "effect_duration": 6.0,
       "max_stacks": 5,
       "inner_category": "StrikeDamagePct",
       "trigger_scope": "WeaponSkillWithRecharge"
+    },
+    {
+      "effect_id": "trait:792:coverage",
+      "source_type": "Trait",
+      "source_id": 792,
+      "source_name": "Mark of Evasion",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mark_of_Evasion (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:780:coverage",
+      "source_type": "Trait",
+      "source_id": 780,
+      "source_name": "Ritual of Life",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Ritual_of_Life (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "revive"
+      }
+    },
+    {
+      "effect_id": "trait:788:coverage",
+      "source_type": "Trait",
+      "source_id": 788,
+      "source_name": "Overflowing Thirst",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Overflowing_Thirst (read 2026-09-08: Taste for Blood to allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "life siphon"
+      }
+    },
+    {
+      "effect_id": "trait:1876:0",
+      "source_type": "Trait",
+      "source_id": 1876,
+      "source_name": "Blood Renewal",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blood_Renewal (read 2026-09-08)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self"
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      },
+      "internal_cooldown": 5.0
+    },
+    {
+      "effect_id": "trait:1876:1",
+      "source_type": "Trait",
+      "source_id": 1876,
+      "source_name": "Blood Renewal",
+      "category": "Heal",
+      "value": 961.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blood_Renewal (read 2026-09-08: 961 + 0.1 x healing power per condition consumed)",
+      "trigger_scope": {
+        "Slot": "Heal"
+      },
+      "internal_cooldown": 5.0,
+      "scale_by": "ConditionsRemoved",
+      "healing_power_coefficient": 0.1
+    },
+    {
+      "effect_id": "trait:783:0",
+      "source_type": "Trait",
+      "source_id": 783,
+      "source_name": "Vampiric",
+      "category": "Heal",
+      "value": 38.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Vampiric (read 2026-09-08: siphon heal half; WvW 38 + 0.006 x healing power)",
+      "healing_power_coefficient": 0.006
+    },
+    {
+      "effect_id": "trait:783:coverage",
+      "source_type": "Trait",
+      "source_id": 783,
+      "source_name": "Vampiric",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Vampiric (read 2026-09-08: siphon damage half and minion siphon)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "life siphon"
+      }
+    },
+    {
+      "effect_id": "trait:789:0",
+      "source_type": "Trait",
+      "source_id": 789,
+      "source_name": "Life from Death",
+      "category": "Heal",
+      "value": 714.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudExit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Life_from_Death (read 2026-09-08: area heal, 5 targets; the 10% healing increase to others is not modeled)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Healing (area)",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Party",
+        "target_count": 5
+      },
+      "healing_power_coefficient": 1.5
+    },
+    {
+      "effect_id": "trait:799:coverage",
+      "source_type": "Trait",
+      "source_id": 799,
+      "source_name": "Banshee's Wail",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Banshee%27s_Wail (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon-scoped duration"
+      }
+    },
+    {
+      "effect_id": "trait:1844:0",
+      "source_type": "Trait",
+      "source_id": 1844,
+      "source_name": "Vampiric Presence",
+      "category": "Heal",
+      "value": 32.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Vampiric_Presence (read 2026-09-08: siphon heal half out of shroud, 0.5 s interval (WvW))",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Healing (siphon)",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Party",
+        "target_count": 5
+      },
+      "prerequisite": {
+        "in_shroud": false
+      },
+      "internal_cooldown": 0.5,
+      "healing_power_coefficient": 0.0333
+    },
+    {
+      "effect_id": "trait:1844:1",
+      "source_type": "Trait",
+      "source_id": 1844,
+      "source_name": "Vampiric Presence",
+      "category": "Heal",
+      "value": 62.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Vampiric_Presence (read 2026-09-08: siphon heal half in shroud, 0.5 s interval (WvW))",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Healing (siphon)",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Party",
+        "target_count": 5
+      },
+      "prerequisite": {
+        "in_shroud": true
+      },
+      "internal_cooldown": 0.5,
+      "healing_power_coefficient": 0.0666
+    },
+    {
+      "effect_id": "trait:1844:coverage",
+      "source_type": "Trait",
+      "source_id": 1844,
+      "source_name": "Vampiric Presence",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Vampiric_Presence (read 2026-09-08: siphon damage half)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "life siphon"
+      }
+    },
+    {
+      "effect_id": "trait:1931:coverage",
+      "source_type": "Trait",
+      "source_id": 1931,
+      "source_name": "Last Rites",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Last_Rites (read 2026-09-08: healing power by health is on the stat sheet)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "downed"
+      }
+    },
+    {
+      "effect_id": "trait:782:coverage",
+      "source_type": "Trait",
+      "source_id": 782,
+      "source_name": "Blood Bank",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blood_Bank (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "barrier"
+      }
+    },
+    {
+      "effect_id": "trait:1692:0",
+      "source_type": "Trait",
+      "source_id": 1692,
+      "source_name": "Unholy Martyr",
+      "category": "RemovesCondition",
+      "value": 3.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudExit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unholy_Martyr (read 2026-09-08: 3 conditions consumed (WvW))",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 3.0,
+        "target_scope": "self"
+      }
+    },
+    {
+      "effect_id": "trait:1692:1",
+      "source_type": "Trait",
+      "source_id": 1692,
+      "source_name": "Unholy Martyr",
+      "category": "GainsLifeForce",
+      "value": 7.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudExit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unholy_Martyr (read 2026-09-08: 7% life force per condition consumed)",
+      "scale_by": "ConditionsRemoved"
+    },
+    {
+      "effect_id": "trait:1692:coverage",
+      "source_type": "Trait",
+      "source_id": 1692,
+      "source_name": "Unholy Martyr",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unholy_Martyr (read 2026-09-08: transfer from allies on entry)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ally state"
+      }
+    },
+    {
+      "effect_id": "trait:778:coverage",
+      "source_type": "Trait",
+      "source_id": 778,
+      "source_name": "Transfusion",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Transfusion (read 2026-09-08: marks triggered by allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ally state"
+      }
+    },
+    {
+      "effect_id": "trait:802:0",
+      "source_type": "Trait",
+      "source_id": 802,
+      "source_name": "Barbed Precision",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Barbed_Precision (read 2026-09-08: 33% chance, 1 s bleeding (WvW))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Bleeding",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "base_duration_ms": 1000
+      },
+      "proc_chance": 0.33
+    },
+    {
+      "effect_id": "trait:1883:coverage",
+      "source_type": "Trait",
+      "source_id": 1883,
+      "source_name": "Insidious Disruption",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Insidious_Disruption (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:815:0",
+      "source_type": "Trait",
+      "source_id": 815,
+      "source_name": "Chilling Darkness",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Chilling_Darkness (read 2026-09-08: chill 2 s on blind, 3 s recharge (API))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Chilled",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "base_duration_ms": 2000
+      },
+      "trigger_scope": {
+        "Status": "Blinded"
+      },
+      "internal_cooldown": 3.0
+    },
+    {
+      "effect_id": "trait:803:0",
+      "source_type": "Trait",
+      "source_id": 803,
+      "source_name": "Furious Demise",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Furious_Demise (read 2026-09-08: Fury 8 s; precision on the stat sheet)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 8000
+      }
+    },
+    {
+      "effect_id": "trait:816:coverage",
+      "source_type": "Trait",
+      "source_id": 816,
+      "source_name": "Master of Corruption",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Master_of_Corruption (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "recharge"
+      }
+    },
+    {
+      "effect_id": "trait:812:coverage",
+      "source_type": "Trait",
+      "source_id": 812,
+      "source_name": "Parasitic Contagion",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Parasitic_Contagion (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "condition damage heal"
+      }
+    },
+    {
+      "effect_id": "trait:810:coverage",
+      "source_type": "Trait",
+      "source_id": 810,
+      "source_name": "Target the Weak",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Target_the_Weak (read 2026-09-08: condition damage from precision is on the stat sheet)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "crit chance per stack"
+      }
+    },
+    {
+      "effect_id": "trait:813:0",
+      "source_type": "Trait",
+      "source_id": 813,
+      "source_name": "Weakening Shroud",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Weakening_Shroud (read 2026-09-08: weakness 2.5 s (WvW), 10 s recharge (API))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Weakness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "base_duration_ms": 2500
+      },
+      "internal_cooldown": 10.0
+    },
+    {
+      "effect_id": "trait:813:coverage",
+      "source_type": "Trait",
+      "source_id": 813,
+      "source_name": "Weakening Shroud",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Weakening_Shroud (read 2026-09-08: Weakening Shroud cast on entry)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:1696:coverage",
+      "source_type": "Trait",
+      "source_id": 1696,
+      "source_name": "Terror",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Terror (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "fear damage"
+      }
+    },
+    {
+      "effect_id": "trait:801:coverage",
+      "source_type": "Trait",
+      "source_id": 801,
+      "source_name": "Lingering Curse",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lingering_Curse (read 2026-09-08: the 200 condition damage is on the stat sheet)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon-scoped duration"
+      }
+    },
+    {
+      "effect_id": "trait:856:0",
+      "source_type": "Trait",
+      "source_id": 856,
+      "source_name": "Armored Shroud",
+      "category": "AppliesBoon",
+      "value": 5.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Armored_Shroud (read 2026-09-08: 5 stacks of Death's Carapace, 10 s, 20 toughness each in WvW)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Death's Carapace",
+        "amount_mode": "Stacks",
+        "amount_value": 5.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
+      }
+    },
+    {
+      "effect_id": "trait:820:coverage",
+      "source_type": "Trait",
+      "source_id": 820,
+      "source_name": "Flesh of the Master",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Flesh_of_the_Master (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "minions"
+      }
+    },
+    {
+      "effect_id": "trait:857:0",
+      "source_type": "Trait",
+      "source_id": 857,
+      "source_name": "Putrid Defense",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Putrid_Defense (read 2026-09-08: a stack of Death's Carapace per poison applied, 10 s; the 15% poison damage is a parsed percent fact)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Death's Carapace",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
+      },
+      "trigger_scope": {
+        "Status": "Poisoned"
+      }
+    },
+    {
+      "effect_id": "trait:1922:0",
+      "source_type": "Trait",
+      "source_id": 1922,
+      "source_name": "Shrouded Removal",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shrouded_Removal (read 2026-09-08)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self"
+      }
+    },
+    {
+      "effect_id": "trait:1922:1",
+      "source_type": "Trait",
+      "source_id": 1922,
+      "source_name": "Shrouded Removal",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "Periodic",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shrouded_Removal (read 2026-09-08: every 3 s while in shroud)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self"
+      },
+      "prerequisite": {
+        "in_shroud": true
+      },
+      "internal_cooldown": 3.0
+    },
+    {
+      "effect_id": "trait:1922:2",
+      "source_type": "Trait",
+      "source_id": 1922,
+      "source_name": "Shrouded Removal",
+      "category": "AppliesBoon",
+      "value": 3.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionRemoved",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shrouded_Removal (read 2026-09-08: 3 stacks of Death's Carapace, 10 s, when a removal takes a condition off the player)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Death's Carapace",
+        "amount_mode": "Stacks",
+        "amount_value": 3.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
+      }
+    },
+    {
+      "effect_id": "trait:839:coverage",
+      "source_type": "Trait",
+      "source_id": 839,
+      "source_name": "Soul Comprehension",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Soul_Comprehension (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "kill"
+      }
+    },
+    {
+      "effect_id": "trait:858:coverage",
+      "source_type": "Trait",
+      "source_id": 858,
+      "source_name": "Necromantic Corruption",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Necromantic_Corruption (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "minions"
+      }
+    },
+    {
+      "effect_id": "trait:860:0",
+      "source_type": "Trait",
+      "source_id": 860,
+      "source_name": "Dark Defense",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dark_Defense (read 2026-09-08)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Protection",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      },
+      "internal_cooldown": 5.0
+    },
+    {
+      "effect_id": "trait:860:coverage",
+      "source_type": "Trait",
+      "source_id": 860,
+      "source_name": "Dark Defense",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dark_Defense (read 2026-09-08: the carapace and protection halves are records; protection's 20% condition damage reduction is not modeled)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "protection condition reduction"
+      }
+    },
+    {
+      "effect_id": "trait:860:1",
+      "source_type": "Trait",
+      "source_id": 860,
+      "source_name": "Dark Defense",
+      "category": "AppliesBoon",
+      "value": 10.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dark_Defense (read 2026-09-08: 10 stacks of Death's Carapace, 10 s, on the healing skill, 5 s recharge)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Death's Carapace",
+        "amount_mode": "Stacks",
+        "amount_value": 10.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      },
+      "internal_cooldown": 5.0
+    },
+    {
+      "effect_id": "trait:855:coverage",
+      "source_type": "Trait",
+      "source_id": 855,
+      "source_name": "Deadly Strength",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Deadly_Strength (read 2026-09-08: 10 power and 10 condition damage per stack of carapace is not modeled)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "carapace stat scaling"
+      }
+    },
+    {
+      "effect_id": "trait:1929:coverage",
+      "source_type": "Trait",
+      "source_id": 1929,
+      "source_name": "Beyond the Veil",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Beyond_the_Veil (read 2026-09-08: 10% condition damage reduction at 10 stacks of carapace is not modeled)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "carapace threshold"
+      }
+    },
+    {
+      "effect_id": "trait:842:coverage",
+      "source_type": "Trait",
+      "source_id": 842,
+      "source_name": "Death Nova",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Death_Nova (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "downed"
+      }
+    },
+    {
+      "effect_id": "trait:1940:coverage",
+      "source_type": "Trait",
+      "source_id": 1940,
+      "source_name": "Corrupter's Fervor",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Corrupter%27s_Fervor (read 2026-09-08: the carapace gain is a record; the 15% damage reduction at 25 stacks is not modeled)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "carapace threshold"
+      }
+    },
+    {
+      "effect_id": "trait:1940:0",
+      "source_type": "Trait",
+      "source_id": 1940,
+      "source_name": "Corrupter's Fervor",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Corrupter%27s_Fervor (read 2026-09-08: a stack of Death's Carapace per condition inflicted, 10 s)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Death's Carapace",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
+      }
+    },
+    {
+      "effect_id": "trait:1694:coverage",
+      "source_type": "Trait",
+      "source_id": 1694,
+      "source_name": "Unholy Sanctuary",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unholy_Sanctuary (read 2026-09-08: 1% of max health per second in shroud)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "percent heal"
+      }
+    },
+    {
+      "effect_id": "trait:2183:coverage",
+      "source_type": "Trait",
+      "source_id": 2183,
+      "source_name": "Dark Disciple",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dark_Disciple (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "blight"
+      }
+    },
+    {
+      "effect_id": "trait:2188:0",
+      "source_type": "Trait",
+      "source_id": 2188,
+      "source_name": "Wicked Corruption",
+      "category": "TriggeredEffect",
+      "value": 10.0,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wicked_Corruption (read 2026-09-08: +10% critical damage against tormented foes)",
+      "inner_category": "CritDamagePct",
+      "prerequisite": {
+        "foe_condition": "Torment"
+      }
+    },
+    {
+      "effect_id": "trait:2188:coverage",
+      "source_type": "Trait",
+      "source_id": 2188,
+      "source_name": "Wicked Corruption",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wicked_Corruption (read 2026-09-08: strike damage per blight stack)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "blight"
+      }
+    },
+    {
+      "effect_id": "trait:2219:0",
+      "source_type": "Trait",
+      "source_id": 2219,
+      "source_name": "Bolstering Brew",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bolstering_Brew (read 2026-09-08)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Protection",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 2500
+      },
+      "trigger_scope": {
+        "Category": "Elixir"
+      }
+    },
+    {
+      "effect_id": "trait:2185:0",
+      "source_type": "Trait",
+      "source_id": 2185,
+      "source_name": "Septic Corruption",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Septic_Corruption (read 2026-09-08: shroud skill 2 poisons 2 s (WvW))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Poisoned",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "base_duration_ms": 2000
+      },
+      "trigger_scope": {
+        "Slot": "Shroud_2"
+      }
+    },
+    {
+      "effect_id": "trait:2185:coverage",
+      "source_type": "Trait",
+      "source_id": 2185,
+      "source_name": "Septic Corruption",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Septic_Corruption (read 2026-09-08: condition damage per blight stack)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "blight"
+      }
+    },
+    {
+      "effect_id": "trait:2186:coverage",
+      "source_type": "Trait",
+      "source_id": 2186,
+      "source_name": "Alchemic Vigor",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Alchemic_Vigor (read 2026-09-08: vitality is on the stat sheet)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "blight"
+      }
+    },
+    {
+      "effect_id": "trait:2192:0",
+      "source_type": "Trait",
+      "source_id": 2192,
+      "source_name": "Implacable Foe",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Implacable_Foe (read 2026-09-08: Stability 3 s (WvW); ferocity from vitality is on the stat sheet)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Stability",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000
+      }
+    },
+    {
+      "effect_id": "trait:2192:coverage",
+      "source_type": "Trait",
+      "source_id": 2192,
+      "source_name": "Implacable Foe",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Implacable_Foe (read 2026-09-08: Implacable Foe effect, -50% for 2 s)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming damage reduction"
+      }
+    },
+    {
+      "effect_id": "trait:2220:coverage",
+      "source_type": "Trait",
+      "source_id": 2220,
+      "source_name": "Twisted Medicine",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Twisted_Medicine (read 2026-09-08: concentration from vitality is on the stat sheet)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "elixir"
+      }
+    },
+    {
+      "effect_id": "trait:2209:coverage",
+      "source_type": "Trait",
+      "source_id": 2209,
+      "source_name": "Dark Gunslinger",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dark_Gunslinger (read 2026-09-08: expertise from vitality is on the stat sheet)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "recharge"
+      }
+    },
+    {
+      "effect_id": "trait:2217:0",
+      "source_type": "Trait",
+      "source_id": 2217,
+      "source_name": "Corrupted Talent",
+      "category": "GainsLifeForce",
+      "value": 15.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Corrupted_Talent (read 2026-09-08)"
+    },
+    {
+      "effect_id": "trait:2218:coverage",
+      "source_type": "Trait",
+      "source_id": 2218,
+      "source_name": "Cascading Corruption",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cascading_Corruption (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "blight"
+      }
+    },
+    {
+      "effect_id": "trait:2194:0",
+      "source_type": "Trait",
+      "source_id": 2194,
+      "source_name": "Deathly Haste",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Deathly_Haste (read 2026-09-08: WvW: swiftness 4 s to 5 allies)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Swiftness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Party",
+        "base_duration_ms": 4000,
+        "target_count": 5
+      }
+    },
+    {
+      "effect_id": "trait:2194:1",
+      "source_type": "Trait",
+      "source_id": 2194,
+      "source_name": "Deathly Haste",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Deathly_Haste (read 2026-09-08)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Party",
+        "base_duration_ms": 4000,
+        "target_count": 5
+      }
+    },
+    {
+      "effect_id": "trait:2194:2",
+      "source_type": "Trait",
+      "source_id": 2194,
+      "source_name": "Deathly Haste",
+      "category": "AppliesBoon",
+      "value": 3.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Deathly_Haste (read 2026-09-08: 3 might 8 s; the Dark Barrage half shares these numbers)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 3.0,
+        "target_scope": "Party",
+        "base_duration_ms": 8000,
+        "target_count": 5
+      }
+    },
+    {
+      "effect_id": "trait:2203:coverage",
+      "source_type": "Trait",
+      "source_id": 2203,
+      "source_name": "Doom Approaches",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Doom_Approaches (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "blight"
+      }
+    },
+    {
+      "effect_id": "trait:1905:coverage",
+      "source_type": "Trait",
+      "source_id": 1905,
+      "source_name": "Shroud Knight",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shroud_Knight (read 2026-09-08: the shroud itself is the shroud table)",
+      "coverage": {
+        "class": "PassiveNoEffect"
+      }
+    },
+    {
+      "effect_id": "trait:1974:0",
+      "source_type": "Trait",
+      "source_id": 1974,
+      "source_name": "Augury of Death",
+      "category": "Heal",
+      "value": 156.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Augury_of_Death (read 2026-09-08: siphon heal per shout)",
+      "trigger_scope": {
+        "Category": "Shout"
+      },
+      "healing_power_coefficient": 0.025
+    },
+    {
+      "effect_id": "trait:1974:coverage",
+      "source_type": "Trait",
+      "source_id": 1974,
+      "source_name": "Augury of Death",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Augury_of_Death (read 2026-09-08: siphon damage half)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "life siphon"
+      }
+    },
+    {
+      "effect_id": "trait:2020:0",
+      "source_type": "Trait",
+      "source_id": 2020,
+      "source_name": "Chilling Nova",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Chilling_Nova (read 2026-09-08: page facts missing; 2 s chill to 5 adjacent foes from the trait's version history, 3 s recharge (API))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Chilled",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "base_duration_ms": 2000,
+        "target_count": 5
+      },
+      "prerequisite": {
+        "foe_condition": "Chilled"
+      },
+      "internal_cooldown": 3.0
+    },
+    {
+      "effect_id": "trait:2026:coverage",
+      "source_type": "Trait",
+      "source_id": 2026,
+      "source_name": "Relentless Pursuit",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Relentless_Pursuit (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming condition duration"
+      }
+    },
+    {
+      "effect_id": "trait:1879:0",
+      "source_type": "Trait",
+      "source_id": 1879,
+      "source_name": "Shivers of Dread",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shivers_of_Dread (read 2026-09-08: chill 2 s on fear)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Chilled",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "base_duration_ms": 2000
+      },
+      "trigger_scope": {
+        "Status": "Fear"
+      }
+    },
+    {
+      "effect_id": "trait:1969:coverage",
+      "source_type": "Trait",
+      "source_id": 1969,
+      "source_name": "Soul Eater",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Soul_Eater (read 2026-09-08: the 10% strike bonus inside 300 range is a parsed percent fact)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "damage-scaled heal"
+      }
+    },
+    {
+      "effect_id": "trait:2008:0",
+      "source_type": "Trait",
+      "source_id": 2008,
+      "source_name": "Chilling Victory",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Chilling_Victory (read 2026-09-08: might 6 s per strike on a chilled foe)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 6000
+      },
+      "prerequisite": {
+        "foe_condition": "Chilled"
+      }
+    },
+    {
+      "effect_id": "trait:2008:1",
+      "source_type": "Trait",
+      "source_id": 2008,
+      "source_name": "Chilling Victory",
+      "category": "GainsLifeForce",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Chilling_Victory (read 2026-09-08)",
+      "prerequisite": {
+        "foe_condition": "Chilled"
+      }
+    },
+    {
+      "effect_id": "trait:2031:0",
+      "source_type": "Trait",
+      "source_id": 2031,
+      "source_name": "Decimate Defenses",
+      "category": "TriggeredEffect",
+      "value": 2.0,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Decimate_Defenses (read 2026-09-08: +2% critical chance per vulnerability stack on the foe, 25 stacks)",
+      "inner_category": "CritChancePct",
+      "prerequisite": {
+        "foe_condition": "Vulnerability"
+      },
+      "max_stacks": 25
+    },
+    {
+      "effect_id": "trait:2018:0",
+      "source_type": "Trait",
+      "source_id": 2018,
+      "source_name": "Cold Shoulder",
+      "category": "TriggeredEffect",
+      "value": 10.0,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cold_Shoulder (read 2026-09-08: +10% strike against chilled foes (WvW))",
+      "inner_category": "StrikeDamagePct",
+      "prerequisite": {
+        "foe_condition": "Chilled"
+      }
+    },
+    {
+      "effect_id": "trait:2018:coverage",
+      "source_type": "Trait",
+      "source_id": 2018,
+      "source_name": "Cold Shoulder",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cold_Shoulder (read 2026-09-08: chilled foes deal 10% less)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming damage reduction"
+      }
+    },
+    {
+      "effect_id": "trait:1932:0",
+      "source_type": "Trait",
+      "source_id": 1932,
+      "source_name": "Blighter's Boon",
+      "category": "GainsLifeForce",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blighter%27s_Boon (read 2026-09-08)"
+    },
+    {
+      "effect_id": "trait:1932:1",
+      "source_type": "Trait",
+      "source_id": 1932,
+      "source_name": "Blighter's Boon",
+      "category": "Heal",
+      "value": 133.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blighter%27s_Boon (read 2026-09-08)",
+      "healing_power_coefficient": 0.03
+    },
+    {
+      "effect_id": "trait:1932:2",
+      "source_type": "Trait",
+      "source_id": 1932,
+      "source_name": "Blighter's Boon",
+      "category": "GainsLifeForce",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonStripped",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blighter%27s_Boon (read 2026-09-08)"
+    },
+    {
+      "effect_id": "trait:1932:3",
+      "source_type": "Trait",
+      "source_id": 1932,
+      "source_name": "Blighter's Boon",
+      "category": "Heal",
+      "value": 133.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonStripped",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blighter%27s_Boon (read 2026-09-08)",
+      "healing_power_coefficient": 0.03
+    },
+    {
+      "effect_id": "trait:1919:0",
+      "source_type": "Trait",
+      "source_id": 1919,
+      "source_name": "Deathly Chill",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Deathly_Chill (read 2026-09-08: bleeding 8 s per chill (WvW))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Bleeding",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "base_duration_ms": 8000
+      },
+      "trigger_scope": {
+        "Status": "Chilled"
+      }
+    },
+    {
+      "effect_id": "trait:2021:0",
+      "source_type": "Trait",
+      "source_id": 2021,
+      "source_name": "Reaper's Onslaught",
+      "category": "TriggeredEffect",
+      "value": 20.0,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Reaper%27s_Onslaught (read 2026-09-08: 300 ferocity in shroud as +20% critical damage (15 ferocity per 1%))",
+      "inner_category": "CritDamagePct",
+      "prerequisite": {
+        "in_shroud": true
+      },
+      "derived_from": [
+        300.0
+      ]
+    },
+    {
+      "effect_id": "trait:2021:1",
+      "source_type": "Trait",
+      "source_id": 2021,
+      "source_name": "Reaper's Onslaught",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "Periodic",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Reaper%27s_Onslaught (read 2026-09-08: quickness 3 s every 3 s in shroud)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Quickness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000
+      },
+      "prerequisite": {
+        "in_shroud": true
+      },
+      "internal_cooldown": 3.0
+    },
+    {
+      "effect_id": "trait:2338:coverage",
+      "source_type": "Trait",
+      "source_id": 2338,
+      "source_name": "Spawning Power",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Spawning_Power (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:2327:coverage",
+      "source_type": "Trait",
+      "source_id": 2327,
+      "source_name": "Wandering Spirits",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wandering_Spirits (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:2378:coverage",
+      "source_type": "Trait",
+      "source_id": 2378,
+      "source_name": "Spirit's Gift",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Spirit%27s_Gift (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:2339:coverage",
+      "source_type": "Trait",
+      "source_id": 2339,
+      "source_name": "Explosive Growth",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Explosive_Growth (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:2371:coverage",
+      "source_type": "Trait",
+      "source_id": 2371,
+      "source_name": "Boon of Creation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Boon_of_Creation (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:2384:coverage",
+      "source_type": "Trait",
+      "source_id": 2384,
+      "source_name": "Spirits' Remedy",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Spirits%27_Remedy (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:2405:coverage",
+      "source_type": "Trait",
+      "source_id": 2405,
+      "source_name": "Empowering Spirits",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Empowering_Spirits (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:2421:coverage",
+      "source_type": "Trait",
+      "source_id": 2421,
+      "source_name": "Spirit's Strength",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Spirit%27s_Strength (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:2398:coverage",
+      "source_type": "Trait",
+      "source_id": 2398,
+      "source_name": "Charged Souls",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Charged_Souls (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:2333:coverage",
+      "source_type": "Trait",
+      "source_id": 2333,
+      "source_name": "Lingering Spirits",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lingering_Spirits (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:2392:coverage",
+      "source_type": "Trait",
+      "source_id": 2392,
+      "source_name": "Soul Twisting",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Soul_Twisting (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:2376:coverage",
+      "source_type": "Trait",
+      "source_id": 2376,
+      "source_name": "Wielder's Boon",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wielder%27s_Boon (read 2026-09-08: weapon spells on allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ally state"
+      }
+    },
+    {
+      "effect_id": "trait:2147:coverage",
+      "source_type": "Trait",
+      "source_id": 2147,
+      "source_name": "Mantle of Sand",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mantle_of_Sand (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shades"
+      }
+    },
+    {
+      "effect_id": "trait:2167:coverage",
+      "source_type": "Trait",
+      "source_id": 2167,
+      "source_name": "Abrasive Grit",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Abrasive_Grit (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "barrier"
+      }
+    },
+    {
+      "effect_id": "trait:2102:0",
+      "source_type": "Trait",
+      "source_id": 2102,
+      "source_name": "Nourishing Ashes",
+      "category": "GainsLifeForce",
+      "value": 3.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Nourishing_Ashes (read 2026-09-08: 3% life force per burn (WvW))",
+      "trigger_scope": {
+        "Status": "Burning"
+      }
+    },
+    {
+      "effect_id": "trait:2102:1",
+      "source_type": "Trait",
+      "source_id": 2102,
+      "source_name": "Nourishing Ashes",
+      "category": "GainsLifeForce",
+      "value": 3.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonStripped",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Nourishing_Ashes (read 2026-09-08)"
+    },
+    {
+      "effect_id": "trait:2121:coverage",
+      "source_type": "Trait",
+      "source_id": 2121,
+      "source_name": "Sand Sage",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sand_Sage (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shades"
+      }
+    },
+    {
+      "effect_id": "trait:2059:coverage",
+      "source_type": "Trait",
+      "source_id": 2059,
+      "source_name": "Feed from Corruption",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Feed_from_Corruption (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "barrier"
+      }
+    },
+    {
+      "effect_id": "trait:2067:coverage",
+      "source_type": "Trait",
+      "source_id": 2067,
+      "source_name": "Sadistic Searing",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sadistic_Searing (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shades"
+      }
+    },
+    {
+      "effect_id": "trait:2123:coverage",
+      "source_type": "Trait",
+      "source_id": 2123,
+      "source_name": "Herald of Sorrow",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Herald_of_Sorrow (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shades"
+      }
+    },
+    {
+      "effect_id": "trait:2096:coverage",
+      "source_type": "Trait",
+      "source_id": 2096,
+      "source_name": "Blood as Sand",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blood_as_Sand (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shades"
+      }
+    },
+    {
+      "effect_id": "trait:2112:coverage",
+      "source_type": "Trait",
+      "source_id": 2112,
+      "source_name": "Sand Savant",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sand_Savant (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shades"
+      }
+    },
+    {
+      "effect_id": "trait:2164:0",
+      "source_type": "Trait",
+      "source_id": 2164,
+      "source_name": "Demonic Lore",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Demonic_Lore (read 2026-09-08: burning 1 s per torment; the 33% torment damage is a parsed percent fact)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Burning",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "base_duration_ms": 1000
+      },
+      "trigger_scope": {
+        "Status": "Torment"
+      },
+      "internal_cooldown": 1.0
+    },
+    {
+      "effect_id": "trait:2080:coverage",
+      "source_type": "Trait",
+      "source_id": 2080,
+      "source_name": "Desert Empowerment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Desert_Empowerment (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "barrier"
+      }
+    },
+    {
+      "effect_id": "trait:887:coverage",
+      "source_type": "Trait",
+      "source_id": 887,
+      "source_name": "Gluttony",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Gluttony (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "life force scaling"
+      }
+    },
+    {
+      "effect_id": "trait:875:0",
+      "source_type": "Trait",
+      "source_id": 875,
+      "source_name": "Unyielding Blast",
+      "category": "AppliesCondition",
+      "value": 2.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unyielding_Blast (read 2026-09-08: 2 vulnerability 6 s (WvW))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Vulnerability",
+        "amount_mode": "Stacks",
+        "amount_value": 2.0,
+        "target_scope": "Area",
+        "base_duration_ms": 6000
+      },
+      "trigger_scope": {
+        "Slot": "Shroud_1"
+      }
+    },
+    {
+      "effect_id": "trait:898:coverage",
+      "source_type": "Trait",
+      "source_id": 898,
+      "source_name": "Soul Marks",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Soul_Marks (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "marks"
+      }
+    },
+    {
+      "effect_id": "trait:888:0",
+      "source_type": "Trait",
+      "source_id": 888,
+      "source_name": "Speed of Shadows",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Speed_of_Shadows (read 2026-09-08)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Swiftness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
+      }
+    },
+    {
+      "effect_id": "trait:888:1",
+      "source_type": "Trait",
+      "source_id": 888,
+      "source_name": "Speed of Shadows",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Speed_of_Shadows (read 2026-09-08: removes Crippled)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Crippled",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self"
+      }
+    },
+    {
+      "effect_id": "trait:888:2",
+      "source_type": "Trait",
+      "source_id": 888,
+      "source_name": "Speed of Shadows",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Speed_of_Shadows (read 2026-09-08: removes Chilled)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Chilled",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self"
+      }
+    },
+    {
+      "effect_id": "trait:888:3",
+      "source_type": "Trait",
+      "source_id": 888,
+      "source_name": "Speed of Shadows",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Speed_of_Shadows (read 2026-09-08: removes Immobile)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Immobile",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self"
+      }
+    },
+    {
+      "effect_id": "trait:891:coverage",
+      "source_type": "Trait",
+      "source_id": 891,
+      "source_name": "Sinister Shroud",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sinister_Shroud (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "recharge"
+      }
+    },
+    {
+      "effect_id": "trait:894:0",
+      "source_type": "Trait",
+      "source_id": 894,
+      "source_name": "Soul Barbs",
+      "category": "TriggeredEffect",
+      "value": null,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Soul_Barbs (read 2026-09-08: the page states the duration for PvE only (15 s))",
+      "inner_category": "StrikeDamagePct"
+    },
+    {
+      "effect_id": "trait:894:1",
+      "source_type": "Trait",
+      "source_id": 894,
+      "source_name": "Soul Barbs",
+      "category": "TriggeredEffect",
+      "value": null,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "OnShroudExit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Soul_Barbs (read 2026-09-08: the page states the duration for PvE only (15 s))",
+      "inner_category": "StrikeDamagePct"
+    },
+    {
+      "effect_id": "trait:861:coverage",
+      "source_type": "Trait",
+      "source_id": 861,
+      "source_name": "Vital Persistence",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Vital_Persistence (read 2026-09-08: vitality is on the stat sheet)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming healing"
+      }
+    },
+    {
+      "effect_id": "trait:892:0",
+      "source_type": "Trait",
+      "source_id": 892,
+      "source_name": "Fear of Death",
+      "category": "GainsLifeForce",
+      "value": 15.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Fear_of_Death (read 2026-09-08: 15% life force per fear (WvW); the fear duration bonus is not modeled)",
+      "trigger_scope": {
+        "Status": "Fear"
+      }
+    },
+    {
+      "effect_id": "trait:874:coverage",
+      "source_type": "Trait",
+      "source_id": 874,
+      "source_name": "Soul Battery",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Soul_Battery (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "life force scaling"
+      }
+    },
+    {
+      "effect_id": "trait:889:0",
+      "source_type": "Trait",
+      "source_id": 889,
+      "source_name": "Eternal Life",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Eternal_Life (read 2026-09-08)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Protection",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000
+      }
+    },
+    {
+      "effect_id": "trait:889:coverage",
+      "source_type": "Trait",
+      "source_id": 889,
+      "source_name": "Eternal Life",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Eternal_Life (read 2026-09-08: 3% per second up to 20% out of shroud)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "life force threshold"
+      }
+    },
+    {
+      "effect_id": "trait:893:0",
+      "source_type": "Trait",
+      "source_id": 893,
+      "source_name": "Death Perception",
+      "category": "TriggeredEffect",
+      "value": 15.0,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Death_Perception (read 2026-09-08: +15% critical damage in shroud (WvW); the 15% critical chance is a parsed percent fact)",
+      "inner_category": "CritDamagePct",
+      "prerequisite": {
+        "in_shroud": true
+      }
+    },
+    {
+      "effect_id": "trait:905:0",
+      "source_type": "Trait",
+      "source_id": 905,
+      "source_name": "Dhuumfire",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dhuumfire (read 2026-09-08: burning 1 s, 5 s recharge (WvW))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Burning",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "base_duration_ms": 1000
+      },
+      "trigger_scope": {
+        "Slot": "Shroud_1"
+      },
+      "internal_cooldown": 5.0
+    },
+    {
+      "effect_id": "trait:913:0",
+      "source_type": "Trait",
+      "source_id": 913,
+      "source_name": "Reaper's Might",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Reaper%27s_Might (read 2026-09-08: might 6 s (WvW))",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 6000
+      },
+      "trigger_scope": {
+        "Slot": "Shroud_1"
+      }
+    },
+    {
+      "effect_id": "trait:916:coverage",
+      "source_type": "Trait",
+      "source_id": 916,
+      "source_name": "Malicious Swarm",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Malicious_Swarm (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:1863:0",
+      "source_type": "Trait",
+      "source_id": 1863,
+      "source_name": "Bitter Chill",
+      "category": "AppliesCondition",
+      "value": 3.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bitter_Chill (read 2026-09-08: 3 vulnerability 6 s (WvW))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Vulnerability",
+        "amount_mode": "Stacks",
+        "amount_value": 3.0,
+        "target_scope": "Area",
+        "base_duration_ms": 6000
+      },
+      "trigger_scope": {
+        "Status": "Chilled"
+      }
+    },
+    {
+      "effect_id": "trait:915:0",
+      "source_type": "Trait",
+      "source_id": 915,
+      "source_name": "Awaken the Pain",
+      "category": "AppliesBoon",
+      "value": 5.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Awaken_the_Pain (read 2026-09-08: 5 might 5 s; power per might is on the stat sheet)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 5.0,
+        "target_scope": "self",
+        "base_duration_ms": 5000
+      }
+    },
+    {
+      "effect_id": "trait:899:coverage",
+      "source_type": "Trait",
+      "source_id": 899,
+      "source_name": "Chill of Death",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Chill_of_Death (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:829:0",
+      "source_type": "Trait",
+      "source_id": 829,
+      "source_name": "Spiteful Fortitude",
+      "category": "GainsLifeForce",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Spiteful_Fortitude (read 2026-09-08: 1% life force per strike below 50%; vitality from power is on the stat sheet)",
+      "prerequisite": {
+        "foe_health": {
+          "above": false,
+          "percent": 50.0
+        }
+      }
+    },
+    {
+      "effect_id": "trait:909:0",
+      "source_type": "Trait",
+      "source_id": 909,
+      "source_name": "Signets of Suffering",
+      "category": "RemovesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Signets_of_Suffering (read 2026-09-08: 1 boon removed (WvW))",
+      "status_operation": {
+        "operation_type": "RemovesBoon",
+        "target_side": "Enemy",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "Area"
+      },
+      "trigger_scope": {
+        "Category": "Signet"
+      }
+    },
+    {
+      "effect_id": "trait:909:coverage",
+      "source_type": "Trait",
+      "source_id": 909,
+      "source_name": "Signets of Suffering",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Signets_of_Suffering (read 2026-09-08)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "life siphon"
+      }
+    },
+    {
+      "effect_id": "trait:917:0",
+      "source_type": "Trait",
+      "source_id": 917,
+      "source_name": "Siphoned Power",
+      "category": "AppliesBoon",
+      "value": 2.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Siphoned_Power (read 2026-09-08: 2 might 6 s (WvW); no recharge on the page)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 2.0,
+        "target_scope": "self",
+        "base_duration_ms": 6000
+      },
+      "prerequisite": {
+        "foe_health": {
+          "above": false,
+          "percent": 50.0
+        }
+      }
+    },
+    {
+      "effect_id": "trait:919:0",
+      "source_type": "Trait",
+      "source_id": 919,
+      "source_name": "Dread",
+      "category": "TriggeredEffect",
+      "value": 15.0,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dread (read 2026-09-08: +15% strike for 2 s (WvW))",
+      "inner_category": "StrikeDamagePct",
+      "trigger_scope": {
+        "Status": "Fear"
+      },
+      "internal_cooldown": 1.0,
+      "effect_duration": 2.0
+    },
+    {
+      "effect_id": "trait:919:1",
+      "source_type": "Trait",
+      "source_id": 919,
+      "source_name": "Dread",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dread (read 2026-09-08)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
+      },
+      "trigger_scope": {
+        "Status": "Fear"
+      },
+      "internal_cooldown": 1.0
+    },
+    {
+      "effect_id": "trait:919:2",
+      "source_type": "Trait",
+      "source_id": 919,
+      "source_name": "Dread",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dread (read 2026-09-08)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Quickness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 5000
+      },
+      "trigger_scope": {
+        "Status": "Fear"
+      },
+      "internal_cooldown": 1.0
+    },
+    {
+      "effect_id": "trait:853:0",
+      "source_type": "Trait",
+      "source_id": 853,
+      "source_name": "Close to Death",
+      "category": "TriggeredEffect",
+      "value": 20.0,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Close_to_Death (read 2026-09-08: +20% strike below 50%)",
+      "inner_category": "StrikeDamagePct",
+      "prerequisite": {
+        "foe_health": {
+          "above": false,
+          "percent": 50.0
+        }
+      }
+    },
+    {
+      "effect_id": "trait:903:0",
+      "source_type": "Trait",
+      "source_id": 903,
+      "source_name": "Spiteful Spirit",
+      "category": "StrikeDamagePct",
+      "value": null,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Spiteful_Spirit (read 2026-09-08: page facts missing; strike coefficient unresolved)"
     }
   ]
 }

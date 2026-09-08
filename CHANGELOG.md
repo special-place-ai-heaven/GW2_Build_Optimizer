@@ -2,7 +2,27 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
-## Unreleased
+## 1.14.4 - 2026-09-08
+
+Sprint 3 convergence: Death's Carapace, the Scourge's shroud skills and a clean wiki check.
+
+- Death's Carapace is simulated: a stacking toughness effect (20 per stack in WvW, 30 stacks at most, 10 s) that shrinks incoming strikes by armor / (armor + toughness). Armored Shroud, Putrid Defense, Shrouded Removal, Dark Defense and Corrupter's Fervor feed it from their wiki records, and a cleanse that removed a condition is now a trigger (Shrouded Removal). The cached Reaper build's "Not simulated" line falls from three traits to two, each naming the half still unmodeled.
+- A Scourge's shade skills count as its shroud skills for traits that say "shroud skill N", as the wiki states; a build with a shroud bar is unchanged.
+- The wiki-number check is clean: a derived value names the page number it comes from, the game's own API facts count beside the page, heuristic records are skipped, and Superior Sigil of Bursting carries the page's +5% (the record said 6).
+
+## 1.14.3 - 2026-09-08
+
+Trait triggers are the build: the WvW simulation now fires the Necromancer's traits.
+
+### Trait triggers in the WvW simulation
+
+- Trait records fire at the moments the game fires them: entering and leaving shroud, landing a critical hit on a chilled foe, using a shout, an elixir, a signet or a numbered shroud skill, putting a condition on a foe, gaining a boon, stripping or corrupting one, and every few seconds. A record with a prerequisite (the foe is chilled, the foe is below half health, you are in shroud) waits until it holds and says so in the trace.
+- New payloads: life force gains, heals with a healing-power coefficient, a scaled gain per condition consumed, timed strike bonuses, critical-damage and critical-chance bonuses that hold in shroud, against a foe with a condition, or per stack of it.
+- The Necromancer's 108 traits are catalogued: every trait is executed from its facts, executed from a dated wiki record, or classified with the mechanic it still needs (carapace, blight, shades, spirits, minions, life siphon and the rest). The trait coverage table in `docs/audit/trait-coverage.md` shows the state of every trait of every profession; the other eight professions follow one increment each.
+- The "Not simulated" line names only what was skipped, each with its reason: `no record`, `needs: carapace`, `unresolved value`, `no firing site`. Weapon skills the builder produced effects for and traits whose facts the parser or the stat sheet consumed no longer appear. An empty line leaves the build Verified.
+- Fights count their population: in a Havoc or Cloud scenario, strikes and conditions reach the secondary foes in range and boons, heals and cleanses reach the allies, within each effect's target cap. Support, Commander and Staller builds rank on the boon time they give allies. Roam fights are unchanged.
+- The improviser enters an affordable shroud instead of leaving a Reaper on its weapons for the whole fight.
+- Non-damaging conditions a skill applies (Chilled, Crippled, Weakness, Vulnerability) land on the foe in the WvW simulation; they used to be counted as buffs on the player. Fear and Taunt count as conditions as well as disables.
 
 ### What the simulator simulates in WvW
 

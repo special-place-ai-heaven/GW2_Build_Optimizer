@@ -77,8 +77,6 @@ struct SynergyCandidate {
     synergy_links: Vec<SynergyLink>,
 }
 
-// ─── Main Entry Point ───
-
 /// Run the full deterministic synergy pipeline.
 /// Returns a SynergyResult with a fully determined build.
 /// [`optimize_synergy_cancellable`] with a probe that never fires.
@@ -219,7 +217,6 @@ pub fn optimize_synergy_cancellable(
         scenario,
     )?;
 
-    // Convert to SynergyResult
     if is_cancelled() {
         return Err("Cancelled".into());
     }
@@ -240,7 +237,7 @@ pub fn optimize_synergy_cancellable(
     )
 }
 
-// ─── Stage 2: Specs + Traits ───
+// Specs + Traits
 
 fn select_specs_and_traits(
     profession: &Profession,
@@ -441,7 +438,6 @@ fn select_specs_and_traits(
         }
     }
 
-    // Sort by score and keep top 5
     candidates.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -472,11 +468,10 @@ fn cross_product_trait_configs(per_spec: &[Vec<(Vec<u32>, f64)>]) -> Vec<Vec<Vec
     result
 }
 
-// ─── Stage 3: Rune ───
+// Rune
 
 fn select_rune(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
     let runes = db.all_runes();
-    // Filter to Superior runes only
     let superior_runes: Vec<_> = runes
         .iter()
         .filter(|r| r.name.contains("Superior"))
@@ -522,7 +517,7 @@ fn select_rune(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Optim
     }
 }
 
-// ─── Stage 4: Sigils ───
+// Sigils
 
 fn select_sigils(
     candidates: &mut [SynergyCandidate],
@@ -601,7 +596,7 @@ fn select_sigils(
     }
 }
 
-// ─── Stage 5: Relic ───
+// Relic
 
 fn select_relic(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
     let relics = db.all_relics();
@@ -643,7 +638,7 @@ fn select_relic(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opti
     }
 }
 
-// ─── Stage 6: Weapons ───
+// Weapons
 
 fn select_weapons(
     candidates: &mut [SynergyCandidate],
@@ -651,7 +646,6 @@ fn select_weapons(
     db: &GameDb,
     weights: &OptimizationWeights,
 ) {
-    // Build list of valid weapon combos for this profession
     for candidate in candidates.iter_mut() {
         let elite_spec_ids: Vec<u32> = candidate
             .spec_ids
@@ -831,7 +825,7 @@ fn score_weapon_skills(
     score
 }
 
-// ─── Stage 7: Skills ───
+// Skills
 
 fn select_skills(
     candidates: &mut [SynergyCandidate],
@@ -1249,7 +1243,7 @@ pub(crate) fn pick_best_skill(
     best
 }
 
-// ─── Final Ranking ───
+// Final Ranking
 
 fn rank_and_select(
     candidates: &[SynergyCandidate],
@@ -1398,7 +1392,7 @@ fn compute_candidate_stats(
     full_stats
 }
 
-// ─── Build SynergyResult ───
+// Build SynergyResult
 
 #[allow(clippy::too_many_arguments)]
 fn build_synergy_result(
@@ -1411,8 +1405,6 @@ fn build_synergy_result(
     scenario: Option<&ScenarioSpec>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
-    // Build ValidatedBuild
-    //
     // Weapons FIRST, in the initializer: the gear fill below asks the build
     // which hands it is holding, and a build that has not been told its weapons
     // yet is holding none. This ordering is load-bearing, not cosmetic.
@@ -2200,7 +2192,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 .collect();
             println!("prefix contains() matches: {:?}", prefix_matches);
 
-            // ---- Baseline current-build computation (mirrors addon current-build path contracts) ----
+            // Baseline current-build (mirrors addon current-build path contracts)
             let loaded_trait_ids = loaded_build_trait_ids(&db, &loaded_specs);
             let equipment = loaded_equipment(584);
             let (baseline_stats, baseline_derived) = crate::stats::calculate_full_stats(
@@ -2247,7 +2239,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 baseline_mods.total_strike_mult()
             );
 
-            // ---- Candidate generation and top pre-ranking traces ----
+            // Candidate generation and top pre-ranking traces
             let profession = db.profession("Warrior").expect("profession should exist");
             let mut candidates = select_specs_and_traits(
                 profession,
@@ -2283,7 +2275,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 );
             }
 
-            // ---- Ranking traces (combat_score without modifiers + final blend) ----
+            // Ranking traces (combat_score without modifiers + final blend)
             let gear_prefix_id = db
                 .itemstats
                 .values()
@@ -2351,7 +2343,7 @@ pub(crate) mod runtime_diagnostics_tests {
             )
             .expect("rank_and_select should produce best candidate");
 
-            // ---- Final suggestion trace (with capped modifiers, as used by deterministic output) ----
+            // Final suggestion (capped modifiers, same as deterministic output)
             let mut progress = |_p: crate::engine::OptimizeProgress| {};
             let result = build_synergy_result(
                 selected.clone(),

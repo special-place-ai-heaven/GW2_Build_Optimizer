@@ -59,9 +59,7 @@ fn assert_in_band(label: &str, actual: f64, expected: f64) {
     );
 }
 
-// ============================================================================
-// Canonical build fixtures
-// ============================================================================
+// Canonical build fixtures.
 //
 // Each fixture is a `CombatPerformance` snapshot representative of the
 // archetype. Numbers are realistic-ish but NOT gear-exact -- the labels are
@@ -149,11 +147,9 @@ fn daredevil_wvw_roam() -> CombatPerformance {
 // fixture for it would be guesswork. Three power+condi+heal+roam covers all
 // six scoring axes between them.
 
-// ============================================================================
 // Pinned scores -- captured by measurement on the canonical baseline.
 // If you change the constants in scoring.rs and these scores shift outside
 // the +/-5% band, that is intentional iff you have user-facing justification.
-// ============================================================================
 
 #[test]
 fn regression_dragonhunter_power_pve() {

@@ -1,0 +1,8 @@
+{
+  "source": "scenario tiers, crates/optimizer/src/scenario.rs and referee.rs (Roam 1v1, Havoc 5-15, Cloud/Zerg); the player is not counted among allies (specs/007-trait-triggers, R6)",
+  "tiers": {
+    "Solo": { "foes": 1, "allies": 0 },
+    "Party": { "foes": 5, "allies": 4 },
+    "Squad": { "foes": 10, "allies": 9 }
+  }
+}

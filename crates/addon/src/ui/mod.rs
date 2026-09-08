@@ -31,7 +31,7 @@ pub(crate) fn color_u32(c: [f32; 4]) -> u32 {
 
 use crate::state::{self, AddonState, Screen};
 
-// ── Off-lock disk writes ─────────────────────────────────────────────────────
+// Off-lock disk writes
 
 /// Diagnostics from the write plumbing.
 ///

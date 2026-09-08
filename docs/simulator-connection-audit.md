@@ -228,3 +228,222 @@ The cached build's nine traits (Bitter Chill, Spiteful Fortitude, Dread, Shroude
 - Dark Aura's torment-on-strike retaliation is not modeled.
 - Overflow damage past the life force pool reaches health at the reduced value.
 - A shroud entry the pool cannot afford is skipped in the opener with a reason, not queued.
+
+## 9. Sprint 3 — trait triggers are the build (`specs/007-trait-triggers`)
+
+Baseline for this section: branch `007-trait-triggers` off `255371f`; plan `0e50a51`, tasks `91a64aa`. Every control below is seen failing before its mechanism exists and again under `python docs/audit/disable_and_run.py <entry>`; the quoted blocks are in `docs/audit/sprint3-failures.md`.
+
+### 9.1 Coverage truth
+
+CONN-01-06 closed. `active_normalized_effects` now returns a `Vec<CoverageEntry>` (`data/quality.rs`: `ReasonClass::{NoRecord, PassiveNoEffect, NeedsMechanic, UnresolvedValue, NoFiringSite}`): a trait the parser consumed a fact from (`DamageModifiers.consumed_trait_ids`, carried on `PreparedRotation`) or a skill the builder produced a `SkillEffect` for is executed and never named; a record with a `coverage` block puts its class on the list; the timeline's own load-time notes (`(on-crit)`, `(unresolved value)`, `(partial combo)`) are classified back into entries in `report()` and keep their wording. `WvwCombatReport.coverage` is the typed list and `unmodeled_sources` its rendering; an empty list yields no coverage reason (`coverage_reason` unchanged).
+
+| kind | test | disabled by (harness entry) | seen failing | passes now |
+|---|---|---|---|---|
+| coverage (executed skills) | `coverage_line_never_names_executed_weapon_skills` | `coverage`: the `executed_from_facts` skip gated off | `executed weapon skills leave the coverage line: ["\"Chilled to the Bone!\" (no record)", …, "Gravedigger (no record)", …]` (40 names) | no weapon skill on the line |
+| coverage (class) | `coverage_entry_carries_its_class` | — (could not compile before `coverage`) | — | `Flesh of the Master (needs: minions)`, class `NeedsMechanic("minions")` |
+| coverage (empty) | `nothing_skipped_is_verified` | — | — | empty `coverage`, empty line, no reason |
+| PvE pin | `pve_trait_fact_consumption_set_unchanged` | — | — | fixture consumed set empty in PvE and WvW; a percent-fact trait consumed, a bare one not |
+
+Quoted blocks: `docs/audit/sprint3-failures.md` § coverage. Full lib run after the step: 1 165 passed, 17.95 s.
+
+### 9.2 Shroud
+
+US1 closed for the mechanism. `enter_shroud` ends with `trigger_procs(OnShroudEnter, entry skill)` and `exit_shroud(why)` starts with `trigger_procs(OnShroudExit)` while the state still stands (so an in-shroud prerequisite on an exit record holds); `why` reaches the `TraitFired` detail. `ConditionalKind::InShroud` is built from a `Conditional` record with `prerequisite.in_shroud: true` (strike or crit-damage payload), switched in `update_conditionals` (called at both transitions) and traced as `ShroudBonusActive`/`Ended`; a crit-damage bonus enters the strike through `strike_crit_factor_with_crit_damage` (percentage points on top of the ferocity multiplier). `ProcSpec.prerequisite` is carried; this step evaluates the shroud member only (`prerequisite_holds`), a foe member refuses with `foe prerequisite not evaluated` until 9.3. Every proc keeps its `ProcFired`; a trait record adds `TraitFired` with `at entry` / `at exit ({why})` and counts into `trait_fire_counts`. A shroud record that never fired because no shroud was entered goes on the coverage line as `(shroud never entered)` at the end of the run.
+
+| kind | test | disabled by (harness entry) | seen failing | passes now |
+|---|---|---|---|---|
+| positive control (entry) | `necro_shroud_enter_fires_once_at_entry` | `shroud_enter`: the entry call a no-op | `the entry record fires once at the entry; trace: [… no TraitFired …] left: 0 right: 1` (before the site: `ProcUnmodeled "Speed of Shadows (on-shroud-enter)" "no firing site"`) | one `TraitFired` at the `ShroudEntered` tick, Swiftness on |
+| timing (exit, three ways) | `necro_shroud_exit_fires_for_every_why` | `shroud_enter` run (exit needs an entry) | — | one fire each: `at exit (exit skill)`, `at exit (life force 0)` by drain, by a 6 000 strike at 3 000 ms |
+| conditional (in shroud) | `necro_in_shroud_bonus_active_only_inside` | — | — | Gravedigger equal with and without, Life Rend + Soul Spiral higher, `×1.15 crit damage` on at entry, off at exit |
+| Scourge rule | `necro_desert_shroud_is_the_scourge_entry` | — | — | Desert Shroud enters and fires; Manifest Sand Shade never |
+| ablation | `necro_removed_trait_changes_results` | — | — | an entry burst record raises `total_damage`; without it no fire |
+| determinism | `necro_results_repeat_identically` | — | — | ten runs identical (trace, coverage, counts) |
+| refusal (no shroud) | `necro_shroud_trigger_without_shroud_floor_never_fires` | — | — | refused entry, no fire, `Speed of Shadows (shroud never entered)` with class `NoFiringSite` |
+
+Deferred to 9.5: a timed strike bonus after a proc (Soul Barbs' +10 % for 10 s) needs a `ConditionalKind` with an expiry; the entry-burst record stands in for it here. Full lib run after the step: 1 172 passed, 16.33 s.
+
+### 9.3 Prerequisites and scopes
+
+US2 closed for the mechanism. `prerequisite_holds` evaluates `foe_condition` against the unexpired outgoing conditions, `in_shroud` against the shroud state and `foe_health` against `enemy_health / target_health` (never met on an open dummy, reason `foe health unknown`); every refusal is traced as `ProcSkippedPrerequisite` and a record that never fired for that reason gets one `prerequisite never met` summary at the end of the run. `RotationSkill.categories` / `slot_name` come from the API skill; `scope_admits` matches `Category`, `Slot` (slot head before `_`) and `Status` (the name of the status trigger in progress, `Timeline.trigger_status`), and the loader admits a trait `OnSkillUse` that carries a scope. New sites: `apply_outgoing_condition` (the one push for skill facts, corrupts and record operations) fires `OnConditionApplied`; `apply_buff` fires `OnBoonApplied`; `remove_enemy_boons` fires `OnBoonStripped` per boon; the tick fires `Periodic` when a periodic record is loaded (period = `internal_cooldown`, first fire at 0 ms). Status triggers never nest (`status_trigger_depth`), so a boon-on-boon record cannot feed itself. `GainsLifeForce` credits the pool through `gain_life_force_percent` (capped, `LifeForceGained` trace); `Heal` heals `value + coefficient × healing power`; `scale_by: ConditionsRemoved` multiplies by the conditions the same trigger's earlier record removed.
+
+Two WvW-only routings found on the way (PvE/PvP builder output untouched, FR-009): a non-damaging condition on a skill fact (Chilled, Crippled, Weakness, Vulnerability, ...) reaches the timeline as `ApplyBuff` and used to land on the *player* as a self-buff; it is now an outgoing condition on the foe when `data/formulas/conditions.json` knows the name. Fear and Taunt are crowd control *and* conditions, so the control arm also applies them as conditions. No `reaper_*` pin moved.
+
+| kind | test | disabled by (harness entry) | seen failing | passes now |
+|---|---|---|---|---|
+| positive/negative (foe prerequisite) | `necro_chilled_prerequisite_gates_chilling_nova` | `prereq`: the `foe not Chilled` refusal gated off | fires from the first crit at 400 ms: `never before the chill` | refused at 400/750/2 000 ms, fires at 2 500/2 800 ms, refused again after 7 100 ms; unchilled opener never fires |
+| scope (category) | `necro_shout_scope_fires_on_shouts_only` | `scope`: the `Category` arm forced false | `one fire inside the 30 s cooldown: left: 0 right: 1` | one fire, `ProcSkippedIcd` on the second shout, none without the category |
+| scope (slot) | `necro_slot_scope_fires_on_elite_only` | `scope` run | — | Elite fires once, Heal never |
+| status site (condition) | `necro_fear_applied_fires_dread` | — | Fear was control only: `left: 0 right: 1` | `Status("Fear")` fires on the fear skill, `Status("Chilled")` on Grasping Darkness, in that order |
+| status sites (boon) | `necro_boon_applied_and_stripped_fire` | — | — | one fire each on a Fury cast and on a corrupted Stability, both into the life force ledger |
+| timing (periodic) and scaling | `necro_periodic_and_exit_life_force` | — | — | ticks at 0/3 000/6 000/9 000 ms; exit cleanse removes 2, the scaled record credits `14% →` |
+| heal route | `necro_heal_route_uses_healing_power` | — | — | healing delta = 133 + 0.1 × healing power |
+| refusal summary | `necro_prerequisite_never_met_is_traced_not_listed` | — | — | `prerequisite never met` at the end, absent from `coverage` |
+| timing (cooldown) | `necro_long_cooldown_fires_once_and_traces_refusal` | — | — | one fire, `ProcSkippedIcd` after |
+
+Quoted blocks: `docs/audit/sprint3-failures.md` §§ prereq, scope. Full lib run after the step: 1 181 passed, 15.64 s (baseline median 17.01 s, SC-006 holds).
+
+### 9.4 Population
+
+FR-003a closed for the mechanism. `data/formulas/fight_population.json` (Solo 1/0, Party 5/4, Squad 10/9, loaded by `data/fight_population.rs`) reaches the timeline as `WvwTimelineInput.population` from the scenario's tier; every direct constructor stays Solo. Foe-facing effects (strikes, skill-fact conditions, record conditions) reach `min(n, foes)` foes: the primary gets the state, the rest are counted into `cleave_damage` (recorded as damage events, so it is inside `total_damage`, `protected_damage` and the peaks) and `cleave_condition_stack_seconds`. Ally-facing effects (skill-fact boons, heals, cleanses and `target_side: Ally` record operations) reach `1 + min(n − 1, allies)`: the player gets the effect, the rest are counted into `ally_boon_stack_seconds`, `ally_healing`, `ally_cleanses`. `n` is the record's `target_count` or the skill's `Number of Targets` fact (`RotationSkill.targets`, one field instead of a `targets` member on four `SkillEffect` variants: same information, forty fewer literals to touch). Every fan-out above one is traced as `PopulationApplied`. `search_rank`'s Support/Commander/Staller output slot adds `ally_boon_stack_seconds / 1000`; the slot rounds to whole points, so the direction test uses a Havoc-minute value (1 000 stack-seconds). PvE pin and `scoring_regression` unchanged to the last digit.
+
+| kind | test | disabled by (harness entry) | seen failing | passes now |
+|---|---|---|---|---|
+| positive control (Havoc) | `population_havoc_credits_five_or_cap` | `population`: `ally_fan_out` forced to 1 | `four allies × 1 stack × 10 s: got 0` | `4 × 1 × 10 s` of Might on allies, `PopulationApplied 5 of allies (5)` |
+| negative control (Roam) | `population_roam_credits_one` | — | — | every ally and cleave total 0, no trace |
+| cap (Cloud) | `population_cloud_caps_at_record` | `population` run | — | four allies not nine; `4 × 2 × 4 s` of Bleeding on secondary foes |
+| totals (cleave) | `population_cleave_damage_joins_totals` | — | — | `party total = solo total + cleave`, cleave = 4 × the strike |
+| builder (targets fact) | `population_skill_fact_targets_feed_the_same_path` | — | — | `Number of Targets 5` → `targets 5`, Regeneration on four allies |
+| ranking (support) | `support_builds_rank_apart_on_ally_trait` | — | `left > right` failed at 40 stack-seconds (rounded away) | Support, Commander, Staller rank the ally record above |
+| ranking (damage) | `damage_builds_unchanged_by_ally_slot` | — | — | StrikeSpike, CondiRamp, Harasser, Disabler keys identical |
+| PvE / PvP pins | `pve_output_unchanged_by_conditional_tagging`, `pve_trait_fact_consumption_set_unchanged`, `scoring_regression` | — | — | unchanged |
+
+Known approximation: population counting is arithmetic, not simulation. Extra foes and allies carry no state, so a record that reads an ally's conditions (Unholy Martyr's transfer half) stays `NeedsMechanic("ally state")`. Full lib run after the step: 1 189 passed, 16.16 s.
+
+### 9.5 Necromancer catalogue
+
+US3 for the Necromancer, increment 1. The cache holds 108 Necromancer traits (9 lines x 12; the plan's 111 was the
+999 / 9 estimate). All 108 wiki pages were read on 2026-09-08 through the wiki API (wikitext, kept only in the
+session scratchpad); every record carries its page URL and read date. `data/normalized_effects/2026-01-13/wvw.json`
+gained 135 Necromancer entries for 104 traits: 59 executable records
+(OnShroudEnter 13, OnSkillUse 10, OnConditionApplied 10, OnHit 7, Conditional 6, OnShroudExit 3, OnCrit 3, OnBoonStripped 3, Periodic 2, OnBoonApplied 2), 3 records with an unresolved WvW number (Soul Barbs' competitive duration, Spiteful
+Spirit's strike coefficient: the pages state neither), and 73 coverage blocks (spirits 11, carapace 7, blight 6, shades 6, life siphon 5, barrier 4, ally state 3, recharge 3, trait skill 3, downed 2, incoming damage reduction 2, life force scaling 2, minions 2, weapon-scoped duration 2, PassiveNoEffect 1, condition damage heal 1, crit chance per stack 1, damage-scaled heal 1, disable trigger 1, dodge 1, elixir 1, fear damage 1, incoming condition duration 1, incoming healing 1, kill 1, life force threshold 1, marks 1, percent heal 1, revive 1). Fell Beacon
+and Spiteful Talisman need no entry: every fact of theirs is a percent the parser consumes. Path of Corruption
+and Plague Sending keep their Sprint 1 records.
+
+Mechanisms the catalogue needed on top of 9.2-9.4: a timed strike bonus a proc switches on
+(`ConditionalKind::Timed`: Dread, Soul Barbs), a conditional that holds while a foe prerequisite does
+(`ConditionalKind::Prerequisite`: Cold Shoulder, Close to Death, Wicked Corruption), a per-stack bonus on a
+foe condition (`ConditionalKind::PerFoeStack` and `EffectCategory::CritChancePct`: Decimate Defenses), the
+`Slot("Shroud_N")` scope for "shroud skill N" records, area heals counting allies, a periodic record that re-checks
+its prerequisite at its own interval, refusal traces as state changes, and an executed-from-facts set that also
+covers attribute facts the stat sheet consumes. One scheduler change: an affordable shroud entry now outranks
+weapon damage in `pick_skill` (the improviser used to leave a Reaper out of shroud for the whole production fight,
+which is why the cached build's entry records had no firing site); no `reaper_*` pin moved.
+
+Trait coverage audit (`trait_coverage_audit_lists_every_trait`, `docs/audit/trait-coverage.md`, cache build
+205780), the Necromancer row (Traits | facts | record | facts+record | PassiveNoEffect | NeedsMechanic | NoRecord |
+UnresolvedValue):
+
+```
+| Necromancer | 108 | 2 | 25 | 19 | 1 | 59 | 0 | 2 |
+```
+
+972 traits have rows (every trait a specialization line lists); 27 cached traits sit on no line.
+
+SC-001 (`reaper_cached_build_traits_are_simulated`, cached Reaper build, `#[ignore]`): **not met, 3 of 9**. The
+run:
+
+```
+1863 Bitter Chill: record
+829 Spiteful Fortitude: facts+record
+919 Dread: record
+1922 Shrouded Removal: record — on the line: needs: carapace
+860 Dark Defense: record — on the line: needs: carapace
+1940 Corrupter's Fervor: NeedsMechanic: carapace — on the line: needs: carapace
+2020 Chilling Nova: record
+2031 Decimate Defenses: facts+record
+1932 Blighter's Boon: facts+record
+viable true quality Provisional; fired: {"Awaken the Pain": 1, "Bitter Chill": 3, "Blighter's Boon": 44, "Chilling Nova": 2, "Dread": 3, "Shivers of Dread": 1, "Shrouded Removal": 2, "Siphoned Power": 12, "Spiteful Fortitude": 12}
+thread 'referee::tests::reaper_cached_build_traits_are_simulated' (1748644) panicked at crates\optimizer\src\referee.rs:1980:9:
+3 of the nine traits are on the coverage line: [CoverageEntry { name: "Armored Shroud", class: NeedsMechanic("carapace"), detail: None }, CoverageEntry { name: "Beyond the Veil", class: NeedsMechanic("carapace"), detail: None }, CoverageEntry { name: "Cold Shoulder", class: NeedsMechanic("incoming damage reduction"), detail: None }, CoverageEntry { name: "Corrupter's Fervor", class: NeedsMechanic("carapace"), detail: None }, CoverageEntry { name: "Dark Defense", class: NeedsMechanic("carapace"), detail: None }, CoverageEntry { name: "Death Shroud", class: NoRecord, detail: None }, CoverageEntry { name: "Shroud Knight", class: PassiveNoEffect, detail: None }, CoverageEntry { name: "Shrouded Removal", class: NeedsMechanic("carapace"), detail: None }, CoverageEntry { name: "Soul Comprehension", class: NeedsMechanic("kill"), detail: None }]
+test referee::tests::reaper_cached_build_traits_are_simulated ... FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1198 filtered out; finished in 1.04s
+```
+
+All three entries share one missing mechanic, Death's Carapace (a stacking toughness effect; the timeline's incoming
+strikes are absolute numbers, so toughness has no lever yet). Two of the three (Shrouded Removal, Dark Defense)
+execute their other half (cleanse on entry and every 3 s; Protection on the heal skill) and sit on the line for the
+carapace half only, as the contract says they must. The test keeps the spec's `<= 2` assertion and fails until
+carapace lands.
+
+SC-003 (`necro_published_ranks_by_its_triggers`, GuildJen Power Spite Reaper, `#[ignore]`, Party tier):
+
+```
+published: [1, 7, 216808, 301123, 360641, 0, 0, 0, 0] Provisional
+Decimate Defenses instead of Chilling Victory: [1, 7, 216891, 301238, 362388, 0, 0, 0, 0]
+Deathly Chill instead of Blighter's Boon: [1, 7, 216808, 301123, 360641, 0, 0, 0, 0]
+test referee::tests::necro_published_ranks_by_its_triggers ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1198 filtered out; finished in 1.04s
+```
+
+The trigger trait changes the rank key; the direction is the simulation's: Chilling Victory's Might feeds
+Blighter's Boon and moves the shroud cycle, and the swap lands 0.04 % above on the damage slots. Deathly Chill for
+Blighter's Boon leaves the key unchanged on this build (no chill in its kit). The test asserts the key moves.
+
+Wiki-number check (`records_match_their_wiki_pages`, `#[ignore]`, wikitext through the wiki API): 145 ok,
+4 mismatches:
+
+```
+MISMATCH sigil:44944:0 Superior Sigil of Bursting: 6 not on page
+MISMATCH trait:1693:0 Path of Corruption: 10 not on page
+MISMATCH trait:2021:0 Reaper's Onslaught: 20 not on page
+MISMATCH trait:829:0 Spiteful Fortitude: 50 not on page
+```
+
+Two are Sprint 2 records (Sigil of Bursting, Path of Corruption) left for that sprint's follow-up; Reaper's
+Onslaught carries 300 ferocity in shroud as +20 % critical damage (15 ferocity per point, the page states the
+ferocity), and Spiteful Fortitude's 50 % threshold is the tooltip's, not on the page. The rendered page hides the
+competitive numbers behind mode tabs, so the check reads wikitext (found on the first run: 50 mismatches, every
+one a competitive split).
+
+Known approximations: non-damaging conditions the records remove on the player pop any condition (`cleanse` is
+count-based); Speed of Shadows' three removals are three single cleanses; Life from Death heals the player and
+counts four allies at the record's coefficient; Unholy Sanctuary's 1 %-of-health heal, Eternal Life's threshold and
+every carapace, blight, shade, spirit and minion mechanic are coverage classes, not simulation. Full lib run after
+the step: 1 190 passed, 16.27 s.
+
+### 9.6 Timing
+
+Sprint 2 baseline re-measured 2026-09-08 at `79e731d` before any Sprint 3 code: `cargo test -p gw2-optimizer --lib` reports `finished in` 19.08 s, 17.01 s, 16.65 s (1 157 tests, 5 ignored). SC-006 cap for Sprint 3: within 10 % of the median 17.01 s, i.e. under 18.7 s harness time on a warm run.
+
+Increment 1 at `ff0eb5b` (Phases 1-7 landed, 1 190 tests, 9 ignored): 16.04 s, 16.29 s, 16.03 s. Median 16.29 s, 4 % under the baseline median: SC-006 holds with 33 more tests. Trial passes and the catalogue's 40 s diagnostic runs are inside that figure. Determinism and trace-cap pins (`reaper_results_repeat_identically`, `reaper_trace_fits_under_cap`, `necro_results_repeat_identically`) green.
+
+Gate run for the increment (T067-T069, 2026-09-08 at `ff0eb5b`): `python docs/audit/disable_and_run.py shroud_enter prereq scope population coverage` fails all five with the quoted blocks and restores each file byte-identically; `pve_output_unchanged_by_conditional_tagging`, `pve_trait_fact_consumption_set_unchanged` and the nine `scoring_regression` tests unchanged to the last digit (SC-004). Sweep (T070): no machine path, `poslj`, `scratchpad`, `DEBUG` or `mock` in code; no fixture id in `data/`; the only lines changed under `prompts.rs` and `llm/` since the base are the concurrent agent's comment-line removals (`601d884`, `c2d75ec`, `79e731d`).
+
+### 9.7 Convergence (T083-T088)
+
+Death's Carapace (wiki `Death's Carapace`, read 2026-09-08): 20 toughness per stack in WvW, 30 stacks at most, 10 s. The timeline holds it as a self buff and `receive_strike` scales an incoming strike by armor / (armor + 20 x stacks), the same 1 / armor the profile's strike was built on. Five Death Magic records feed it (Armored Shroud 5 at entry, Putrid Defense 1 per poison applied, Shrouded Removal 3 per removal, Dark Defense 10 on the heal skill with its 5 s recharge, Corrupter's Fervor 1 per condition inflicted); the removal needed a seventh trigger kind, `OnConditionRemoved`, fired from `cleanse` only when it took a condition off the player (`necro_condition_removed_needs_a_removed_condition`: a cleanse of nothing is not a firing site). `necro_carapace_scales_incoming_strikes_by_armor` pins the ratio armor / (armor + 100) after Armored Shroud's entry. Approximations: the 10 s runs through the boon-duration multiplier like every self buff; the threshold halves (Corrupter's Fervor 15 % damage reduction at 25 stacks, Beyond the Veil 10 % condition damage reduction at 10 stacks) and Deadly Strength's 10 power / 10 condition damage per stack stay classified under their own names (`carapace threshold`, `carapace stat scaling`), as does Dark Defense's protection-condition-reduction half (`protection condition reduction`).
+
+SC-001 (`reaper_cached_build_traits_are_simulated`): **met, 2 of 9**:
+
+```
+860 Dark Defense: record — on the line: needs: protection condition reduction
+1940 Corrupter's Fervor: record — on the line: needs: carapace threshold
+```
+
+Both execute their carapace half; the line names the other. Necromancer row after the change: record 27, facts+record 20, NeedsMechanic 56 (was 25 / 19 / 59). SC-003 (`necro_published_ranks_by_its_triggers`) still passes.
+
+Scourge (T085, spec edge case "a Scourge with no shade out"): with no shroud bar on the skill list, `Shroud_N` admits the `Profession_N` skill (wiki `Shade`: the shade skills are the Scourge's shroud skills); a list with a shroud bar keeps `Weapon_N` of that bar. `necro_scourge_shade_skill_is_shroud_skill_one` pins both directions on a synthetic shade in `Profession_1` with Unyielding Blast's `Shroud_1` record.
+
+Wiki check (T084, `records_match_their_wiki_pages`): **0 mismatches**. `derived_from` names the page numbers a derived value comes from and the check verifies those instead of the value (Reaper's Onslaught: 300 ferocity as +20 % critical damage); the cached API facts of the trait or skill count beside the page (Spiteful Fortitude's 50 % threshold is an API `Health Threshold` fact the page leaves to the tooltip); records with heuristic evidence are skipped by name (Path of Corruption's 10 s cooldown, Phalanx Strength, Sharpened Edges: estimates, not page claims); Superior Sigil of Bursting now carries the page's 5 % (the Sprint 2 record said 6).
+
+Gates after the change: `python docs/audit/disable_and_run.py shroud_enter prereq scope population coverage`:
+
+```
+### shroud_enter
+test: necro_shroud_enter_fires_once_at_entry
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1201 filtered out; finished in 0.01s
+restored: byte-identical
+### prereq
+test: necro_chilled_prerequisite_gates_chilling_nova
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1201 filtered out; finished in 0.01s
+restored: byte-identical
+### scope
+test: necro_shout_scope_fires_on_shouts_only
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1201 filtered out; finished in 0.01s
+restored: byte-identical
+### population
+test: population_havoc_credits_five_or_cap
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1201 filtered out; finished in 0.01s
+restored: byte-identical
+### coverage
+test: coverage_line_never_names_executed_weapon_skills
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1201 filtered out; finished in 0.01s
+restored: byte-identical
+```
+
+clippy `-D warnings` clean, fmt clean, workspace tests green. Timing (`cargo test -p gw2-optimizer --lib`, 1193 tests): 18.61 s, 17.93 s, 16.35 s.
+
+## 10. Sprint 3 increments 2-9
+
+Profession order (T074): `cache/characters.json` holds names only (no `profession` field), so the fallback applies: alphabetical. Elementalist, Engineer, Guardian, Mesmer, Ranger, Revenant, Thief, Warrior. Each is its own branch off the previous increment's tip, its own PR and its own patch version, on the mechanism of section 9; the trait coverage table's `NoRecord` column is the progress bar (Necromancer 0; the other eight 65-85 at `ff0eb5b`).

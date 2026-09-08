@@ -132,7 +132,7 @@ pub fn enrich_with_cleanse(
 
 /// Convert a GW2 API Skill into a RotationSkill with extracted timing and effects.
 #[cfg(test)]
-fn skill_to_rotation(skill: &Skill) -> RotationSkill {
+pub(crate) fn skill_to_rotation(skill: &Skill) -> RotationSkill {
     skill_to_rotation_for_context(skill, &BalanceContext::pve())
 }
 
@@ -170,6 +170,20 @@ fn skill_to_rotation_for_context(skill: &Skill, ctx: &BalanceContext) -> Rotatio
         next_chain: skill.next_chain,
         is_stunbreak,
         weapon_set: 0, // default; caller can tag with set 1/2 via tag_weapon_set()
+        categories: skill.categories.clone(),
+        slot_name: skill.slot.clone(),
+        targets: skill
+            .facts
+            .iter()
+            .find_map(|fact| match fact {
+                Fact::Number {
+                    text: Some(text),
+                    value: Some(value),
+                    ..
+                } if text.eq_ignore_ascii_case("Number of Targets") => Some((*value).max(1) as u32),
+                _ => None,
+            })
+            .unwrap_or(1),
     }
 }
 
@@ -1322,7 +1336,7 @@ mod tests {
         assert!(rs.is_stunbreak);
     }
 
-    // ─── Tests for enrich_with_cleanse ───
+    // Tests for enrich_with_cleanse
 
     use crate::data::normalized_effects::{
         AmountMode, EffectCategory, NormalizedEffect, OperationType, SourceType, StackingRule,
@@ -1397,12 +1411,18 @@ mod tests {
             health_threshold: None,
             proc_chance: None,
             trigger_scope: None,
+            prerequisite: None,
+            scale_by: None,
+            healing_power_coefficient: None,
+            derived_from: Vec::new(),
+            coverage: None,
         }
     }
 
     /// Build a minimal rotation skill for cleanse tests.
     fn cleanse_test_skill(id: u32) -> RotationSkill {
         RotationSkill {
+            targets: 1,
             skill_id: id,
             name: format!("Skill {}", id),
             slot: SkillSlot::Utility,
@@ -1412,6 +1432,8 @@ mod tests {
             next_chain: None,
             is_stunbreak: false,
             weapon_set: 0,
+            categories: Vec::new(),
+            slot_name: None,
         }
     }
 
@@ -1475,6 +1497,7 @@ mod tests {
     #[test]
     fn merge_weapon_sets_keeps_one_copy_of_a_shared_skill() {
         let weapon = |id: u32, set: u8| RotationSkill {
+            targets: 1,
             skill_id: id,
             name: format!("Skill {id}"),
             slot: SkillSlot::Weapon4,
@@ -1484,6 +1507,8 @@ mod tests {
             next_chain: None,
             is_stunbreak: false,
             weapon_set: set,
+            categories: Vec::new(),
+            slot_name: None,
         };
         let set1 = vec![weapon(1, 1), weapon(10705, 1)];
         let set2 = vec![weapon(10705, 2), weapon(2, 2)];

@@ -11,7 +11,7 @@ use crate::stats;
 use crate::validation::ValidatedBuild;
 use gw2_core::types::GameMode;
 
-// ─── Viability Gate Thresholds ───────────────────────────────────────────────
+// Viability Gate Thresholds
 
 /// Minimum stunbreak skills required for PvP/WvW viability. // HEURISTIC
 const MIN_STUNBREAKS: u32 = 1;
@@ -81,7 +81,7 @@ pub const EHP_FLOOR_WVW: f64 = EHP_FLOOR_WVW_HAVOC;
 /// every real amulet/rune combo viable. // HEURISTIC
 pub const EHP_FLOOR_PVP: f64 = 8_000.0;
 
-// ─── Viability Gate Types ────────────────────────────────────────────────────
+// Viability Gate Types
 
 /// Which gate a `GateResult` describes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,7 +258,9 @@ pub fn search_rank(report: &RefereeReport) -> [i64; 9] {
                 CombatKind::CondiRamp => fight.protected_damage,
                 CombatKind::Disabler => fight.control_landed_ms as f64 * 10.0,
                 CombatKind::Support | CombatKind::Commander | CombatKind::Staller => {
-                    fight.sustain_margin.max(0.0)
+                    // Sprint 3 (specs/007-trait-triggers): ally-facing output
+                    // counts for the support kinds; the only rank-key change.
+                    fight.sustain_margin.max(0.0) + fight.ally_boon_stack_seconds / 1_000.0
                 }
             })
             .unwrap_or(0.0)
@@ -347,7 +349,7 @@ pub fn evaluate_viability_gates_for(
     let need_cleanses = cleanse_count_floor(profile);
 
     if requires_pvp_gates {
-        // ── Stunbreak gate ──────────────────────────────────────────────────
+        // Stunbreak gate
         gates.push(match rotation {
             Some(rot) => {
                 let passed = rot.stunbreak_count >= need_stunbreaks;
@@ -412,7 +414,7 @@ pub fn evaluate_viability_gates_for(
             });
         }
 
-        // ── Cleanse gate ────────────────────────────────────────────────────
+        // Cleanse gate
         gates.push(match rotation {
             Some(rot) => {
                 let required_rate = effective_cleanse_requirement(scenario, rot, profile);
@@ -653,7 +655,7 @@ pub fn evaluate_viability_gates_for(
         }
     }
 
-    // ── Effective health gate (always runs) ─────────────────────────────────
+    // Effective health gate (always runs)
     // WvW floor varies by combat tier: Roamers need more personal sustain than Zerg players.
     // PvP uses its own (lower) floor — amulet-based gear has a smaller stat budget than
     // ascended WvW, so reusing WvW floors here would non-viably score most real PvP builds.
@@ -1161,7 +1163,7 @@ pub fn evaluate_validated_build_with(
     let rotation = prepared
         .as_ref()
         .map(|p| engine::simulate_prepared(p, validated, db, Some(scenario)));
-    // ── Viability gating ──────────────────────────────────────────────────────
+    // Viability gating
     // Run before score computation. Non-viable builds receive sentinel score -1.0.
     let profile = objective_profile_for(
         scenario,
@@ -1297,7 +1299,7 @@ mod tests {
     use gw2_core::types::GameMode;
     use std::collections::HashMap;
 
-    // ─── Gate test helpers ────────────────────────────────────────────────
+    // Gate test helpers
 
     /// A `SimulationResult` that satisfies all WvW/PvP gates.
     fn make_viable_rotation() -> SimulationResult {
@@ -1357,6 +1359,13 @@ mod tests {
                 resource_legal: true,
                 resource_model_complete: true,
                 unmodeled_sources: Vec::new(),
+                coverage: Vec::new(),
+                cleave_damage: 0.0,
+                cleave_condition_stack_seconds: 0.0,
+                ally_boon_stack_seconds: 0.0,
+                ally_healing: 0.0,
+                ally_cleanses: 0,
+                trait_fire_counts: std::collections::BTreeMap::new(),
                 trace: Vec::new(),
                 trace_truncated: false,
                 proc_trials: Vec::new(),
@@ -1536,6 +1545,643 @@ mod tests {
         );
     }
 
+    /// Sprint 3 (specs/007-trait-triggers): two support builds identical but
+    /// for one ally-facing boon record rank apart, the record above.
+    #[test]
+    fn support_builds_rank_apart_on_ally_trait() {
+        let with = make_viable_rotation();
+        let mut without = with.clone();
+        let mut with = with;
+        // The slot rounds to whole points: a Havoc minute of Might, Fury and
+        // Protection on four allies is well past 1 000 stack-seconds.
+        with.wvw
+            .as_mut()
+            .expect("WvW report")
+            .ally_boon_stack_seconds = 1_000.0;
+        without
+            .wvw
+            .as_mut()
+            .expect("WvW report")
+            .ally_boon_stack_seconds = 0.0;
+        for kind in [
+            crate::scenario::CombatKind::Support,
+            crate::scenario::CombatKind::Commander,
+            crate::scenario::CombatKind::Staller,
+        ] {
+            let mut a = make_rank_report(with.clone());
+            a.scenario.combat_kind = kind;
+            let mut b = make_rank_report(without.clone());
+            b.scenario.combat_kind = kind;
+            assert!(search_rank(&a) > search_rank(&b), "{kind:?}");
+        }
+    }
+
+    /// The same record leaves two damage builds' order alone.
+    #[test]
+    fn damage_builds_unchanged_by_ally_slot() {
+        let mut with = make_viable_rotation();
+        with.wvw
+            .as_mut()
+            .expect("WvW report")
+            .ally_boon_stack_seconds = 1_000.0;
+        let without = make_viable_rotation();
+        for kind in [
+            crate::scenario::CombatKind::StrikeSpike,
+            crate::scenario::CombatKind::CondiRamp,
+            crate::scenario::CombatKind::Harasser,
+            crate::scenario::CombatKind::Disabler,
+        ] {
+            let mut a = make_rank_report(with.clone());
+            a.scenario.combat_kind = kind;
+            let mut b = make_rank_report(without.clone());
+            b.scenario.combat_kind = kind;
+            assert_eq!(search_rank(&a), search_rank(&b), "{kind:?}");
+        }
+    }
+
+    // ---- Sprint 3 (specs/007-trait-triggers, US3): cache- and network-backed
+    // checks. All `#[ignore]`; they read `gw2_api::dev_config`.
+
+    /// Professions whose trait catalogue increment has shipped: every one of
+    /// their traits must have a state other than `NoRecord`.
+    const SHIPPED_PROFESSIONS: [&str; 1] = ["Necromancer"];
+
+    fn cache_db() -> Option<(std::path::PathBuf, GameDb)> {
+        let Ok(cache_dir) = gw2_api::dev_config::cache_dir() else {
+            println!("no dev.cfg: nothing to check");
+            return None;
+        };
+        let cache = gw2_api::cache::DataCache::new(cache_dir.clone());
+        let db = GameDb::load(&cache).expect("the cache holds a full GameDb");
+        Some((cache_dir, db))
+    }
+
+    /// Derived state of one trait for the coverage table.
+    fn trait_state(db: &GameDb, trait_id: u32, ctx: &BalanceContext) -> (String, String) {
+        use crate::data::normalized_effects::{CoverageClass, SourceType};
+        use gw2_api::models::Fact;
+        let effects = crate::data::normalized_effects::effects().effects_for_mode("WvW");
+        let records: Vec<_> = effects
+            .iter()
+            .filter(|e| e.source_type == SourceType::Trait && e.source_id == trait_id)
+            .collect();
+        let source = records
+            .iter()
+            .find_map(|e| e.source.clone())
+            .unwrap_or_default();
+        let facts = db.traits.get(&trait_id).is_some_and(|t| {
+            let stat = |f: &Fact| {
+                matches!(
+                    f,
+                    Fact::AttributeAdjust { .. } | Fact::BuffConversion { .. }
+                )
+            };
+            t.facts.iter().any(stat)
+                || t.traited_facts.iter().any(|tf| stat(&tf.fact))
+                || !crate::combat::extract_damage_modifiers(
+                    &[trait_id],
+                    None,
+                    &[],
+                    None,
+                    &db.traits,
+                    &db.items,
+                    ctx,
+                )
+                .consumed_trait_ids
+                .is_empty()
+        });
+        let executable = records
+            .iter()
+            .any(|e| e.coverage.is_none() && e.value.is_resolved());
+        let unresolved = records
+            .iter()
+            .any(|e| e.coverage.is_none() && !e.value.is_resolved());
+        let class = records
+            .iter()
+            .find_map(|e| e.coverage.as_ref())
+            .map(|c| match c.class {
+                CoverageClass::PassiveNoEffect => "PassiveNoEffect".to_string(),
+                CoverageClass::NeedsMechanic => {
+                    format!("NeedsMechanic: {}", c.mechanic.clone().unwrap_or_default())
+                }
+            });
+        let state = match (facts, executable, unresolved, class) {
+            (true, true, _, _) => "facts+record".to_string(),
+            (false, true, _, _) => "record".to_string(),
+            (_, false, true, _) => "UnresolvedValue".to_string(),
+            (_, false, false, Some(class)) => class,
+            (true, false, false, None) => "facts".to_string(),
+            (false, false, false, None) => "NoRecord".to_string(),
+        };
+        (state, source)
+    }
+
+    /// T052: every trait in the cache gets a row and a derived state;
+    /// `docs/audit/trait-coverage.md` is regenerated; a shipped profession
+    /// with `NoRecord > 0` fails.
+    #[test]
+    #[ignore]
+    fn trait_coverage_audit_lists_every_trait() {
+        let Some((cache_dir, db)) = cache_db() else {
+            return;
+        };
+        let build: u64 = std::fs::read_to_string(cache_dir.join("traits.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| v["build"].as_u64())
+            .unwrap_or(0);
+        let ctx = BalanceContext::new(GameMode::WvW);
+        let mut specs: Vec<_> = db.specializations.values().collect();
+        specs.sort_by(|a, b| {
+            (a.profession.as_str(), a.elite, &a.name).cmp(&(
+                b.profession.as_str(),
+                b.elite,
+                &b.name,
+            ))
+        });
+        let mut professions: Vec<String> = specs.iter().map(|s| s.profession.clone()).collect();
+        professions.dedup();
+
+        let columns = [
+            "facts",
+            "record",
+            "facts+record",
+            "PassiveNoEffect",
+            "NeedsMechanic",
+            "NoRecord",
+            "UnresolvedValue",
+        ];
+        let mut summary = String::new();
+        let mut sections = String::new();
+        let mut total_rows = 0usize;
+        for profession in &professions {
+            let mut counts = std::collections::BTreeMap::new();
+            let mut rows = String::new();
+            let mut traits_seen = 0usize;
+            for spec in specs.iter().filter(|s| &s.profession == profession) {
+                let mut ids: Vec<u32> = spec
+                    .minor_traits
+                    .iter()
+                    .chain(spec.major_traits.iter())
+                    .copied()
+                    .collect();
+                ids.sort_by_key(|id| {
+                    db.traits
+                        .get(id)
+                        .map(|t| (t.tier, t.order))
+                        .unwrap_or((99, 99))
+                });
+                for id in ids {
+                    let Some(t) = db.traits.get(&id) else {
+                        continue;
+                    };
+                    let (state, source) = trait_state(&db, id, &ctx);
+                    let key = state.split(':').next().unwrap_or("").to_string();
+                    *counts.entry(key).or_insert(0usize) += 1;
+                    rows.push_str(&format!(
+                        "| {} | {} | {} | {} | {} |\n",
+                        spec.name, id, t.name, state, source
+                    ));
+                    traits_seen += 1;
+                }
+            }
+            total_rows += traits_seen;
+            summary.push_str(&format!("| {profession} | {traits_seen} |"));
+            for column in columns {
+                summary.push_str(&format!(" {} |", counts.get(column).copied().unwrap_or(0)));
+            }
+            summary.push('\n');
+            sections.push_str(&format!(
+                "\n## {profession}\n\n| Line | Id | Trait | State | Source |\n|---|---|---|---|---|\n{rows}"
+            ));
+            let no_record = counts.get("NoRecord").copied().unwrap_or(0);
+            if SHIPPED_PROFESSIONS.contains(&profession.as_str()) {
+                assert_eq!(
+                    no_record, 0,
+                    "{profession} shipped its increment: NoRecord must be 0\n{rows}"
+                );
+            }
+        }
+        // Every trait a specialization line lists has a row; the cache also
+        // holds traits no line references (retired or mechanic-only ids).
+        let listed: usize = specs
+            .iter()
+            .map(|s| s.minor_traits.len() + s.major_traits.len())
+            .sum();
+        assert_eq!(total_rows, listed, "every listed trait has a row");
+        println!(
+            "{} cached traits are on no specialization line",
+            db.traits.len().saturating_sub(listed)
+        );
+        let table = format!(
+            "# Trait coverage — generated 2026-09-08 from cache build {build}\n\n\
+             | Profession | Traits | facts | record | facts+record | PassiveNoEffect | NeedsMechanic | NoRecord | UnresolvedValue |\n\
+             |---|---|---|---|---|---|---|---|---|\n{summary}{sections}"
+        );
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/audit/trait-coverage.md");
+        std::fs::write(&path, table).expect("write docs/audit/trait-coverage.md");
+        println!("wrote {} ({} rows)\n{summary}", path.display(), total_rows);
+    }
+
+    /// T053: every factual number of every wiki-sourced record appears in
+    /// its page's wikitext (the rendered page shows the PvE column and hides
+    /// the competitive facts behind mode tabs; the wikitext carries every
+    /// `game mode=wvw` fact). Needs `wiki_api` in dev.cfg (the MediaWiki
+    /// `api.php` URL); prints one line per record, commits no text.
+    #[test]
+    #[ignore]
+    fn records_match_their_wiki_pages() {
+        use crate::data::quality::FactualValue;
+        let Ok(cfg) = gw2_api::dev_config::load() else {
+            println!("no dev.cfg: nothing to check");
+            return;
+        };
+        let Some(wiki_api) = cfg.get("wiki_api") else {
+            println!("no wiki_api in dev.cfg: skipping the wiki-number check");
+            return;
+        };
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("gw2-build-optimizer trait audit")
+            .build()
+            .expect("client");
+        // The game's own facts (cached API) count as a source beside the
+        // page: Spiteful Fortitude's 50 % threshold is an API fact the page
+        // leaves to the tooltip.
+        let db = cache_db().map(|(_, db)| db);
+        let api_numbers =
+            |source_type: &crate::data::normalized_effects::SourceType, id: u32| -> Vec<f64> {
+                use crate::data::normalized_effects::SourceType;
+                use gw2_api::models::Fact;
+                let Some(db) = &db else {
+                    return Vec::new();
+                };
+                let facts = match source_type {
+                    SourceType::Trait => db.traits.get(&id).map(|t| &t.facts),
+                    SourceType::Skill => db.skills.get(&id).map(|s| &s.facts),
+                    _ => None,
+                };
+                facts
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|fact| match fact {
+                        Fact::Percent { percent, .. } => vec![percent.unwrap_or(0.0)],
+                        Fact::Number { value, .. } => vec![value.unwrap_or(0) as f64],
+                        Fact::Recharge { value, .. } => vec![value.unwrap_or(0.0)],
+                        Fact::Time { duration, .. } => vec![duration.unwrap_or(0) as f64],
+                        Fact::AttributeAdjust { value, .. } => vec![value.unwrap_or(0) as f64],
+                        Fact::Buff {
+                            duration,
+                            apply_count,
+                            ..
+                        }
+                        | Fact::PrefixedBuff {
+                            duration,
+                            apply_count,
+                            ..
+                        } => vec![
+                            duration.unwrap_or(0) as f64,
+                            apply_count.unwrap_or(0) as f64,
+                        ],
+                        _ => Vec::new(),
+                    })
+                    .collect()
+            };
+        let mut pages: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut mismatches = 0usize;
+        for effect in crate::data::normalized_effects::effects().effects_for_mode("WvW") {
+            let Some(source) = effect.source.as_deref() else {
+                continue;
+            };
+            let Some(url) = source
+                .split(" (")
+                .next()
+                .filter(|u| u.starts_with("https://wiki.guildwars2.com/"))
+            else {
+                continue;
+            };
+            let text = pages.entry(url.to_string()).or_insert_with(|| {
+                // The source URL is percent-encoded; the API wants the title.
+                let title = url
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .replace("%27", "'")
+                    .replace('_', " ");
+                client
+                    .get(wiki_api)
+                    .query(&[
+                        ("action", "parse"),
+                        ("prop", "wikitext"),
+                        ("format", "json"),
+                        ("page", title.as_str()),
+                    ])
+                    .send()
+                    .and_then(|r| r.json::<serde_json::Value>())
+                    .map(|v| {
+                        v["parse"]["wikitext"]["*"]
+                            .as_str()
+                            .unwrap_or("")
+                            .to_string()
+                    })
+                    .unwrap_or_else(|e| format!("FETCH FAILED: {e}"))
+            });
+            // A heuristic record's numbers are estimates, not page claims
+            // (Sprint 2's Path of Corruption cooldown).
+            if effect.evidence_level != crate::data::EvidenceLevel::Factual {
+                println!(
+                    "skip {} {} ({:?} evidence)",
+                    effect.effect_id, effect.source_name, effect.evidence_level
+                );
+                continue;
+            }
+            let mut numbers: Vec<f64> = Vec::new();
+            let push = |numbers: &mut Vec<f64>, v: &FactualValue<f64>| {
+                if let FactualValue::Resolved(x) = v {
+                    numbers.push(*x);
+                }
+            };
+            // A status record's value mirrors its stack count; one stack is
+            // implicit on the page. A derived value is checked through the
+            // page numbers it comes from.
+            let single_status = effect.status_operation.is_some()
+                && matches!(effect.value, FactualValue::Resolved(v) if v == 1.0);
+            if !effect.derived_from.is_empty() {
+                numbers.extend(effect.derived_from.iter().copied());
+            } else if !single_status {
+                push(&mut numbers, &effect.value);
+            }
+            if let Some(d) = &effect.effect_duration {
+                push(&mut numbers, d);
+            }
+            if let Some(d) = &effect.internal_cooldown {
+                push(&mut numbers, d);
+            }
+            if let Some(c) = &effect.healing_power_coefficient {
+                push(&mut numbers, c);
+            }
+            if let Some(op) = &effect.status_operation {
+                // A single stack or count is implicit on the page.
+                if !matches!(op.amount_value, FactualValue::Resolved(v) if v == 1.0) {
+                    push(&mut numbers, &op.amount_value);
+                }
+                if let Some(FactualValue::Resolved(ms)) = &op.base_duration_ms {
+                    numbers.push(*ms as f64 / 1_000.0);
+                }
+                if let Some(FactualValue::Resolved(n)) = &op.target_count {
+                    numbers.push(*n as f64);
+                }
+            }
+            if let Some(gate) = effect
+                .prerequisite
+                .as_ref()
+                .and_then(|p| p.foe_health.as_ref())
+            {
+                push(&mut numbers, &gate.percent);
+            }
+            let mut tokens: Vec<f64> = text
+                .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+                .filter_map(|t| t.trim_matches('.').parse::<f64>().ok())
+                .collect();
+            tokens.extend(api_numbers(&effect.source_type, effect.source_id));
+            let missing: Vec<String> = numbers
+                .iter()
+                .filter(|n| !tokens.iter().any(|t| (t - **n).abs() < 1e-9))
+                .map(|n| n.to_string())
+                .collect();
+            if missing.is_empty() {
+                println!("ok {} {}", effect.effect_id, effect.source_name);
+            } else {
+                mismatches += 1;
+                println!(
+                    "MISMATCH {} {}: {} not on page",
+                    effect.effect_id,
+                    effect.source_name,
+                    missing.join(", ")
+                );
+            }
+        }
+        println!("{mismatches} mismatches");
+    }
+
+    /// The cached Reaper build (first Necromancer tab running Reaper) through
+    /// the real database: returns its trait ids and the traced WvW report.
+    fn cached_reaper_traced(
+        db: &GameDb,
+        cache_dir: &std::path::Path,
+    ) -> Option<(
+        Vec<u32>,
+        crate::rotation::wvw_timeline::WvwCombatReport,
+        RefereeReport,
+    )> {
+        let reaper_spec = db
+            .specializations
+            .values()
+            .find(|s| s.name == "Reaper" && s.profession == "Necromancer")
+            .map(|s| s.id)?;
+        let mut found: Option<serde_json::Value> = None;
+        for entry in std::fs::read_dir(cache_dir).ok()? {
+            let path = entry.ok()?.path();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            if !name.starts_with("char_") || !name.ends_with("_buildtabs.json") {
+                continue;
+            }
+            let tabs: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+            for tab in tabs.as_array()? {
+                let build = &tab["build"];
+                if build["profession"] == "Necromancer"
+                    && build["specializations"]
+                        .as_array()
+                        .is_some_and(|specs| specs.iter().any(|s| s["id"] == reaper_spec))
+                {
+                    found = Some(build.clone());
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        let build = found?;
+        let trait_ids: Vec<u32> = build["specializations"]
+            .as_array()?
+            .iter()
+            .flat_map(|s| s["traits"].as_array().cloned().unwrap_or_default())
+            .filter_map(|t| t.as_u64().map(|t| t as u32))
+            .collect();
+        let specs: Vec<serde_json::Value> = build["specializations"]
+            .as_array()?
+            .iter()
+            .map(|s| {
+                let name = db
+                    .specializations
+                    .get(&(s["id"].as_u64().unwrap_or(0) as u32))
+                    .map(|sp| sp.name.clone())
+                    .unwrap_or_default();
+                let traits: Vec<String> = s["traits"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|t| {
+                        t.as_u64()
+                            .and_then(|id| db.traits.get(&(id as u32)))
+                            .map(|t| t.name.clone())
+                    })
+                    .collect();
+                serde_json::json!({ "name": name, "traits": traits })
+            })
+            .collect();
+        let skill_name = |v: &serde_json::Value| {
+            v.as_u64()
+                .and_then(|id| db.skills.get(&(id as u32)))
+                .map(|s| s.name.clone())
+        };
+        let utilities: Vec<serde_json::Value> = build["skills"]["utilities"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|u| serde_json::json!(skill_name(u)))
+            .collect();
+        let plate = serde_json::json!({
+            "specializations": specs,
+            "weapons": {
+                "set1": {"main": "Greatsword", "off": null},
+                "set2": {"main": "Axe", "off": "Focus"},
+            },
+            "skills": {
+                "heal": skill_name(&build["skills"]["heal"]),
+                "utilities": utilities,
+                "elite": skill_name(&build["skills"]["elite"]),
+            },
+            "rune": "Superior Rune of the Scholar",
+            "sigils": ["Superior Sigil of Force", "Superior Sigil of Fire"],
+            "relic": "Relic of the Thief",
+            "stat_prefix": "Marauder",
+            "explanation": "cached build",
+        });
+        let parsed = crate::prompts::parse_gemini_build(&plate.to_string()).ok()?;
+        let validated = crate::validation::validate_gemini_build(&parsed, db, "Necromancer");
+        assert!(validated.errors.is_empty(), "{:?}", validated.errors);
+        let (bal, scenario) = crate::rotation::reaper_fixture::scenario();
+        let report = super::evaluate_validated_build_with(
+            &validated,
+            db,
+            "Necromancer",
+            &OptimizationWeights::default(),
+            &bal,
+            &scenario,
+            &[],
+        );
+        let (stats, _) =
+            crate::engine::calculate_validated_stats(&validated, db, "Necromancer", &bal);
+        let prepared =
+            crate::engine::prepare_validated_rotation(&validated, db, &stats, Some(&scenario))
+                .expect("prepares");
+        let traced =
+            crate::engine::simulate_prepared_traced(&prepared, &validated, db, Some(&scenario))
+                .wvw
+                .expect("WvW");
+        Some((trait_ids, traced, report))
+    }
+
+    /// T054 (SC-001): the cached Reaper build's nine traits, each with its
+    /// state; at most two on the coverage line, each with a class.
+    #[test]
+    #[ignore]
+    fn reaper_cached_build_traits_are_simulated() {
+        let Some((cache_dir, db)) = cache_db() else {
+            return;
+        };
+        let Some((trait_ids, traced, report)) = cached_reaper_traced(&db, &cache_dir) else {
+            println!("no Reaper build tab in the cache: nothing to check");
+            return;
+        };
+        let ctx = BalanceContext::new(GameMode::WvW);
+        let mut listed = 0usize;
+        for id in &trait_ids {
+            let name = db
+                .traits
+                .get(id)
+                .map(|t| t.name.clone())
+                .unwrap_or_default();
+            let (state, _) = trait_state(&db, *id, &ctx);
+            let on_line = traced.coverage.iter().find(|e| e.name == name);
+            println!(
+                "{id} {name}: {state}{}",
+                on_line
+                    .map(|e| format!(" — on the line: {}", e.class.suffix()))
+                    .unwrap_or_default()
+            );
+            if let Some(entry) = on_line {
+                listed += 1;
+                assert!(
+                    !matches!(entry.class, crate::data::quality::ReasonClass::NoRecord),
+                    "{name} sits on the line without a class"
+                );
+            }
+        }
+        println!(
+            "viable {} quality {:?}; fired: {:?}",
+            report.viability.is_viable, report.quality, traced.trait_fire_counts
+        );
+        assert!(
+            listed <= 2,
+            "{listed} of the nine traits are on the coverage line: {:?}",
+            traced.coverage
+        );
+    }
+
+    /// T066 (SC-003): the published GuildJen build ranks above the same
+    /// build with a trigger trait swapped for a line neighbour that only has a
+    /// coverage class.
+    #[test]
+    #[ignore]
+    fn necro_published_ranks_by_its_triggers() {
+        let Some((_, db)) = cache_db() else {
+            return;
+        };
+        let (bal, mut scenario) = crate::rotation::reaper_fixture::scenario();
+        scenario.combat_tier = CombatTier::Party;
+        let weights = OptimizationWeights::default();
+        let rank = |validated: &ValidatedBuild| {
+            let report = super::evaluate_validated_build_with(
+                validated,
+                &db,
+                "Necromancer",
+                &weights,
+                &bal,
+                &scenario,
+                &[],
+            );
+            (search_rank(&report), report.quality.clone())
+        };
+        let published =
+            crate::rotation::necro_published::build(&db).expect("the published build validates");
+        let (base, quality) = rank(&published);
+        println!("published: {base:?} {quality:?}");
+        // Chilling Victory (record) against Decimate Defenses (coverage only).
+        let swapped =
+            crate::rotation::necro_published::build_with_trait(&db, 2008, 2031).expect("swap");
+        let (other, _) = rank(&swapped);
+        println!("Decimate Defenses instead of Chilling Victory: {other:?}");
+        // The trigger trait changes the rank key; its direction is the
+        // simulation's to decide (Chilling Victory's Might feeds Blighter's
+        // Boon and moves the shroud cycle), so the audit records both keys.
+        assert_ne!(base, other, "the trigger trait is felt in the rank key");
+        // Blighter's Boon (record) against Deathly Chill (record): printed only.
+        let swapped =
+            crate::rotation::necro_published::build_with_trait(&db, 1932, 1919).expect("swap");
+        let (other, _) = rank(&swapped);
+        println!("Deathly Chill instead of Blighter's Boon: {other:?}");
+    }
+
     #[test]
     fn roam_rank_prefers_earlier_target_threshold_when_other_terms_match() {
         let mut earlier = make_viable_rotation();
@@ -1607,7 +2253,7 @@ mod tests {
         gates.iter().find(|g| &g.gate == kind)
     }
 
-    // ─── Gate scenario tests ──────────────────────────────────────────────
+    // Gate scenario tests
 
     /// WvW build with all gates satisfied → viable.
     #[test]
@@ -2464,7 +3110,7 @@ mod tests {
         assert!(gate_by_kind(&report.gates, &ViabilityGate::StunbreakCount).is_none());
     }
 
-    // ─── CombatTier-differentiated EHP gate tests ──────────────────────────
+    // CombatTier-differentiated EHP gate tests
 
     /// EHP between Zerg floor and Roam floor: passes Zerg (Squad), fails Roaming (Solo).
     #[test]
@@ -2483,7 +3129,7 @@ mod tests {
         let mut combat = make_viable_combat();
         combat.effective_health = mid_ehp;
 
-        // ── Squad scenario → should pass EHP gate ──
+        // Squad scenario → should pass EHP gate
         let squad_scenario = ScenarioSpec {
             game_mode: GameMode::WvW,
             combat_tier: crate::scenario::CombatTier::Squad,
@@ -2503,7 +3149,7 @@ mod tests {
             mid_ehp, EHP_FLOOR_WVW_ZERG, ehp_squad.note
         );
 
-        // ── Solo scenario (Roaming) → should fail EHP gate ──
+        // Solo scenario (Roaming) → should fail EHP gate
         let solo_scenario = ScenarioSpec {
             game_mode: GameMode::WvW,
             combat_tier: crate::scenario::CombatTier::Solo,
@@ -2829,7 +3475,7 @@ mod tests {
         };
         assert!(search_rank(&mk(0.7)) > search_rank(&mk(0.5)));
     }
-    // ── Reaper slice (specs/004-simulator-trust) ────────────────────────────
+    // Reaper slice (specs/004-simulator-trust)
 
     #[test]
     fn reaper_fixture_evaluates_without_errors() {

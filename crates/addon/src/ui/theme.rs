@@ -11,7 +11,7 @@ use nexus::imgui::{DrawListMut, StyleColor, StyleVar, TextureId, Ui};
 
 use super::color_u32;
 
-// ── Semantic colors (NOT themeable — they carry meaning, not chrome) ────────
+// Semantic colors (NOT themeable — they carry meaning, not chrome)
 pub const CURRENT: [f32; 4] = [0.62, 0.82, 1.0, 1.0];
 pub const OPTIMIZED: [f32; 4] = [0.55, 0.92, 0.62, 1.0];
 pub const HEAL_RIM: [f32; 4] = [0.42, 0.78, 0.48, 0.95];
@@ -24,7 +24,7 @@ pub const ICON_ROUNDING: f32 = 5.0;
 pub const HEADER_ACCENT_W: f32 = 3.0;
 pub const HEADER_TITLE_GAP: f32 = 10.0;
 
-// ── Runtime theme palette ───────────────────────────────────────────────────
+// Runtime theme palette
 
 /// Every themeable chrome slot, resolved to RGBA. Themes replace RGB only —
 /// each slot keeps the alpha the shipped Tyrian Gold theme uses.
@@ -2028,7 +2028,7 @@ mod tests {
     use super::choya_gap_ms;
     use std::time::{Duration, Instant};
 
-    // ── Theme system ────────────────────────────────────────────────────────
+    // Theme system
 
     /// WCAG 2.x sRGB channel linearization.
     fn srgb_lin(c: f32) -> f64 {

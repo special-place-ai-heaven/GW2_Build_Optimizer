@@ -35,8 +35,6 @@ use gw2_optimizer::validation::validate_gemini_build;
 use serde_json::{json, Value};
 use std::time::Instant;
 
-// ─── Helpers ───
-
 fn gemini_key() -> String {
     std::env::var("GEMINI_API_KEY").expect("Set GEMINI_API_KEY env var to run this test")
 }
@@ -201,7 +199,7 @@ fn run_provider_tests(client: &dyn LlmClient) {
     println!("  [{}] All live tests PASSED", provider);
 }
 
-// ─── Gemini Tests ───
+// Gemini Tests
 
 #[test]
 #[ignore]
@@ -231,7 +229,7 @@ fn test_gemini_invalid_key() {
     );
 }
 
-// ─── OpenAI Tests ───
+// OpenAI Tests
 
 #[test]
 #[ignore]
@@ -261,7 +259,7 @@ fn test_openai_invalid_key() {
     );
 }
 
-// ─── Anthropic Tests ───
+// Anthropic Tests
 
 #[test]
 #[ignore]
@@ -294,7 +292,7 @@ fn test_anthropic_invalid_key() {
     );
 }
 
-// ─── OpenRouter Tests ───
+// OpenRouter Tests
 
 #[test]
 #[ignore]
@@ -326,7 +324,7 @@ fn test_openrouter_invalid_key() {
     );
 }
 
-// ─── Factory Test ───
+// Factory Test
 
 #[test]
 #[ignore]
@@ -397,7 +395,7 @@ fn test_create_client_factory_anthropic() {
     std::fs::remove_dir_all(&tmp).ok();
 }
 
-// ─── Canonical Build Smoke Suite ─────────────────────────────────────────
+// Canonical Build Smoke Suite
 //
 // One command, all three providers: send the canonical new-build prompt
 // and assert the response parses and validates against a real GameDb.

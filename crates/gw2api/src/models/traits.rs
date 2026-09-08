@@ -25,7 +25,6 @@ pub struct Trait {
     pub skills: Vec<TraitSkill>,
 }
 
-/// A skill triggered by a trait.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraitSkill {
     pub id: u32,

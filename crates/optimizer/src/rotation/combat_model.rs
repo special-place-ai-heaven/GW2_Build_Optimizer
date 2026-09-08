@@ -315,6 +315,7 @@ mod tests {
 
     fn skill_with(effects: Vec<SkillEffect>) -> RotationSkill {
         RotationSkill {
+            targets: 1,
             skill_id: 1,
             name: "t".into(),
             slot: SkillSlot::Utility,
@@ -324,6 +325,8 @@ mod tests {
             next_chain: None,
             is_stunbreak: false,
             weapon_set: 0,
+            categories: Vec::new(),
+            slot_name: None,
         }
     }
 
