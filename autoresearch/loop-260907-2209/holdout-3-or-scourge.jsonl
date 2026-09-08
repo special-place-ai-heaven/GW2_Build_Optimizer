@@ -1,0 +1,11 @@
+{"at":"2026-09-08T15:27:47.753Z","event":"start","label":"holdout-3-or-scourge"}
+{"at":"2026-09-08T15:27:49.018Z","event":"prompt","chars":68326,"tools":20}
+{"at":"2026-09-08T15:28:03.100Z","event":"round","turn":1,"max":8,"seconds":8.4,"tools":"search_upgrades, search_upgrades, search_upgrades, search_upgrades, search_upgrades"}
+{"at":"2026-09-08T15:28:08.598Z","event":"round","turn":2,"max":8,"seconds":5.5,"tools":"search_upgrades"}
+{"at":"2026-09-08T15:28:17.197Z","event":"round","turn":3,"max":8,"seconds":8.6,"tools":"search_upgrades"}
+{"at":"2026-09-08T15:28:22.722Z","event":"round","turn":4,"max":8,"seconds":5.5,"tools":"upgrade_synergies"}
+{"at":"2026-09-08T15:28:28.131Z","event":"round","turn":5,"max":8,"seconds":5.4,"tools":"upgrade_synergies"}
+{"at":"2026-09-08T15:28:33.140Z","event":"round","turn":6,"max":8,"seconds":5,"tools":"upgrade_synergies"}
+{"at":"2026-09-08T15:28:39.258Z","event":"round","turn":7,"max":8,"seconds":6.1,"tools":"upgrade_synergies"}
+{"at":"2026-09-08T15:29:29.733Z","event":"result","status":"PASS","model":"google/gemini-3.8-flash","rounds":9,"wire":10,"seconds":100.7,"failure_kind":null,"specs":["Blood Magic","Soul Reaping","Scourge"]}
+{"at":"2026-09-08T15:29:29.777Z","event":"exit","code":0}

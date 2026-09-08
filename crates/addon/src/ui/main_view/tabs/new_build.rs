@@ -40,7 +40,9 @@ fn render_scenario_ready(ui: &Ui, state: &AddonState) {
 }
 
 pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
-    if state.main.selected_character.is_none() {
+    // A plate Choya cooked with no character selected is still a build to
+    // look at; only the empty case needs the hint.
+    if state.main.selected_character.is_none() && state.main.comparison.suggestions.is_empty() {
         theme::wrapped(ui, theme::pal().muted, &t("new_build.select_character"));
         return;
     }
@@ -74,18 +76,14 @@ pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonS
         nexus::imgui::ChildWindow::new("##new_build_scroll")
             .size([0.0, scroll_h])
             .build(ui, || {
-                if let Some(build) = state.main.current_build.clone() {
-                    let stats = state.main.current_stats.clone();
-                    crate::ui::comparison::render_comparison(
-                        ui,
-                        &build,
-                        stats.as_ref(),
-                        &mut state.main.comparison,
-                        state.main.game_db.as_deref(),
-                    );
-                } else {
-                    ui.text_colored(theme::WARN, t("cmp.wait_build"));
-                }
+                let stats = state.main.current_stats.clone();
+                crate::ui::comparison::render_comparison(
+                    ui,
+                    state.main.current_build.clone().as_ref(),
+                    stats.as_ref(),
+                    &mut state.main.comparison,
+                    state.main.game_db.as_deref(),
+                );
                 picked = crate::ui::main_view::provider_picks::render_provider_picks(ui, state);
                 if crate::ui::main_view::provider_picks::take_sync_invite(ui, state) {
                     go_to_settings = true;

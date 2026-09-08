@@ -1,0 +1,3 @@
+{"at":"2026-09-08T15:18:24.313Z","event":"start","label":"guard-3"}
+{"at":"2026-09-08T15:18:41.981Z","event":"guard","status":"PASS","passed":1112,"failed":0,"ignored":4}
+{"at":"2026-09-08T15:18:41.993Z","event":"exit","code":0}

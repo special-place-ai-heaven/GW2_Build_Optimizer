@@ -1548,8 +1548,25 @@ pub(super) fn result_alert_tab(has_current: bool) -> crate::state::MainTab {
 
 pub(super) fn format_provider_issue(err: &str, provider: &str, model: &str) -> String {
     let lower = err.to_lowercase();
-    let detail = if lower.contains("rate limit") || lower.contains("429") {
-        t("err.rate_limited")
+    let detail = if lower.contains("data policy") || lower.contains("guardrail") {
+        // OpenRouter, 404: "0 endpoints out of N requested are available
+        // matching your guardrail restrictions and data policy ... Free
+        // model training". The account's privacy settings exclude the
+        // provider; nothing in the request can change that.
+        t("err.data_policy")
+    } else if lower.contains("rate limit") || lower.contains("429") {
+        // The provider's own words say whose limit it is. OpenRouter:
+        // "temporarily rate-limited upstream" is their pool; Google names
+        // the quota ("per minute", "per day") in the body it sends.
+        if lower.contains("upstream") || lower.contains("shared pool") {
+            t("err.upstream_busy")
+        } else if lower.contains("per day") || lower.contains("perday") || lower.contains("daily") {
+            t("err.daily_quota")
+        } else if lower.contains("per minute") || lower.contains("perminute") {
+            t("err.minute_quota")
+        } else {
+            t("err.rate_limited")
+        }
     } else if lower.contains("invalid api key")
         || lower.contains("401")
         || lower.contains("unauthorized")

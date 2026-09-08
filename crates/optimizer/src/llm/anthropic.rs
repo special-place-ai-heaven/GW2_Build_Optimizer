@@ -66,7 +66,7 @@ struct MessagesRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct AnthropicMessage {
+pub(crate) struct AnthropicMessage {
     role: String,
     content: AnthropicContent,
 }
@@ -530,6 +530,81 @@ fn trim_messages(messages: &mut Vec<AnthropicMessage>, budget_tokens: usize) {
     }
 }
 
+impl super::tool_loop::TurnDriver for AnthropicClient {
+    type Conv = Vec<AnthropicMessage>;
+    type Err = LlmError;
+
+    fn open(&self, prompt: &str) -> Vec<AnthropicMessage> {
+        vec![AnthropicMessage {
+            role: "user".to_string(),
+            content: AnthropicContent::Text(prompt.to_string()),
+        }]
+    }
+    fn trim(&self, conv: &mut Vec<AnthropicMessage>) {
+        trim_messages(conv, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
+    }
+    fn turn(
+        &self,
+        conv: &mut Vec<AnthropicMessage>,
+        tools: Option<&[ToolDefinition]>,
+        _mode: super::tool_loop::TurnMode,
+    ) -> Result<super::tool_loop::Turn, LlmError> {
+        let response = self.send_messages(conv, None, tools, ANTHROPIC_MAX_TOKENS)?;
+        let blocks = response.content.unwrap_or_default();
+        let calls = extract_tool_uses(&blocks)
+            .into_iter()
+            .map(|(id, name, input)| super::tool_loop::ToolCall {
+                id,
+                name,
+                args: input,
+            })
+            .collect();
+        let text = extract_text(&blocks);
+        // Every block goes back as it came: the assistant turn is the
+        // provider's, not a flattening of it.
+        conv.push(AnthropicMessage {
+            role: "assistant".to_string(),
+            content: AnthropicContent::Blocks(blocks),
+        });
+        Ok(super::tool_loop::Turn { text, calls })
+    }
+    fn push_tool_results(
+        &self,
+        conv: &mut Vec<AnthropicMessage>,
+        results: &[(super::tool_loop::ToolCall, Value)],
+    ) {
+        let blocks = results
+            .iter()
+            .map(|(call, value)| ContentBlock::ToolResult {
+                tool_use_id: call.id.clone(),
+                content: serde_json::to_string(value).unwrap_or_default(),
+            })
+            .collect();
+        conv.push(AnthropicMessage {
+            role: "user".to_string(),
+            content: AnthropicContent::Blocks(blocks),
+        });
+    }
+    fn push_user(&self, conv: &mut Vec<AnthropicMessage>, text: &str) {
+        conv.push(AnthropicMessage {
+            role: "user".to_string(),
+            content: AnthropicContent::Text(text.to_string()),
+        });
+    }
+    fn cancelled(&self) -> LlmError {
+        LlmError::Unavailable(CANCELLED.to_string())
+    }
+    fn no_answer(&self, detail: String) -> LlmError {
+        LlmError::Parse(format!("Anthropic: {detail}"))
+    }
+    fn is_deadline(&self, err: &LlmError) -> bool {
+        super::openai_compat::is_deadline(err)
+    }
+    fn is_function_call_failure(&self, err: &LlmError) -> bool {
+        super::openai_compat::is_function_call_failure(err)
+    }
+}
+
 impl LlmClient for AnthropicClient {
     fn provider_name(&self) -> &str {
         "Anthropic"
@@ -659,100 +734,7 @@ impl LlmClient for AnthropicClient {
         max_turns: usize,
         on_progress: &mut dyn FnMut(usize, usize, &[String]),
     ) -> Result<String, LlmError> {
-        let mut messages = vec![AnthropicMessage {
-            role: "user".to_string(),
-            content: AnthropicContent::Text(prompt.to_string()),
-        }];
-
-        let gathering_until = std::time::Instant::now() + super::openai_compat::TOOL_PHASE_BUDGET;
-        for turn in 0..max_turns {
-            // Between turns as well as inside the stream: a tool loop is up to
-            // max_turns whole requests, so checking only inside one of them
-            // still leaves the worker running after the flag flips.
-            if super::cancel::is_cancelled() {
-                return Err(LlmError::Unavailable(CANCELLED.to_string()));
-            }
-            // Out of clock for lookups. Every tool result so far is already in
-            // `messages`, so the closing request below answers from them.
-            if turn > 0 && std::time::Instant::now() >= gathering_until {
-                break;
-            }
-            trim_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
-            let response =
-                self.send_messages(&messages, None, Some(tools), ANTHROPIC_MAX_TOKENS)?;
-
-            let blocks = response.content.unwrap_or_default();
-
-            // Check for tool use
-            let tool_uses = extract_tool_uses(&blocks);
-            if tool_uses.is_empty() {
-                // Done. Only THIS turn's text is the answer: text carried by an
-                // earlier turn arrived alongside that turn's tool calls, which
-                // means the model was still working.
-                return extract_text(&blocks)
-                    .filter(|text| !text.is_empty())
-                    .ok_or_else(|| LlmError::Parse("No response text from Anthropic".into()));
-            }
-
-            // Report progress
-            let tool_names: Vec<String> =
-                tool_uses.iter().map(|(_, name, _)| name.clone()).collect();
-            on_progress(turn + 1, max_turns, &tool_names);
-
-            // Add assistant message with all content blocks
-            messages.push(AnthropicMessage {
-                role: "assistant".to_string(),
-                content: AnthropicContent::Blocks(blocks),
-            });
-
-            // Execute each tool and build result blocks
-            let mut result_blocks = Vec::new();
-            for (tool_use_id, name, input) in &tool_uses {
-                let result = if super::unparseable_tool_input(input) {
-                    input.clone()
-                } else {
-                    execute_tool(name, input)
-                };
-                let result_str = serde_json::to_string(&result).unwrap_or_default();
-                result_blocks.push(ContentBlock::ToolResult {
-                    tool_use_id: tool_use_id.clone(),
-                    content: result_str,
-                });
-            }
-
-            // Tool results go in a user message
-            messages.push(AnthropicMessage {
-                role: "user".to_string(),
-                content: AnthropicContent::Blocks(result_blocks),
-            });
-        }
-
-        // Turns exhausted while the model was still calling tools. Every tool
-        // result is already in `messages`, so one final request with the tools
-        // withheld makes it answer from what it gathered, instead of serving
-        // whatever it happened to say mid-thought. Withholding the tools is
-        // not enough on its own — the system prompt still orders tool use, so
-        // the request also has to countermand it.
-        if super::cancel::is_cancelled() {
-            return Err(LlmError::Unavailable(CANCELLED.to_string()));
-        }
-        // Empty tool list: the caller renders this as "writing", not as
-        // another lookup round. Without it the UI freezes on (N/N) for the
-        // whole closing request, which is the longest one of the run.
-        on_progress(max_turns, max_turns, &[]);
-        messages.push(AnthropicMessage {
-            role: "user".to_string(),
-            content: AnthropicContent::Text(super::openai_compat::CLOSING_TURN.to_string()),
-        });
-        trim_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
-        let closing = self.send_messages(&messages, None, None, ANTHROPIC_MAX_TOKENS)?;
-        extract_text(&closing.content.unwrap_or_default())
-            .filter(|text| !text.is_empty())
-            .ok_or_else(|| {
-                LlmError::Parse(format!(
-                    "Tool loop exceeded {max_turns} turns with no answer"
-                ))
-            })
+        super::tool_loop::run(self, prompt, tools, execute_tool, max_turns, on_progress)
     }
 
     fn list_models(&self) -> Result<Vec<super::ModelInfo>, LlmError> {
@@ -764,7 +746,7 @@ impl LlmClient for AnthropicClient {
         match resp.status().as_u16() {
             200 => {}
             401 => return Err(LlmError::InvalidKey),
-            429 => return Err(LlmError::RateLimited),
+            429 => return Err(LlmError::RateLimited(read_body_capped(resp))),
             status => {
                 let body = read_body_capped(resp);
                 return Err(LlmError::Api {

@@ -1171,6 +1171,9 @@ pub fn calculate_validated_stats(
 pub struct PreparedRotation {
     pub skills: Vec<rotation::RotationSkill>,
     pub params: rotation::simulator::SimParams,
+    /// Skill ids in the order a published page says to press them. Empty
+    /// means the timeline improvises from the first tick.
+    pub opener: Vec<u32>,
     profession_name: String,
 }
 
@@ -1323,6 +1326,7 @@ pub fn prepare_validated_rotation(
     };
 
     Some(PreparedRotation {
+        opener: Vec::new(),
         skills: rotation_skills,
         params,
         profession_name: profession_name.to_string(),
@@ -1383,6 +1387,7 @@ pub fn simulate_prepared(
         result.wvw = Some(rotation::wvw_timeline::evaluate_wvw_timeline(
             rotation::wvw_timeline::WvwTimelineInput {
                 skills: rotation_skills,
+                opener: &prepared.opener,
                 duration_ms,
                 params,
                 enemy,

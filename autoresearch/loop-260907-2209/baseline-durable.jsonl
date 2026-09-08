@@ -1,0 +1,21 @@
+{"at":"2026-09-07T22:27:43.567Z","event":"start","label":"baseline-durable"}
+{"at":"2026-09-07T22:27:44.856Z","event":"prompt","chars":65516,"tools":20}
+{"at":"2026-09-07T22:27:58.619Z","event":"round","turn":1,"max":8,"seconds":7.7,"tools":"calculate_stats, calculate_stats, search_upgrades, search_upgrades"}
+{"at":"2026-09-07T22:28:08.812Z","event":"round","turn":2,"max":8,"seconds":10.2,"tools":"search_upgrades, search_upgrades"}
+{"at":"2026-09-07T22:28:21.482Z","event":"round","turn":3,"max":8,"seconds":12.7,"tools":"get_trait_details, get_trait_details"}
+{"at":"2026-09-07T22:28:43.484Z","event":"round","turn":4,"max":8,"seconds":22,"tools":"get_build_synergy_report"}
+{"at":"2026-09-07T22:29:01.029Z","event":"round","turn":5,"max":8,"seconds":17.5,"tools":"simulate_combat"}
+{"at":"2026-09-07T22:29:07.457Z","event":"round","turn":6,"max":8,"seconds":6.4,"tools":"get_skill_info"}
+{"at":"2026-09-07T22:29:27.747Z","event":"result","status":"PASS","model":"google/gemini-3.8-flash","rounds":8,"wire":9,"seconds":102.9}
+{"at":"2026-09-07T22:29:43.363Z","event":"round","turn":1,"max":2,"seconds":11.1,"tools":"find_synergies"}
+{"at":"2026-09-07T22:30:00.306Z","event":"result","status":"FAIL","model":"inclusionai/ling-3.0-flash-sante:free","rounds":3,"wire":4,"seconds":32.6}
+{"at":"2026-09-07T22:30:13.702Z","event":"round","turn":1,"max":8,"seconds":8.1,"tools":"calculate_stats, search_upgrades, search_upgrades"}
+{"at":"2026-09-07T22:30:18.695Z","event":"round","turn":2,"max":8,"seconds":5,"tools":"search_upgrades, search_upgrades"}
+{"at":"2026-09-07T22:31:04.363Z","event":"result","status":"PASS","model":"google/gemini-3.8-flash","rounds":4,"wire":5,"seconds":64.1}
+{"at":"2026-09-07T22:31:46.414Z","event":"result","status":"PASS","model":"inclusionai/ling-3.0-flash-sante:free","rounds":2,"wire":3,"seconds":42.1}
+{"at":"2026-09-07T22:31:58.518Z","event":"round","turn":1,"max":8,"seconds":6.2,"tools":"search_upgrades, search_upgrades, calculate_stats, calculate_stats"}
+{"at":"2026-09-07T22:32:03.781Z","event":"round","turn":2,"max":8,"seconds":5.3,"tools":"upgrade_synergies"}
+{"at":"2026-09-07T22:32:09.666Z","event":"round","turn":3,"max":8,"seconds":5.9,"tools":"search_upgrades, search_upgrades"}
+{"at":"2026-09-07T22:32:43.852Z","event":"result","status":"FAIL","model":"google/gemini-3.8-flash","rounds":5,"wire":6,"seconds":57.4}
+{"at":"2026-09-07T22:33:14.630Z","event":"result","status":"FAIL","model":"inclusionai/ling-3.0-flash-sante:free","rounds":2,"wire":4,"seconds":30.8}
+{"at":"2026-09-07T22:33:14.636Z","event":"exit","code":1}

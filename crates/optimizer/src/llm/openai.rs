@@ -10,8 +10,8 @@ use serde_json::Value;
 
 use super::body::{json_capped, read_body_capped};
 use super::openai_compat::{
-    closing_request, http_client, is_function_call_failure, send_chat, Message, ProviderCore,
-    CHAT_REQUEST_TIMEOUT, MAX_COMPLETION_TOKENS, METADATA_TIMEOUT,
+    http_client, send_chat, Message, ProviderCore, CHAT_REQUEST_TIMEOUT, MAX_COMPLETION_TOKENS,
+    METADATA_TIMEOUT,
 };
 use super::rate::{persist_usage, PersistedUsage, RateTracker};
 use super::trim::trim_openai_messages;
@@ -78,7 +78,25 @@ impl OpenAiClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, LlmError> {
-        self.send_chat_capped(messages, tools, MAX_COMPLETION_TOKENS)
+        self.send_chat_capped(
+            messages,
+            tools,
+            MAX_COMPLETION_TOKENS,
+            CHAT_REQUEST_TIMEOUT,
+            None,
+        )
+    }
+
+    /// The request that writes the plate: small cap, its own deadline. See
+    /// [`super::openai_compat::CLOSING_MAX_TOKENS`].
+    fn send_closing(&self, messages: &[Message]) -> Result<Message, LlmError> {
+        self.send_chat_capped(
+            messages,
+            None,
+            super::openai_compat::CLOSING_MAX_TOKENS,
+            super::openai_compat::CLOSING_REQUEST_TIMEOUT,
+            None,
+        )
     }
 
     /// `send_chat` with an explicit completion budget (see `generate_brief`).
@@ -87,10 +105,13 @@ impl OpenAiClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
         max_tokens: u32,
+        request_timeout: std::time::Duration,
+        tool_choice: Option<&'static str>,
     ) -> Result<Message, LlmError> {
         let extra_headers: [(&str, String); 0] = [];
         let is_cancelled = super::cancel::is_cancelled;
         let core = ProviderCore {
+            tool_choice,
             http: &self.http,
             rate: &self.rate,
             api_key: &self.api_key,
@@ -107,7 +128,9 @@ impl OpenAiClient {
             reasoning_effort: None,
             supports_provider_prefs: false,
             require_tool_endpoints: tools.is_some(),
-            request_timeout: CHAT_REQUEST_TIMEOUT,
+            provider_sort: None,
+            response_format: None,
+            request_timeout,
             max_retries: 2,
             is_cancelled: &is_cancelled,
         };
@@ -122,6 +145,54 @@ impl OpenAiClient {
 
     fn persist_usage(&self, rate: &RateTracker) {
         persist_usage(self.usage_path.as_deref(), rate);
+    }
+}
+
+impl super::tool_loop::TurnDriver for OpenAiClient {
+    type Conv = Vec<Message>;
+    type Err = LlmError;
+
+    fn open(&self, prompt: &str) -> Vec<Message> {
+        let mut conv = Vec::new();
+        super::openai_compat::push_user(&mut conv, prompt);
+        conv
+    }
+    fn trim(&self, conv: &mut Vec<Message>) {
+        trim_openai_messages(conv, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
+    }
+    fn turn(
+        &self,
+        conv: &mut Vec<Message>,
+        tools: Option<&[ToolDefinition]>,
+        mode: super::tool_loop::TurnMode,
+    ) -> Result<super::tool_loop::Turn, LlmError> {
+        let message = match (mode, tools) {
+            (super::tool_loop::TurnMode::Explore, tools) => self.send_chat(conv, tools)?,
+            (super::tool_loop::TurnMode::Closing, _) => self.send_closing(conv)?,
+        };
+        Ok(super::openai_compat::absorb_turn(conv, message))
+    }
+    fn push_tool_results(
+        &self,
+        conv: &mut Vec<Message>,
+        results: &[(super::tool_loop::ToolCall, Value)],
+    ) {
+        super::openai_compat::push_tool_results(conv, results);
+    }
+    fn push_user(&self, conv: &mut Vec<Message>, text: &str) {
+        super::openai_compat::push_user(conv, text);
+    }
+    fn cancelled(&self) -> LlmError {
+        LlmError::Unavailable(super::cancel::CANCELLED.to_string())
+    }
+    fn no_answer(&self, detail: String) -> LlmError {
+        LlmError::Parse(format!("OpenAI: {detail}"))
+    }
+    fn is_deadline(&self, err: &LlmError) -> bool {
+        super::openai_compat::is_deadline(err)
+    }
+    fn is_function_call_failure(&self, err: &LlmError) -> bool {
+        super::openai_compat::is_function_call_failure(err)
     }
 }
 
@@ -249,7 +320,8 @@ impl LlmClient for OpenAiClient {
             tool_call_id: None,
             reasoning_details: None,
         }];
-        let response = self.send_chat_capped(&messages, None, max_tokens)?;
+        let response =
+            self.send_chat_capped(&messages, None, max_tokens, CHAT_REQUEST_TIMEOUT, None)?;
         response
             .content
             .ok_or_else(|| LlmError::Parse("No response text from OpenAI".into()))
@@ -274,109 +346,7 @@ impl LlmClient for OpenAiClient {
         max_turns: usize,
         on_progress: &mut dyn FnMut(usize, usize, &[String]),
     ) -> Result<String, LlmError> {
-        let mut messages = vec![Message {
-            role: "user".to_string(),
-            content: Some(prompt.to_string()),
-            tool_calls: None,
-            tool_call_id: None,
-            reasoning_details: None,
-        }];
-
-        let gathering_until = std::time::Instant::now() + super::openai_compat::TOOL_PHASE_BUDGET;
-        for turn in 0..max_turns {
-            // Between turns as well as inside the stream: a tool loop is up to
-            // max_turns whole requests, so checking only inside one of them
-            // still leaves the worker running after the flag flips.
-            if super::cancel::is_cancelled() {
-                return Err(LlmError::Unavailable(super::cancel::CANCELLED.to_string()));
-            }
-            // Out of clock for lookups. Every tool result so far is already in
-            // `messages`, so the closing request below answers from them.
-            if turn > 0 && std::time::Instant::now() >= gathering_until {
-                break;
-            }
-            trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
-            let response = match self.send_chat(&messages, Some(tools)) {
-                Ok(response) => response,
-                // The model cannot drive our tools at all. Losing the whole
-                // conversation over that is worse than answering without them.
-                Err(e) if is_function_call_failure(&e) => {
-                    self.send_chat(&closing_request(&messages), None)?
-                }
-                // One round ran out its deadline. Earlier rounds gathered real
-                // tool results and throwing them away to report a stopwatch is
-                // the worst of both: the player waited and got nothing. Break
-                // to the closing request and answer from what is in hand.
-                Err(e) if super::openai_compat::is_deadline(&e) && turn > 0 => break,
-                Err(e) => return Err(e),
-            };
-
-            // Check for tool calls
-            let tool_calls = match response.tool_calls {
-                Some(ref calls) if !calls.is_empty() => calls.clone(),
-                _ => {
-                    // Done. Only THIS turn's text is the answer: text carried
-                    // by an earlier turn arrived alongside that turn's tool
-                    // calls, which means the model was still working.
-                    return response
-                        .content
-                        .filter(|text| !text.is_empty())
-                        .ok_or_else(|| LlmError::Parse("No response text from OpenAI".into()));
-                }
-            };
-
-            // Report progress
-            let tool_names: Vec<String> = tool_calls
-                .iter()
-                .map(|tc| tc.function.name.clone())
-                .collect();
-            on_progress(turn + 1, max_turns, &tool_names);
-
-            // Add assistant message (with tool_calls) to conversation
-            messages.push(response);
-
-            // Execute each tool call and add responses
-            for tc in &tool_calls {
-                // OpenAI sends arguments as a JSON *string*. Truncated JSON
-                // is an error the model can retry — not an empty-object run.
-                let result = super::run_tool_or_parse_error(
-                    execute_tool,
-                    &tc.function.name,
-                    &tc.function.arguments,
-                );
-                let result_str = serde_json::to_string(&result).unwrap_or_default();
-
-                messages.push(Message {
-                    role: "tool".to_string(),
-                    content: Some(result_str),
-                    tool_calls: None,
-                    tool_call_id: Some(tc.id.clone()),
-                    reasoning_details: None,
-                });
-            }
-        }
-
-        // Turns exhausted while the model was still calling tools. Every tool
-        // result is already in `messages`, so one final request with the tools
-        // withheld makes it answer from what it gathered, instead of serving
-        // whatever it happened to say mid-thought.
-        if super::cancel::is_cancelled() {
-            return Err(LlmError::Unavailable(super::cancel::CANCELLED.to_string()));
-        }
-        // Empty tool list: the caller renders this as "writing", not as
-        // another lookup round. Without it the UI freezes on (N/N) for the
-        // whole closing request, which is the longest one of the run.
-        on_progress(max_turns, max_turns, &[]);
-        let mut messages = closing_request(&messages);
-        trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
-        self.send_chat(&messages, None)?
-            .content
-            .filter(|text| !text.is_empty())
-            .ok_or_else(|| {
-                LlmError::Parse(format!(
-                    "Tool loop exceeded {max_turns} turns with no answer"
-                ))
-            })
+        super::tool_loop::run(self, prompt, tools, execute_tool, max_turns, on_progress)
     }
 
     fn list_models(&self) -> Result<Vec<super::ModelInfo>, LlmError> {
@@ -392,7 +362,7 @@ impl LlmClient for OpenAiClient {
         match resp.status().as_u16() {
             200 => {}
             401 => return Err(LlmError::InvalidKey),
-            429 => return Err(LlmError::RateLimited),
+            429 => return Err(LlmError::RateLimited(read_body_capped(resp))),
             status => {
                 let body = read_body_capped(resp);
                 return Err(LlmError::Api {
@@ -538,7 +508,7 @@ mod tests {
             "a fresh client must inherit the minute window, not reset it"
         );
         assert!(
-            matches!(rate.check_and_reserve(), Err(LlmError::RateLimited)),
+            matches!(rate.check_and_reserve(), Err(LlmError::RateLimited(_))),
             "the RPM limit must still bite after create_client"
         );
         drop(rate);

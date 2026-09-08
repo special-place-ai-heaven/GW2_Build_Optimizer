@@ -422,6 +422,13 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
 /// to a chat model, they are noise in a list someone has to read.
 fn model_catalog(state: &AddonState) -> Vec<gw2_optimizer::llm::ModelInfo> {
     if !state.main.available_models.is_empty() {
+        // Every model that can drive tools and answer in text. Structured
+        // output ORDERS the list (see `ModelInfo::rank`); it does not gate it.
+        // Gating on it was tried 2026-09-07 and left two free models in the
+        // picker, both of which the player's OpenRouter data policy then
+        // refused, while the free models that had been working were hidden.
+        // A model without schema support gets its plate from the repair
+        // request; that is a slower path, not a broken one.
         return state
             .main
             .available_models
@@ -532,7 +539,9 @@ pub(in crate::ui::main_view) fn render_talk_model_row(ui: &Ui, state: &mut Addon
         stats::start_fetch_models(state);
     }
     let current_model = state.config.active_model_id().to_string();
-    let display_models = model_catalog(state);
+    // The same list Settings shows: the Free switch is one preference, not
+    // one per screen (the talk row ignored it until 2026-09-07).
+    let display_models = visible_models(state, &model_catalog(state));
     let preview = display_models
         .iter()
         .find(|m| m.id == current_model)
@@ -705,6 +714,16 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     ui.set_cursor_screen_pos([origin[0], origin[1] + row_h + 4.0]);
     if let Some(ref err) = state.main.models_error {
         ui.text_colored([1.0, 0.5, 0.0, 1.0], format!("  {}", err));
+    }
+    // Seven of this player's fifteen free OpenRouter models answered 404
+    // "guardrail restrictions and data policy" (2026-09-07): an account
+    // setting the addon cannot change, and nothing in the picker said so.
+    if matches!(
+        state.config.active_provider,
+        gw2_core::config::LlmProvider::OpenRouter
+    ) && any_free
+    {
+        theme::wrapped(ui, theme::pal().muted, &t("settings.data_sharing_hint"));
     }
 
     ui.spacing();
@@ -920,16 +939,15 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32, theme_align
         ui.text(t("settings.font"));
         ui.set_next_item_width(pair_w);
         let current_font = state.config.ui_font.clone();
-        let font_preview = t(crate::ui::fonts::label_key(&current_font));
+        let font_preview = crate::ui::fonts::label_for(&current_font);
         if let Some(_c) = ComboBox::new("##ui_font")
             .preview_value(&font_preview)
             .begin(ui)
         {
-            for (id, key) in crate::ui::fonts::combo_options() {
-                let label = t(key);
+            for (id, label) in crate::ui::fonts::combo_options(&state.config.ui_language) {
                 let sel = current_font == id;
                 if Selectable::new(&label).selected(sel).build(ui) && !sel {
-                    state.config.ui_font = id.to_string();
+                    state.config.ui_font = id;
                     crate::ui::save_config_detached(state);
                 }
             }

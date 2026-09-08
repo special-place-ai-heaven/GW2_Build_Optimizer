@@ -1099,6 +1099,21 @@ pub fn evaluate_validated_build(
     ctx: &BalanceContext,
     scenario: &ScenarioSpec,
 ) -> RefereeReport {
+    evaluate_validated_build_with(validated, db, profession_name, weights, ctx, scenario, &[])
+}
+
+/// Same referee, but the WvW timeline presses `opener` (skill ids, in
+/// order) before improvising — the rotation a published page wrote, parsed
+/// by `rotation::prose::parse_rotation`.
+pub fn evaluate_validated_build_with(
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+    opener: &[u32],
+) -> RefereeReport {
     let (stats, modifiers) = engine::calculate_validated_stats(validated, db, profession_name, ctx);
     let derived = stats::compute_derived(&stats, profession_name);
     let buff_profiles = combat::buff_profiles_for_profession(profession_name, ctx);
@@ -1137,7 +1152,12 @@ pub fn evaluate_validated_build(
         CombatTier::Party => combat_party.clone(),
         CombatTier::Squad => combat_squad.clone(),
     };
-    let prepared = engine::prepare_validated_rotation(validated, db, &stats, Some(scenario));
+    let prepared = engine::prepare_validated_rotation(validated, db, &stats, Some(scenario)).map(
+        |mut prepared| {
+            prepared.opener = opener.to_vec();
+            prepared
+        },
+    );
     let rotation = prepared
         .as_ref()
         .map(|p| engine::simulate_prepared(p, validated, db, Some(scenario)));

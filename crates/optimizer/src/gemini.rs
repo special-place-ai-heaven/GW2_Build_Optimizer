@@ -9,6 +9,7 @@
 //! is the addon's default pipeline, so it had the most to lose from being the
 //! one client with its own rules.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -42,8 +43,8 @@ pub enum GeminiError {
     Api { status: u16, message: String },
     #[error("Invalid API key")]
     InvalidKey,
-    #[error("Rate limited — try again later")]
-    RateLimited,
+    #[error("Rate limited: {0}")]
+    RateLimited(String),
     #[error("Parse error: {0}")]
     Parse(String),
     #[error("LLM unavailable: {0}")]
@@ -57,6 +58,97 @@ pub struct GeminiClient {
     cache: crate::llm::response_cache::ResponseCache,
     rate: Mutex<RateTracker>,
     usage_path: Option<PathBuf>,
+}
+
+impl crate::llm::tool_loop::TurnDriver for GeminiClient {
+    type Conv = Vec<Content>;
+    type Err = GeminiError;
+
+    fn open(&self, prompt: &str) -> Vec<Content> {
+        vec![Content {
+            role: Some("user".into()),
+            parts: vec![Part::text(prompt)],
+        }]
+    }
+    fn trim(&self, conv: &mut Vec<Content>) {
+        trim_contents(conv, crate::llm::trim::SAFE_PROMPT_BUDGET_TOKENS);
+    }
+    fn turn(
+        &self,
+        conv: &mut Vec<Content>,
+        tools: Option<&[crate::llm::ToolDefinition]>,
+        mode: crate::llm::tool_loop::TurnMode,
+    ) -> Result<crate::llm::tool_loop::Turn, GeminiError> {
+        let tools = tools.map(|defs| {
+            vec![Tool {
+                function_declarations: defs
+                    .iter()
+                    .map(|d| FunctionDeclaration {
+                        name: d.name.clone(),
+                        description: d.description.clone(),
+                        parameters: d.parameters.clone(),
+                    })
+                    .collect(),
+            }]
+        });
+        let content = self.send_request(&GenerateRequest {
+            contents: conv.clone(),
+            tools,
+            generation_config: matches!(mode, crate::llm::tool_loop::TurnMode::Closing).then(
+                || GenerationConfig {
+                    max_output_tokens: crate::llm::openai_compat::CLOSING_MAX_TOKENS,
+                },
+            ),
+        })?;
+        let text = content.parts.iter().find_map(|p| p.text.clone());
+        let calls = content
+            .parts
+            .iter()
+            .filter_map(|p| p.function_call.as_ref())
+            .map(|fc| crate::llm::tool_loop::ToolCall {
+                // Gemini matches responses by name, not by id.
+                id: fc.name.clone(),
+                name: fc.name.clone(),
+                args: fc.args.clone(),
+            })
+            .collect();
+        conv.push(content);
+        Ok(crate::llm::tool_loop::Turn { text, calls })
+    }
+    fn push_tool_results(
+        &self,
+        conv: &mut Vec<Content>,
+        results: &[(crate::llm::tool_loop::ToolCall, serde_json::Value)],
+    ) {
+        conv.push(Content {
+            role: Some("user".into()),
+            parts: results
+                .iter()
+                .map(|(call, value)| Part::function_response(&call.name, value.clone()))
+                .collect(),
+        });
+    }
+    fn push_user(&self, conv: &mut Vec<Content>, text: &str) {
+        conv.push(Content {
+            role: Some("user".into()),
+            parts: vec![Part::text(text)],
+        });
+    }
+    fn cancelled(&self) -> GeminiError {
+        GeminiError::Unavailable(CANCELLED.to_string())
+    }
+    fn no_answer(&self, detail: String) -> GeminiError {
+        GeminiError::Parse(format!("Gemini: {detail}"))
+    }
+    fn is_deadline(&self, err: &GeminiError) -> bool {
+        err.to_string()
+            .contains(crate::llm::openai_compat::DEADLINE_MARKER)
+    }
+    fn is_function_call_failure(&self, err: &GeminiError) -> bool {
+        err.to_string()
+            .to_ascii_uppercase()
+            .contains("MALFORMED_FUNCTION_CALL")
+    }
 }
 
 impl GeminiClient {
@@ -98,8 +190,18 @@ impl GeminiClient {
 
 /// Length of the per-minute window.
 const MINUTE: Duration = Duration::from_secs(60);
+/// Requests per minute assumed for a model until Google says otherwise.
+/// The older free-tier Flash models allow 10; `gemini-3.8-flash` allows 5,
+/// which its first 429 teaches the tracker (`learn_rpm`).
+const DEFAULT_RPM: u32 = 10;
+/// Longest a per-minute quota is waited out rather than reported.
+const MAX_QUOTA_WAIT: Duration = Duration::from_secs(65);
 
 struct RateTracker {
+    /// Which model's per-minute quota applies. Empty in unit tests.
+    model: String,
+    /// Per-minute limits Google has stated, by model, kept across runs.
+    rpm_limits: HashMap<String, u32>,
     requests_this_minute: u32,
     minute_start: Instant,
     requests_today: u32,
@@ -121,6 +223,8 @@ struct PersistedUsage {
     minute_start_epoch: u64,
     #[serde(default)]
     requests_this_minute: u32,
+    #[serde(default)]
+    rpm_limits: HashMap<String, u32>,
 }
 
 fn current_epoch_secs() -> u64 {
@@ -137,11 +241,45 @@ fn current_epoch_day() -> u64 {
 impl RateTracker {
     fn new() -> Self {
         Self {
+            model: String::new(),
+            rpm_limits: HashMap::new(),
             requests_this_minute: 0,
             minute_start: Instant::now(),
             requests_today: 0,
             current_day: current_epoch_day(),
         }
+    }
+
+    fn for_model(mut self, model: &str) -> Self {
+        self.model = model.to_string();
+        self
+    }
+
+    fn rpm_limit(&self) -> u32 {
+        self.stated_rpm().unwrap_or(DEFAULT_RPM)
+    }
+
+    /// The per-minute quota Google has actually stated for this model, if
+    /// any. `None` is not "generous": it is "not yet told", and a fresh
+    /// free-tier key spends its 20-a-day finding out.
+    fn stated_rpm(&self) -> Option<u32> {
+        self.rpm_limits.get(&self.model).copied()
+    }
+
+    /// Google stated this model's per-minute quota in a 429; keep it.
+    fn learn_rpm(&mut self, limit: u32) {
+        self.rpm_limits.insert(self.model.clone(), limit.max(1));
+    }
+
+    /// How long until the window admits another request, if it is full.
+    /// Pacing to this beats spending the request on a 429: a run that needs
+    /// six requests on a five-a-minute tier then waits instead of failing
+    /// (gemini-3.8-flash free tier, in-game 2026-09-07).
+    fn wait_for_window(&self) -> Option<Duration> {
+        if self.requests_this_minute < self.rpm_limit() {
+            return None;
+        }
+        MINUTE.checked_sub(self.minute_start.elapsed())
     }
 
     fn from_persisted(persisted: PersistedUsage) -> Self {
@@ -168,6 +306,8 @@ impl RateTracker {
         };
 
         Self {
+            model: String::new(),
+            rpm_limits: persisted.rpm_limits,
             requests_this_minute,
             minute_start,
             requests_today,
@@ -194,8 +334,11 @@ impl RateTracker {
             self.minute_start = now;
         }
 
-        if self.requests_this_minute >= 10 {
-            return Err(GeminiError::RateLimited);
+        if self.requests_this_minute >= self.rpm_limit() {
+            return Err(GeminiError::RateLimited(format!(
+                "{} requests per minute on this model",
+                self.rpm_limit()
+            )));
         }
         if self.requests_today >= 240 {
             return Err(GeminiError::Unavailable(
@@ -243,8 +386,70 @@ impl RateTracker {
             requests_today: self.requests_today,
             minute_start_epoch: current_epoch_secs().saturating_sub(age),
             requests_this_minute: self.requests_this_minute,
+            rpm_limits: self.rpm_limits.clone(),
         }
     }
+}
+
+/// A quota refusal, as Google states it in a 429 body:
+/// `QuotaFailure.violations[].quotaId` naming `PerMinute` or `PerDay` with a
+/// `quotaValue`, and `RetryInfo.retryDelay` ("39s"). Measured 2026-09-07 on
+/// the free tier of gemini-3.8-flash: 5 per minute, **20 per day**.
+struct QuotaRefusal {
+    limit: u32,
+    per_day: bool,
+    retry_after: Duration,
+}
+
+impl QuotaRefusal {
+    fn summary(&self) -> String {
+        if self.per_day {
+            format!(
+                "{} requests per day on this model's free tier; it resets at midnight Pacific time",
+                self.limit
+            )
+        } else {
+            format!(
+                "{} requests per minute on this model's tier; Google asked for {}s",
+                self.limit,
+                self.retry_after.as_secs()
+            )
+        }
+    }
+}
+
+fn quota_refusal(body: &str) -> Option<QuotaRefusal> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    let details = v["error"]["details"].as_array()?;
+    let mut limit = None;
+    let mut per_day = false;
+    let mut retry_after = None;
+    for d in details {
+        if let Some(violations) = d["violations"].as_array() {
+            for violation in violations {
+                let id = violation["quotaId"].as_str().unwrap_or_default();
+                if id.contains("PerMinute") || id.contains("PerDay") {
+                    per_day = id.contains("PerDay");
+                    limit = violation["quotaValue"]
+                        .as_str()
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .or_else(|| violation["quotaValue"].as_u64().map(|n| n as u32));
+                }
+            }
+        }
+        if let Some(delay) = d["retryDelay"].as_str() {
+            retry_after = delay
+                .trim_end_matches('s')
+                .parse::<f64>()
+                .ok()
+                .map(Duration::from_secs_f64);
+        }
+    }
+    Some(QuotaRefusal {
+        limit: limit?,
+        per_day,
+        retry_after: retry_after.unwrap_or(MINUTE),
+    })
 }
 
 /// Holds the rate slot taken by [`RateTracker::check_and_reserve`] and gives
@@ -300,10 +505,20 @@ struct GenerateRequest {
     contents: Vec<Content>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<Tool>>,
+    /// Set on the closing turn only: the plate is ~600 tokens, and a model
+    /// left uncapped has reasoned for minutes on that request.
+    #[serde(rename = "generationConfig", skip_serializing_if = "Option::is_none")]
+    generation_config: Option<GenerationConfig>,
+}
+
+#[derive(Serialize)]
+struct GenerationConfig {
+    #[serde(rename = "maxOutputTokens")]
+    max_output_tokens: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct Content {
+pub(crate) struct Content {
     #[serde(skip_serializing_if = "Option::is_none")]
     role: Option<String>,
     parts: Vec<Part>,
@@ -319,6 +534,16 @@ struct Part {
     function_call: Option<FunctionCall>,
     #[serde(rename = "functionResponse", skip_serializing_if = "Option::is_none")]
     function_response: Option<FunctionResponse>,
+    /// Gemini 3 signs each function call with an opaque thought signature
+    /// and refuses the next turn if the call comes back without it
+    /// ("Function call is missing a thought_signature in functionCall
+    /// parts", 400, in-game 2026-09-07 on gemini-3.8-flash). Carried back
+    /// verbatim; never inspected.
+    #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
+    thought_signature: Option<String>,
+    /// Marks a thinking part; kept so a round-tripped turn stays as it came.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thought: Option<bool>,
 }
 
 impl Part {
@@ -327,6 +552,8 @@ impl Part {
             text: Some(s.into()),
             function_call: None,
             function_response: None,
+            thought_signature: None,
+            thought: None,
         }
     }
 
@@ -338,6 +565,8 @@ impl Part {
                 name: name.into(),
                 response,
             }),
+            thought_signature: None,
+            thought: None,
         }
     }
 }
@@ -461,6 +690,8 @@ fn read_gemini_stream<R: std::io::Read>(reader: R) -> Result<Content, GeminiErro
                     text: None,
                     function_call: Some(call),
                     function_response: None,
+                    thought_signature: part.thought_signature,
+                    thought: None,
                 });
             }
         }
@@ -551,7 +782,7 @@ fn denied_from_body(status: u16, body: &str) -> GeminiError {
     }
     match status {
         403 => GeminiError::InvalidKey,
-        429 => GeminiError::RateLimited,
+        429 => GeminiError::RateLimited(body.to_string()),
         _ => GeminiError::Api {
             status,
             message: body.to_string(),
@@ -659,7 +890,7 @@ impl GeminiClient {
             model: model.to_string(),
             http: gemini_http_client()?,
             cache: crate::llm::response_cache::ResponseCache::new(1800, 64),
-            rate: Mutex::new(RateTracker::new()),
+            rate: Mutex::new(RateTracker::new().for_model(model)),
             usage_path: None,
         })
     }
@@ -688,7 +919,7 @@ impl GeminiClient {
             model: model.to_string(),
             http: gemini_http_client()?,
             cache: crate::llm::response_cache::ResponseCache::new(1800, 64),
-            rate: Mutex::new(rate),
+            rate: Mutex::new(rate.for_model(model)),
             usage_path: Some(usage_path),
         })
     }
@@ -801,9 +1032,23 @@ impl GeminiClient {
         Ok(text)
     }
 
+    /// Whether a run should spend as few requests as it can. Yes until
+    /// Google has stated a per-minute quota at or above the default: an
+    /// assumed 10 is not evidence that eight lookups are affordable, and a
+    /// paid key loses nothing but a few lookups the reference already
+    /// covers.
+    pub fn thrifty(&self) -> bool {
+        self.rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .stated_rpm()
+            .is_none_or(|stated| stated < DEFAULT_RPM)
+    }
+
     /// Send a prompt to Gemini (no caching). Checks rate limits first.
     pub fn generate(&self, prompt: &str) -> Result<String, GeminiError> {
         let request = GenerateRequest {
+            generation_config: None,
             contents: vec![Content {
                 role: Some("user".into()),
                 parts: vec![Part::text(prompt)],
@@ -848,109 +1093,18 @@ impl GeminiClient {
         max_turns: usize,
         on_progress: &mut dyn FnMut(usize, usize, &[String]),
     ) -> Result<String, GeminiError> {
-        let mut contents = vec![Content {
-            role: Some("user".into()),
-            parts: vec![Part::text(prompt)],
-        }];
-
-        let mut last_text: Option<String> = None;
-
-        let gathering_until =
-            std::time::Instant::now() + crate::llm::openai_compat::TOOL_PHASE_BUDGET;
-        for turn in 0..max_turns {
-            // Between turns as well as inside the stream: a tool loop is up to
-            // max_turns whole requests, so checking only inside one of them
-            // still leaves the worker running after the flag flips.
-            if is_cancelled() {
-                return Err(GeminiError::Unavailable(CANCELLED.to_string()));
-            }
-            // Out of clock for lookups. Every function response so far is
-            // already in `contents`, so the closing request below answers
-            // from them.
-            if turn > 0 && std::time::Instant::now() >= gathering_until {
-                break;
-            }
-            trim_contents(&mut contents, crate::llm::trim::SAFE_PROMPT_BUDGET_TOKENS);
-            let request = GenerateRequest {
-                contents: contents.clone(),
-                tools: Some(tools.clone()),
-            };
-
-            let response_content = self.send_request(&request)?;
-
-            // Capture any text from this response (Gemini may send text + calls)
-            if let Some(text) = response_content.parts.iter().find_map(|p| p.text.clone()) {
-                last_text = Some(text);
-            }
-
-            // Check if model wants to call a function
-            let function_calls: Vec<&FunctionCall> = response_content
-                .parts
-                .iter()
-                .filter_map(|p| p.function_call.as_ref())
-                .collect();
-
-            if function_calls.is_empty() {
-                // No function calls — return text response
-                return last_text
-                    .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()));
-            }
-
-            // Report progress: which tools are being called this turn
-            let tool_names: Vec<String> = function_calls.iter().map(|fc| fc.name.clone()).collect();
-            on_progress(turn + 1, max_turns, &tool_names);
-
-            // Add model's response to conversation history
-            contents.push(response_content.clone());
-
-            // Execute each function call and build response parts
-            let mut response_parts = Vec::new();
-            for fc in &function_calls {
-                let result = execute_tool(&fc.name, &fc.args);
-                response_parts.push(Part::function_response(&fc.name, result));
-            }
-
-            // Send function responses back
-            contents.push(Content {
-                role: Some("user".into()),
-                parts: response_parts,
-            });
-        }
-
-        // Gathering is over, either on turns or on the clock, and the model was
-        // still calling tools. Every function response is already in
-        // `contents`, so one request with the tools withheld makes it answer
-        // from what it gathered - the same exit the OpenAI-compatible clients
-        // take. Without it this path returned "Tool loop exceeded 8 turns with
-        // no text response", which is the "no result" a player reports.
-        if is_cancelled() {
-            return Err(GeminiError::Unavailable(CANCELLED.to_string()));
-        }
-        // Empty tool list: the caller renders this as "writing", not as
-        // another lookup round.
-        on_progress(max_turns, max_turns, &[]);
-        contents.push(Content {
-            role: Some("user".into()),
-            parts: vec![Part::text(crate::llm::openai_compat::CLOSING_TURN)],
-        });
-        trim_contents(&mut contents, crate::llm::trim::SAFE_PROMPT_BUDGET_TOKENS);
-        let closing = self.send_request(&GenerateRequest {
-            contents,
-            tools: None,
-        });
-        let closing_text = match closing {
-            Ok(content) => content.parts.iter().find_map(|p| p.text.clone()),
-            // The closing request is the last chance, not the only evidence:
-            // text from an earlier turn still beats an error.
-            Err(e) if last_text.is_none() => return Err(e),
-            Err(_) => None,
-        };
-        closing_text.or(last_text).ok_or_else(|| {
-            GeminiError::Parse(format!(
-                "Tool loop exceeded {} turns with no text response",
-                max_turns
-            ))
-        })
+        // The shared loop validates arguments against the declarations, so
+        // it takes the provider-neutral form; the driver turns them back.
+        let defs: Vec<crate::llm::ToolDefinition> = tools
+            .iter()
+            .flat_map(|t| t.function_declarations.iter())
+            .map(|d| crate::llm::ToolDefinition {
+                name: d.name.clone(),
+                description: d.description.clone(),
+                parameters: d.parameters.clone(),
+            })
+            .collect();
+        crate::llm::tool_loop::run(self, prompt, &defs, execute_tool, max_turns, on_progress)
     }
 
     /// Low-level: send a request and return the response Content.
@@ -962,6 +1116,18 @@ impl GeminiClient {
     fn send_request(&self, request: &GenerateRequest) -> Result<Content, GeminiError> {
         const MAX_RETRIES: u32 = 3;
 
+        // Pace to the model's stated per-minute quota before spending a
+        // request on the 429 that would say the same thing.
+        let wait = self
+            .rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .wait_for_window();
+        if let Some(wait) = wait {
+            if !sleep_observing(wait + Duration::from_secs(1), &is_cancelled) {
+                return Err(GeminiError::Unavailable(CANCELLED.to_string()));
+            }
+        }
         // Atomically check rate limit and reserve a slot
         self.rate
             .lock()
@@ -983,6 +1149,7 @@ impl GeminiClient {
                 next_delay = doubled_backoff(next_delay);
             }
 
+            crate::llm::HTTP_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let resp = match self.stream_request(request).send() {
                 Ok(r) => r,
                 Err(e) => {
@@ -1008,7 +1175,30 @@ impl GeminiClient {
                 }
                 StatusAction::InvalidKey => return Err(GeminiError::InvalidKey),
                 StatusAction::Denied => {
-                    return Err(denied_from_body(status, &read_body_capped(resp)))
+                    let body = read_body_capped(resp);
+                    // A per-minute quota is weather, not a verdict: Google
+                    // names the limit and the wait. Learn the one, sleep the
+                    // other, try again. Per-day quotas fall through to the
+                    // terminal path below, where a retry would only burn
+                    // the player's remaining slots.
+                    if status == 429 {
+                        if let Some(quota) = quota_refusal(&body) {
+                            if quota.per_day {
+                                return Err(GeminiError::RateLimited(quota.summary()));
+                            }
+                            self.rate
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .learn_rpm(quota.limit);
+                            if attempt + 1 < MAX_RETRIES && quota.retry_after <= MAX_QUOTA_WAIT {
+                                next_delay = quota.retry_after + Duration::from_secs(1);
+                                last_error = Some(GeminiError::RateLimited(quota.summary()));
+                                continue;
+                            }
+                            return Err(GeminiError::RateLimited(quota.summary()));
+                        }
+                    }
+                    return Err(denied_from_body(status, &body));
                 }
                 StatusAction::Retry => {
                     if let Some(delay) = retry_after_delay(resp.headers()) {
@@ -1120,6 +1310,7 @@ mod tests {
     fn test_rate_tracker_persistence_day_rollover_resets_daily() {
         let yesterday = current_epoch_day().saturating_sub(1);
         let persisted = PersistedUsage {
+            rpm_limits: HashMap::new(),
             day: yesterday,
             requests_today: 200,
             minute_start_epoch: 0,
@@ -1153,6 +1344,7 @@ mod tests {
     fn test_rate_tracker_daily_limit_enforced_after_reload() {
         // Simulate a DLL reload mid-day with the daily budget nearly exhausted.
         let persisted = PersistedUsage {
+            rpm_limits: HashMap::new(),
             day: current_epoch_day(),
             requests_today: 240,
             minute_start_epoch: 0,
@@ -1263,6 +1455,8 @@ mod tests {
             Content {
                 role: Some("model".into()),
                 parts: vec![Part {
+                    thought_signature: None,
+                    thought: None,
                     text: None,
                     function_call: Some(FunctionCall {
                         name: name.into(),
@@ -1588,7 +1782,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         const { assert!(CONNECT_TIMEOUT_SECS > 0 && CONNECT_TIMEOUT_SECS <= 30) };
         assert_eq!(
             CHAT_REQUEST_TIMEOUT,
-            Duration::from_secs(420),
+            Duration::from_secs(120),
             "one completion budget shared with every other provider"
         );
         assert!(
@@ -1605,6 +1799,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         let client = GeminiClient::new("test-key-not-a-real-one", "gemini-2.5-flash")
             .expect("client builds offline");
         let generate = GenerateRequest {
+            generation_config: None,
             contents: vec![Content {
                 role: Some("user".into()),
                 parts: vec![Part::text("hi")],
@@ -1683,7 +1878,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         ));
         assert!(matches!(
             denied_from_body(429, ""),
-            GeminiError::RateLimited
+            GeminiError::RateLimited(_)
         ));
         assert!(matches!(
             denied_from_body(429, "RESOURCE_EXHAUSTED"),
@@ -1837,9 +2032,100 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
             .nth(1)
             .and_then(|s| s.split("fn send_request").next())
             .expect("tool loop body");
+        // The loop itself is shared (`llm::tool_loop`); this provider only
+        // drives turns. The cancel poll lives in the shared loop.
         assert!(
-            tool_loop.contains("is_cancelled()"),
-            "tool loop must poll is_cancelled between turns"
+            tool_loop.contains("tool_loop::run("),
+            "the Gemini tool loop must be the shared one"
         );
+        let shared = include_str!("llm/tool_loop.rs");
+        assert!(
+            shared.contains("is_cancelled()"),
+            "the shared tool loop must poll is_cancelled between turns"
+        );
+    }
+}
+
+#[cfg(test)]
+mod minute_quota_tests {
+    use super::*;
+
+    /// The body gemini-3.8-flash returned in-game on 2026-09-07 20:04.
+    const BODY: &str = r#"{"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://ai.google.dev/gemini-api/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"5"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"39s"}]}}"#;
+
+    #[test]
+    fn a_per_minute_quota_names_its_limit_and_wait() {
+        let q = quota_refusal(BODY).expect("per-minute quota");
+        assert!(!q.per_day);
+        assert_eq!(q.limit, 5);
+        assert_eq!(q.retry_after, Duration::from_secs(39));
+        assert!(q.retry_after <= MAX_QUOTA_WAIT);
+    }
+
+    #[test]
+    fn a_per_day_quota_is_named_and_not_waited_out() {
+        let body = BODY.replace("PerMinutePerProjectPerModel", "PerDayPerProjectPerModel");
+        let q = quota_refusal(&body).expect("per-day quota");
+        assert!(q.per_day);
+        assert!(q.summary().contains("per day"), "{}", q.summary());
+        assert!(quota_refusal("not json").is_none());
+        assert!(quota_refusal(r#"{"error":{"code":429}}"#).is_none());
+    }
+
+    #[test]
+    fn a_learned_limit_paces_the_next_run_and_survives_a_reload() {
+        let mut t = RateTracker::new().for_model("gemini-3.8-flash");
+        assert_eq!(t.rpm_limit(), DEFAULT_RPM);
+        assert_eq!(t.stated_rpm(), None, "a default is not a statement");
+        t.learn_rpm(5);
+        assert_eq!(t.stated_rpm(), Some(5));
+        for _ in 0..5 {
+            t.check_and_reserve().expect("under the learned limit");
+        }
+        assert!(t.wait_for_window().is_some(), "sixth request waits");
+        assert!(t.check_and_reserve().is_err());
+
+        let reloaded = RateTracker::from_persisted(t.to_persisted()).for_model("gemini-3.8-flash");
+        assert_eq!(
+            reloaded.rpm_limit(),
+            5,
+            "the stated limit is kept across runs"
+        );
+        let other = RateTracker::from_persisted(t.to_persisted()).for_model("gemini-flash-latest");
+        assert_eq!(
+            other.rpm_limit(),
+            DEFAULT_RPM,
+            "one model's quota is not another's"
+        );
+    }
+}
+
+#[cfg(test)]
+mod closing_cap_tests {
+    use super::*;
+
+    /// The closing turn caps the reply; lookup turns do not send the field.
+    #[test]
+    fn only_the_closing_turn_carries_an_output_cap() {
+        let closing = GenerateRequest {
+            contents: vec![],
+            tools: None,
+            generation_config: Some(GenerationConfig {
+                max_output_tokens: crate::llm::openai_compat::CLOSING_MAX_TOKENS,
+            }),
+        };
+        let json = serde_json::to_string(&closing).unwrap();
+        assert!(
+            json.contains("\"generationConfig\":{\"maxOutputTokens\":8192}"),
+            "{json}"
+        );
+        let lookup = GenerateRequest {
+            contents: vec![],
+            tools: None,
+            generation_config: None,
+        };
+        assert!(!serde_json::to_string(&lookup)
+            .unwrap()
+            .contains("generationConfig"));
     }
 }

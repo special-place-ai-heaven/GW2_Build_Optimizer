@@ -1500,8 +1500,28 @@ pub fn draw_choya_hero(ui: &Ui, center: [f32; 2], size: f32) {
     );
 }
 
-/// Peeking-from-the-rock pose while the LLM is working.
+/// Pacing while the LLM works. The rock-peek used to sit here and it read
+/// as asleep — every slot showed a still Choya for the whole request, so
+/// "working" and "idle" looked the same. A brisk walk is unmistakably awake.
 pub fn draw_choya_thinking(ui: &Ui, center: [f32; 2], size: f32) {
+    if choya_sheet2().is_some() {
+        draw_choya_walk_paced(ui, center, size, 8);
+        return;
+    }
+    let i = (ui.frame_count() as usize / 5) % CHOYA_IDLE.len();
+    blit_choya_frame(&ui.get_window_draw_list(), center, size, CHOYA_IDLE[i]);
+}
+
+/// The chat row's working pose: the nine-frame maraca bob from sheet 1.
+/// Header paces, row bobs, composer blinks — three slots, three motions.
+pub fn draw_choya_thinking_row(ui: &Ui, center: [f32; 2], size: f32) {
+    let i = (ui.frame_count() as usize / 6) % CHOYA_IDLE.len();
+    blit_choya_frame(&ui.get_window_draw_list(), center, size, CHOYA_IDLE[i]);
+}
+
+/// Peeking-from-the-rock pose, kept for whoever wants a shy Choya.
+#[allow(dead_code)]
+pub fn draw_choya_peek(ui: &Ui, center: [f32; 2], size: f32) {
     let Some(tid) = choya_sheet2() else {
         blit_choya_frame(&ui.get_window_draw_list(), center, size, CHOYA_THINK);
         return;

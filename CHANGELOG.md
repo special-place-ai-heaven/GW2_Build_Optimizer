@@ -2,6 +2,44 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.1 - 2026-09-07
+
+The evening's question was why no free model produced a build any more. The answer is written down, with the numbers, in `docs/llm-requirements.md`, and this release fixes the parts that were ours.
+
+### Choya
+
+- Google's free tier allows five requests per minute on Gemini 3.8 Flash, and a Choya run had grown to six or more. The sixth was refused with "retry in 39 s" and the addon treated that as final. Choya now learns each model's stated limit from that reply, keeps it, paces itself to it, and waits the seconds Google asks for instead of giving up. A daily quota is still final; waiting a minute does nothing for that.
+- The profession reference handed to the model - every specialization, trait and slot skill, about 26 KB - was being cut to its first 2,000 characters on the way into the prompt, while the prompt promised the model it was complete. Every run started by fetching through tools what it should have been reading. The reference now arrives whole.
+- A model whose handshake got no answer at all (a 404 from an account setting, a 429 from a busy pool) was recorded as "no tools, answers in prose" for a week. A handshake that never happened is no longer kept.
+- The chat's own two-minute stopwatch fired while the model was still legitimately writing the build, threw the result away, and showed "timed out" with no build at all. The worker owns the deadlines and always ends in a build; the stopwatch is a backstop again.
+- A rate limit now says whose it is: "the provider is throttling everyone right now" reads differently from "your daily quota is used up" or "this tier allows a few requests a minute", and the addon had been showing one line for all three.
+- Free models on OpenRouter think at low effort. A free reasoning model given medium spent its whole closing budget thinking and returned nothing.
+- Settings says how to get more free models on OpenRouter: some are hidden unless the account allows prompt sharing with their providers, which is a switch at openrouter.ai/settings/privacy, not in the addon.
+- The Free switch in Settings now also filters the model list in the Choya row.
+- A run on a free model, or on a Gemini key whose quota Google has not stated as generous, is now two lookup rounds and the plate: about five requests including the handshake, where it was six to ten. Measured on the same free model, four runs before took 46 to 199 seconds; three runs after took 30 to 86, all with a valid build. The instructions no longer tell the model to confirm with a tool what the profession reference in front of it already says, and no longer force a tool call on the first turn.
+- A free endpoint that takes minutes on one lookup no longer takes the whole run with it: a lookup on a free model is abandoned after 90 seconds and Choya plates from what it has. One in-game run had sat 179 seconds on a single lookup and then timed out writing the build.
+- Gemini's closing request now carries an output cap, so a model that reasons at length cannot spend minutes on it.
+- `cargo run -p gw2-optimizer --example choya_live -- <provider> <model>` runs the real contract against the configured keys and prints PASS or FAIL with the request count. This is what "the model works" means from now on.
+
+## 1.14.0 - 2026-09-07
+
+Every number in this release was checked against a wiki page, and the page is named at the constant it justifies. Where the wiki has no dev statement, the code says "community-tested" rather than pretending.
+
+### The build it recommends
+
+- Skills recharge when the cast finishes, not when it starts. Every skill had been getting its whole cast time back for free, which flattered long casts most. The wiki's rule - "once the activation is complete a skill will enter a recharge time" - is what runs now. A channelled skill really starts recharging a little earlier, at the start of its active phase; there is no public data on where that phase begins, so channels now err late by their own length, where before everything erred early.
+- Chill is 60% recharge, not 34%. Yesterday's release read the tooltip's "cooldown increased by 66%" as a 34% rate. The wiki puts it plainly: for every 1.66 seconds chilled, one second of cooldown expires. Supports under Chill get their heals back sooner than 1.13.0 said, and later than 1.12.0 said.
+- A boon strip takes what you applied last. It used to take whatever was about to expire anyway, which is the one thing a strip never does. Last in, first out - the reason every WvW guide says "stability out first, then cover it" - is what the enemy does now, and extending a boon no longer moves it to the front of the queue. Cleanses already worked that way.
+- Damage modifiers stack the way the game stacks them. The wiki is explicit that some sigils, traits and utility effects add together before the rest multiply, and it gives no rule for which is which - it is a tested fact per effect. Seventy-nine effects are now named in the data as additive, unnamed ones multiply as before, so nothing that was right can have gone wrong. Warrior's Peak Performance, Berserker's Power, Warrior's Sprint and Fierce as Fire are all additive, and Warrior is exactly where the old model over-ranked stacked bonuses.
+- A multi-hit skill lands its hits across the cast. Both simulations used to drop the whole thing as one lump, which undercut the premise this addon is built on: a hit that lands inside a burst window is worth more than the same hit outside it, and a channel that starts inside a window and runs out of it is worth something in between. Hits are now spaced by measured timing where anyone has measured it - Guardian and Ranger, from gw2combat's log-audited files - and evenly across the cast everywhere else. An interrupt drops the hits that had not landed.
+- The referee plays the rotation the page wrote. Every build site writes its rotation as `Rifle 3 > Shred > Rifle 5 > 2 > Demolish` and nothing read it, so a published build was judged on an opener the simulation invented. Seventy-four of the 124 synced WvW builds are now judged on their own rotation line, and the timeline improvises only after it runs out.
+- Boons cap where the wiki caps them: 30 seconds for most, 60 for Swiftness, none for Might, Aegis and Regeneration - the last three had been capped at 30 in the data. Stack caps come from the same data instead of a number typed into two places.
+- An interrupted cast goes on a 4-second recharge. The wiki disagrees with itself (two pages say 4, two say 5); the newest page wins and the disagreement is written at the constant.
+
+### Choya
+
+- When Choya simulates a rotation it now keeps the two weapon sets apart. The tool it calls was handed a flat list and put both sets in hand at once, so a rotation could weave Greatsword and Longbow skills with no swap between them.
+
 ## 1.13.0 - 2026-09-07
 
 ### The build it recommends

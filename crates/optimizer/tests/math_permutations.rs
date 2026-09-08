@@ -374,7 +374,7 @@ fn sigil_buff_description_not_double_counted() {
         Some("+5% Damage"),
         &BalanceContext::pve(),
     );
-    assert_eq!(mods.strike_pct, vec![0.05]);
+    assert_eq!(mods.strike_add_pct, vec![0.05]);
 
     let effects = synergy::extract_sigil_effects(
         &item(
@@ -401,8 +401,8 @@ fn sigil_buff_description_not_double_counted() {
 fn sigil_force_name_fallback_is_mode_split() {
     let pve = extract_sigil("Superior Sigil of Force", None, &BalanceContext::pve());
     let pvp = extract_sigil("Superior Sigil of Force", None, &BalanceContext::pvp());
-    assert_eq!(pve.strike_pct, vec![0.05]);
-    assert_eq!(pvp.strike_pct, vec![0.03]);
+    assert_eq!(pve.strike_add_pct, vec![0.05]);
+    assert_eq!(pvp.strike_add_pct, vec![0.03]);
 }
 
 #[test]
@@ -709,8 +709,8 @@ fn relic_weapon_swap_is_easy_trigger() {
         "Relic of Nourys",
         "After swapping weapons, deal increased strike damage for a duration.",
     );
-    assert_eq!(mods.strike_pct.len(), 1);
-    assert!(almost(mods.strike_pct[0], 0.07 * (6.0 / 9.0)));
+    assert_eq!(mods.strike_add_pct.len(), 1);
+    assert!(almost(mods.strike_add_pct[0], 0.07 * (6.0 / 9.0)));
 }
 
 #[test]
@@ -730,8 +730,8 @@ fn sigil_strike_disabled_is_easy_trigger() {
         Some("Deal increased strike damage when you hit a stunned or disabled foe."),
         &BalanceContext::pve(),
     );
-    assert_eq!(mods.strike_pct.len(), 1);
-    assert!(almost(mods.strike_pct[0], 0.07 * (6.0 / 15.0)));
+    assert_eq!(mods.strike_add_pct.len(), 1);
+    assert!(almost(mods.strike_add_pct[0], 0.07 * (6.0 / 15.0)));
 }
 
 #[test]
