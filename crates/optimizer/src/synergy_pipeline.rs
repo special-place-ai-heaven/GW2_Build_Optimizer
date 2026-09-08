@@ -218,7 +218,6 @@ pub fn optimize_synergy_cancellable(
         scenario,
     )?;
 
-    // Convert to SynergyResult
     if is_cancelled() {
         return Err("Cancelled".into());
     }
@@ -440,7 +439,6 @@ fn select_specs_and_traits(
         }
     }
 
-    // Sort by score and keep top 5
     candidates.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -475,7 +473,6 @@ fn cross_product_trait_configs(per_spec: &[Vec<(Vec<u32>, f64)>]) -> Vec<Vec<Vec
 
 fn select_rune(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
     let runes = db.all_runes();
-    // Filter to Superior runes only
     let superior_runes: Vec<_> = runes
         .iter()
         .filter(|r| r.name.contains("Superior"))
@@ -650,7 +647,6 @@ fn select_weapons(
     db: &GameDb,
     weights: &OptimizationWeights,
 ) {
-    // Build list of valid weapon combos for this profession
     for candidate in candidates.iter_mut() {
         let elite_spec_ids: Vec<u32> = candidate
             .spec_ids
@@ -1410,8 +1406,6 @@ fn build_synergy_result(
     scenario: Option<&ScenarioSpec>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
-    // Build ValidatedBuild
-    //
     // Weapons FIRST, in the initializer: the gear fill below asks the build
     // which hands it is holding, and a build that has not been told its weapons
     // yet is holding none. This ordering is load-bearing, not cosmetic.

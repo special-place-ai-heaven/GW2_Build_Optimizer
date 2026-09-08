@@ -711,7 +711,6 @@ fn render_ranch_table(ui: &Ui, state: &mut AddonState, rows: &[usize]) {
     }
 }
 
-/// Render the Save/Load tab.
 pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
     if !state.main.saved_builds_loaded {
         let (builds, skipped) = load_saved_builds(&state.addon_dir);
@@ -787,7 +786,6 @@ fn suggestion_slot_prefixes(
     })
 }
 
-/// Convert a BuildSuggestion to a SavedBuild.
 fn suggestion_to_saved(
     name: &str,
     character_name: &str,

@@ -70,7 +70,6 @@ pub(super) fn synergy_result_to_suggestion(
         weapons.push(s);
     }
 
-    // Skills: flatten into display strings
     let mut skills = Vec::new();
     if !v.legends.is_empty() {
         let names: Vec<String> = v
@@ -117,7 +116,6 @@ pub(super) fn synergy_result_to_suggestion(
         ));
     }
 
-    // Sigils: flatten to display strings
     let sigils: Vec<String> = v.sigils.iter().map(|s| s.name.clone()).collect();
 
     // Convert stats from optimizer StatBlock (f64) to core StatBlock (i32)
@@ -138,12 +136,10 @@ pub(super) fn synergy_result_to_suggestion(
         armor: derived.armor.round() as i32,
     });
 
-    // Convert combat performance to CombatMetrics
     let combat_solo = Some(perf_to_combat_metrics(&result.combat_solo));
     let combat_party = Some(perf_to_combat_metrics(&result.combat_party));
     let combat_squad = Some(perf_to_combat_metrics(&result.combat_squad));
 
-    // Convert rotation simulation result
     let rotation = result
         .rotation
         .as_ref()
@@ -179,7 +175,6 @@ pub(super) fn synergy_result_to_suggestion(
             cleanse_rate_per_20s: sim.cleanse_rate_per_20s,
         });
 
-    // Build changes_made from validated structured changes
     let changes_made: Vec<String> = v
         .changes
         .iter()
@@ -202,7 +197,6 @@ pub(super) fn synergy_result_to_suggestion(
         explanation.push_str(&v.warnings.join("; "));
     }
 
-    // Compute viability gates from the referee using the scenario
     let primary_combat = match scenario.combat_tier {
         gw2_optimizer::scenario::CombatTier::Solo => &result.combat_solo,
         gw2_optimizer::scenario::CombatTier::Party => &result.combat_party,
@@ -221,7 +215,6 @@ pub(super) fn synergy_result_to_suggestion(
         .or_else(|| role.map(|r| r.label().to_string()))
         .unwrap_or_else(|| "Optimized Build".to_string());
 
-    // Compute benchmark delta vs best matching community reference
     let role_hint = role.map(|r| r.label().to_string()).unwrap_or_default();
     let our_score = {
         // Use normalised strike + condi DPS index as proxy score when referee score unavailable
@@ -424,7 +417,6 @@ pub(super) fn candidate_to_suggestion(
         }
     }
 
-    // Convert stats from optimizer::stats::StatBlock to core::types::StatBlock
     let estimated_stats = Some(gw2_core::types::StatBlock {
         power: candidate.stats.power.round() as i32,
         precision: candidate.stats.precision.round() as i32,

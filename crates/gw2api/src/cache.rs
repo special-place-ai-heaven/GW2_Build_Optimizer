@@ -113,7 +113,6 @@ impl DataCache {
             .map(|m| m.build)
     }
 
-    /// Delete a cache entry.
     pub fn delete(&self, key: &str) {
         let path = self.path_for(key);
         std::fs::remove_file(&path).ok();
@@ -154,7 +153,6 @@ impl DataCache {
         }
     }
 
-    /// Check if a cache key exists.
     pub fn exists(&self, key: &str) -> bool {
         self.path_for(key).exists()
     }
@@ -230,7 +228,6 @@ impl DataCache {
         result
     }
 
-    /// Load the cached character name list. Returns None if not cached.
     pub fn load_characters(&self) -> Result<Option<Vec<String>>, CacheError> {
         let path = self.path_for("characters");
         if !path.exists() {
@@ -346,7 +343,6 @@ mod tests {
             cache.load_character("Fun Detected", "buildtabs").unwrap();
         assert_eq!(loaded, Some(tabs));
 
-        // Different character returns None
         let other: Option<Vec<String>> = cache.load_character("Other Char", "buildtabs").unwrap();
         assert!(other.is_none());
 

@@ -5,7 +5,6 @@
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 
-/// A mechanical fact describing an effect.
 /// The `type` field in the API determines which variant this is.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -244,7 +243,6 @@ mod tests {
             .into_iter()
             .filter_map(|v| serde_json::from_value(v).ok())
             .collect();
-        // The middle fact (missing type) should be skipped
         assert_eq!(facts.len(), 2);
     }
 }

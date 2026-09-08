@@ -27,7 +27,6 @@ impl CancellationToken {
         }
     }
 
-    /// Check if cancellation has been requested.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Relaxed)
     }
@@ -639,7 +638,6 @@ pub struct MainState {
     pub weights: OptimizationWeights,
     /// Which radar chart axis is being dragged (None = no drag).
     pub radar_dragging: Option<usize>,
-    // Save/Load
     pub saved_builds: Vec<SavedBuild>,
     pub saved_builds_loaded: bool,
     /// Basenames of `.json` files in the saves directory that failed to
