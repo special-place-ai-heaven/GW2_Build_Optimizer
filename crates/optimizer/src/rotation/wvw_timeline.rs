@@ -156,6 +156,10 @@ pub struct SkillResourceRule {
     /// Incoming damage taken by the pool while in this shroud, as a
     /// fraction after reduction (WvW: 0.5).
     pub shroud_damage_factor: f64,
+    /// The health pool stays exposed in this shroud and healing lands
+    /// (Harbinger Shroud). `false` is the Death / Reaper's / Ritualist's
+    /// shape where the pool takes the hit and nothing heals.
+    pub shroud_health_exposed: bool,
     /// This skill enters / exits shroud.
     pub enters_shroud: bool,
     pub exits_shroud: bool,
@@ -593,6 +597,8 @@ struct ShroudState {
     drain_per_second: f64,
     /// Share of incoming damage the pool takes (WvW: 0.5).
     damage_factor: f64,
+    /// Damage hits health and healing lands (Harbinger Shroud).
+    health_exposed: bool,
     /// Recharge the entry skill gets when the shroud ends.
     exit_recharge_ms: u32,
 }
@@ -1629,6 +1635,7 @@ impl<'a> Timeline<'a> {
             } else {
                 rule.shroud_damage_factor
             },
+            health_exposed: rule.shroud_health_exposed,
             exit_recharge_ms,
         });
         let cap = resource_cap(ResourceKind::LifeForce, self.params.max_health).max(1.0);
@@ -1793,9 +1800,15 @@ impl<'a> Timeline<'a> {
             }
         }
         self.barrier_absorbed += absorbed;
-        if let Some(factor) = self.in_shroud.as_ref().map(|s| s.damage_factor) {
+        if let Some(factor) = self
+            .in_shroud
+            .as_ref()
+            .filter(|s| !s.health_exposed)
+            .map(|s| s.damage_factor)
+        {
             // In shroud the pool takes the (reduced) hit; what the pool
-            // cannot cover overflows to health.
+            // cannot cover overflows to health. Harbinger Shroud is the
+            // exception: its health stays exposed and the pool only drains.
             let to_pool = remaining * factor;
             let pool = self.resources.entry(ResourceKind::LifeForce).or_default();
             let taken = to_pool.min(*pool);
@@ -2650,8 +2663,9 @@ impl<'a> Timeline<'a> {
     }
 
     fn heal(&mut self, amount: f64) {
-        if self.in_shroud.is_some() {
+        if self.in_shroud.as_ref().is_some_and(|s| !s.health_exposed) {
             // wiki `Death Shroud`: necromancers cannot be healed in shroud.
+            // wiki `Harbinger Shroud`: they can, there.
             return;
         }
         let before = self.player_health;
