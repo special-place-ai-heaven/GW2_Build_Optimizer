@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::data::normalized_effects::{
     EffectCategory, NormalizedEffect, OperationType, SourceType, TargetSide, TriggerRule,
 };
-use crate::data::quality::FactualValue;
+use crate::data::quality::{CoverageEntry, FactualValue};
 use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
 
 use super::combat_model::{corrupt_into, EnemyDummy};
@@ -208,6 +208,9 @@ pub struct WvwCombatReport {
     /// This never silently becomes verified data: the referee turns it into
     /// the `wvw_timeline.effects` coverage reason.
     pub unmodeled_sources: Vec<String>,
+    /// The same list with its classes (specs/007-trait-triggers, US4): one
+    /// entry per skipped source; empty iff the coverage reason is absent.
+    pub coverage: Vec<CoverageEntry>,
     /// Bounded event trace. Empty unless [`WvwTimelineInput::trace`] was set;
     /// capped at [`TRACE_CAP`] events.
     pub trace: Vec<TraceEvent>,
@@ -280,9 +283,9 @@ pub struct WvwTimelineInput<'a> {
     pub active_effects: &'a [&'a NormalizedEffect],
     pub resource_rules: &'a [SkillResourceRule],
     pub resource_model_complete: bool,
-    /// Equipped sources with no record for this mode, already named by the
-    /// caller (`engine::active_normalized_effects`).
-    pub unmodeled_sources: Vec<String>,
+    /// Equipped sources the timeline will not simulate, already classified
+    /// by the caller (`engine::active_normalized_effects`).
+    pub coverage: Vec<CoverageEntry>,
     /// Each socketed sigil's weapon set (1 or 2; 0 = on both), so a sigil's
     /// procs fire only while its set is held (CONN-00-07).
     pub sigil_sets: HashMap<u32, u8>,
@@ -699,7 +702,8 @@ struct Timeline<'a> {
     /// Reported after `unmodeled_names`: most traits and every weapon skill
     /// have no proc record, so this list is long and least specific
     /// (CONN-01-06).
-    no_record_names: Vec<String>,
+    /// Sources the caller classified before the run (US4).
+    no_record_entries: Vec<CoverageEntry>,
     trace_enabled: bool,
     trace: Vec<TraceEvent>,
     trace_truncated: bool,
@@ -731,7 +735,7 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
         active_effects,
         resource_rules,
         resource_model_complete,
-        unmodeled_sources,
+        coverage,
         sigil_sets,
         weapon_swap_cooldown_ms,
         trace,
@@ -745,7 +749,7 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
         active_effects,
         resource_rules,
         resource_model_complete,
-        unmodeled_sources,
+        coverage,
     );
     timeline.weapon_swap_cooldown_ms = weapon_swap_cooldown_ms;
     timeline.assign_sigil_sets(&sigil_sets);
@@ -817,7 +821,7 @@ impl<'a> Timeline<'a> {
         active_effects: &[&NormalizedEffect],
         resource_rules: &[SkillResourceRule],
         resource_model_complete: bool,
-        unmodeled_sources: Vec<String>,
+        coverage: Vec<CoverageEntry>,
     ) -> Self {
         let mut state = Self {
             skills,
@@ -867,7 +871,7 @@ impl<'a> Timeline<'a> {
             conditional_specs: Vec::new(),
             unmodeled_proc_keys: HashSet::new(),
             unmodeled_names: Vec::new(),
-            no_record_names: unmodeled_sources,
+            no_record_entries: coverage,
             trace_enabled: false,
             trace: Vec::new(),
             trace_truncated: false,
@@ -2435,8 +2439,12 @@ impl<'a> Timeline<'a> {
         for name in self.unmodeled_names.clone() {
             self.trace(TraceKind::ProcUnmodeled, &name, "no firing site");
         }
-        for name in self.no_record_names.clone() {
-            self.trace(TraceKind::ProcUnmodeled, &name, "no record");
+        for entry in self.no_record_entries.clone() {
+            self.trace(
+                TraceKind::ProcUnmodeled,
+                &entry.rendered(),
+                &entry.class.suffix(),
+            );
         }
     }
 
@@ -2814,6 +2822,13 @@ impl<'a> Timeline<'a> {
             && resource_recovery
             && (target_reached || sustain_margin >= 0.0 || remaining_health_ratio >= 0.50);
 
+        let mut coverage: Vec<CoverageEntry> = self
+            .unmodeled_names
+            .iter()
+            .map(|note| CoverageEntry::from_runtime_note(note))
+            .collect();
+        coverage.extend(self.no_record_entries.iter().cloned());
+
         WvwCombatReport {
             duration_ms: self.profile.duration_ms,
             target_health: self.profile.target_health,
@@ -2844,12 +2859,8 @@ impl<'a> Timeline<'a> {
             resource_blocked_actions: self.resource_blocked_skills.len() as u32,
             resource_legal: self.resource_blocked_skills.is_empty(),
             resource_model_complete: self.resource_model_complete,
-            unmodeled_sources: self
-                .unmodeled_names
-                .iter()
-                .chain(&self.no_record_names)
-                .cloned()
-                .collect(),
+            unmodeled_sources: coverage.iter().map(CoverageEntry::rendered).collect(),
+            coverage,
             trace: self.trace.clone(),
             trace_truncated: self.trace_truncated,
             proc_trials: Vec::new(),
@@ -5075,6 +5086,91 @@ mod reaper_experiments {
             .expect("the fixture prepares a rotation");
         prepared.opener = fx::opener();
         prepared
+    }
+
+    // US4 (specs/007-trait-triggers): the coverage line says what was skipped
+    // and why. Seen failing before the executed-source subtraction existed.
+
+    /// A weapon skill the builder produced effects for is executed by the
+    /// timeline, so it never sits on the "Not simulated" line.
+    #[test]
+    fn coverage_line_never_names_executed_weapon_skills() {
+        let report = traced(&fx::build(), None);
+        assert!(
+            !report
+                .unmodeled_sources
+                .iter()
+                .any(|s| s.starts_with("Gravedigger")),
+            "executed weapon skills leave the coverage line: {:?}",
+            report.unmodeled_sources
+        );
+    }
+
+    /// A record that carries a `coverage` block puts its class on the line
+    /// in place of "(no record)".
+    #[test]
+    fn coverage_entry_carries_its_class() {
+        use crate::data::normalized_effects::{
+            CoverageBlock, CoverageClass, EffectCategory, TriggerRule,
+        };
+        use crate::data::quality::ReasonClass;
+        let p = prepared();
+        let db = fx::db();
+        let build = fx::build();
+        let trait_id = build.specializations[0].all_trait_ids[0];
+        let mut classified = fx::path_of_corruption();
+        classified.effect_id = "test:coverage".into();
+        classified.source_id = trait_id;
+        classified.source_name = "Flesh of the Master".into();
+        classified.category = EffectCategory::FlatStat;
+        classified.value = FactualValue::Unknown;
+        classified.trigger_rule = TriggerRule::Passive;
+        classified.status_operation = None;
+        classified.internal_cooldown = None;
+        classified.coverage = Some(CoverageBlock {
+            class: CoverageClass::NeedsMechanic,
+            mechanic: Some("minions".into()),
+        });
+        let records = vec![classified];
+        let consumed: HashSet<u32> = p.consumed_trait_ids.iter().copied().collect();
+        let (_, coverage, _) =
+            engine::active_normalized_effects(&build, &p.skills, &db, &records, &consumed);
+        let entry = coverage
+            .iter()
+            .find(|e| e.name == "Flesh of the Master")
+            .expect("the classified trait is on the list");
+        assert_eq!(entry.class, ReasonClass::NeedsMechanic("minions".into()));
+        assert_eq!(entry.rendered(), "Flesh of the Master (needs: minions)");
+        assert!(
+            coverage.iter().all(|e| e.class != ReasonClass::NoRecord
+                || !consumed.contains(&trait_id)
+                || e.name != "Flesh of the Master"),
+            "one entry per source"
+        );
+    }
+
+    /// Nothing skipped: empty coverage, empty line, no coverage reason.
+    #[test]
+    fn nothing_skipped_is_verified() {
+        let p = prepared();
+        let report = run(
+            &p.skills,
+            &p.params,
+            &[fx::GRAVEDIGGER],
+            &[],
+            open_profile(2_000, vec![]),
+        );
+        assert!(report.coverage.is_empty(), "{:?}", report.coverage);
+        assert!(report.unmodeled_sources.is_empty());
+        assert!(
+            crate::data::quality::coverage_reason(
+                "Necromancer",
+                &gw2_core::types::GameMode::WvW,
+                &report.unmodeled_sources
+            )
+            .is_none(),
+            "an empty list leaves the build Verified"
+        );
     }
 
     /// The fixture through the production entry point, with the trace on.

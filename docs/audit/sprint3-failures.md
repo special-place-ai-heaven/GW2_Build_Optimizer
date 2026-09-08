@@ -24,6 +24,36 @@ plan changes (test modules omitted; counts are the index's, recall best-effort):
 
 ## coverage
 
+### coverage_line_never_names_executed_weapon_skills
+
+Before the executed-source subtraction existed (`1e760db`, run 2026-09-08): the production coverage line named all 40 equipped sources as "(no record)", Gravedigger among them.
+
+```
+thread 'rotation::wvw_timeline::reaper_experiments::coverage_line_never_names_executed_weapon_skills' (155492) panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5088:9:
+executed weapon skills leave the coverage line: ["\"Chilled to the Bone!\" (no record)", "\"You Are All Weaklings!\" (no record)", "Death Spiral (no record)", "Death's Charge (no record)", "Dusk Strike (no record)", "Ghastly Claws (no record)", "Grasping Darkness (no record)", "Gravedigger (no record)", "Infusing Terror (no record)", "Life Rend (no record)", "Nightfall (no record)", "Reaper Adept Left (no record)", "Reaper Adept Minor (no record)", "Reaper Grandmaster Left (no record)", "Reaper Grandmaster Minor (no record)", "Reaper Master Left (no record)", "Reaper Master Minor (no record)", "Reaper's Shroud (no record)", "Reaper's Touch (no record)", "Relic of the Thief (no record)", "Rending Claws (no record)", "Signet of Vampirism (no record)", "Soul Reaping Adept Left (no record)", "Soul Reaping Adept Minor (no record)", "Soul Reaping Grandmaster Left (no record)", "Soul Reaping Gr
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1166 filtered out; finished in 0.01s
+```
+
+Disabled again after the edit with `python docs/audit/disable_and_run.py coverage` (the `executed_from_facts` skip in `engine::active_normalized_effects` gated off), 2026-09-08:
+
+```
+### coverage
+file: crates/optimizer/src/engine.rs
+disabled: if executed_from_facts {
+            continue;
+        }
+test: coverage_line_never_names_executed_weapon_skills
+panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5099:9:
+executed weapon skills leave the coverage line: ["\"Chilled to the Bone!\" (no record)", "\"You Are All Weaklings!\" (no record)", "Death Spiral (no record)", "Death's Charge (no record)", "Dusk Strike (no record)", "Ghastly Claws (no record)", "Grasping Darkness (no record)", "Gravedigger (no record)", "Infusing Terror (no record)", "Life Rend (no record)", "Nightfall (no record)", "Reaper Adept Left (no record)", "Reaper Adept Minor (no record)", "Reaper Grandmaster Left (no record)", "Reaper Grandmaster Minor (no record)", "Reaper Master Left (no record)", "Reaper Master Minor (no record)", "Reaper's Shroud (no record)", "Reaper's Touch (no record)", "Relic of the Thief (no record)", "Ren
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1169 filtered out; finished in 0.01s
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+restored: byte-identical
+```
+
+With the mechanism on: the fixture's line drops every weapon skill and every fixture trait whose facts the parser consumed; `coverage_entry_carries_its_class` renders a `NeedsMechanic("minions")` record as `Flesh of the Master (needs: minions)`; `nothing_skipped_is_verified` gets an empty list and no coverage reason; `pve_trait_fact_consumption_set_unchanged` pins the consumed set (empty for the synthetic fixture traits; a percent-fact trait is consumed, a bare one is not).
+
 ## shroud_enter
 
 ## prereq
