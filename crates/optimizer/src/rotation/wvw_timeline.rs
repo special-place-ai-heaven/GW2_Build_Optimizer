@@ -279,6 +279,9 @@ pub struct WvwTimelineInput<'a> {
     /// Equipped sources with no record for this mode, already named by the
     /// caller (`engine::active_normalized_effects`).
     pub unmodeled_sources: Vec<String>,
+    /// Each socketed sigil's weapon set (1 or 2; 0 = on both), so a sigil's
+    /// procs fire only while its set is held (CONN-00-07).
+    pub sigil_sets: HashMap<u32, u8>,
     /// Exact in-combat weapon swap cooldown for this profession. `None`
     /// means the active specialization cannot swap weapons in combat.
     pub weapon_swap_cooldown_ms: Option<u32>,
@@ -679,6 +682,7 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
         resource_rules,
         resource_model_complete,
         unmodeled_sources,
+        sigil_sets,
         weapon_swap_cooldown_ms,
         trace,
     } = input;
@@ -694,6 +698,7 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
         unmodeled_sources,
     );
     timeline.weapon_swap_cooldown_ms = weapon_swap_cooldown_ms;
+    timeline.assign_sigil_sets(&sigil_sets);
     timeline.opener = opener;
     timeline.trace_enabled = trace;
     timeline.trace_loaded_unmodeled();
@@ -723,6 +728,7 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
                 Vec::new(),
             );
             trial.weapon_swap_cooldown_ms = weapon_swap_cooldown_ms;
+            trial.assign_sigil_sets(&sigil_sets);
             trial.opener = opener;
             trial.crit_mode = CritMode::Seeded(XorShift64Star::new(seed));
             trial.run();
@@ -1981,6 +1987,26 @@ impl<'a> Timeline<'a> {
         });
     }
 
+    /// Tag each sigil's procs with the weapon set it is socketed on.
+    fn assign_sigil_sets(&mut self, sigil_sets: &HashMap<u32, u8>) {
+        for spec in &mut self.proc_specs {
+            if matches!(spec.source_type, SourceType::Sigil) {
+                spec.weapon_set = sigil_sets.get(&spec.source_id).copied().unwrap_or(0);
+            }
+        }
+    }
+
+    /// The set a hit from `skill_id` was cast on: a weapon skill's own set,
+    /// which is also right for a channel that finishes after a swap; the
+    /// held set for everything else.
+    fn held_set_for(&self, skill_id: Option<u32>) -> u8 {
+        skill_id
+            .and_then(|id| self.skills.iter().find(|s| s.skill_id == id))
+            .map(|s| s.weapon_set)
+            .filter(|set| matches!(set, 1 | 2))
+            .unwrap_or(self.active_weapon_set)
+    }
+
     /// The sources `load_normalized_effects` could not model are known before
     /// tracing is switched on; replay them as events once it is.
     fn trace_loaded_unmodeled(&mut self) {
@@ -2017,11 +2043,11 @@ impl<'a> Timeline<'a> {
     ) {
         let mut ready = Vec::new();
         let mut on_cooldown = Vec::new();
+        let held_set = self.held_set_for(activating_skill_id);
         for (idx, proc_spec) in self.proc_specs.iter().enumerate() {
             let source_matches = !matches!(proc_spec.source_type, SourceType::Skill)
                 || activating_skill_id == Some(proc_spec.source_id);
-            let set_held =
-                proc_spec.weapon_set == 0 || proc_spec.weapon_set == self.active_weapon_set;
+            let set_held = proc_spec.weapon_set == 0 || proc_spec.weapon_set == held_set;
             let scope_ok = match proc_spec.scope {
                 crate::data::normalized_effects::TriggerScope::Any => true,
                 crate::data::normalized_effects::TriggerScope::WeaponSkillWithRecharge => {
@@ -4606,18 +4632,123 @@ mod reaper_experiments {
 
     /// The fixture through the production entry point, with the trace on.
     fn traced(build: &ValidatedBuild, precision: Option<f64>) -> WvwCombatReport {
+        traced_opener(build, fx::opener(), precision)
+    }
+
+    /// `traced` with a custom press order.
+    fn traced_opener(
+        build: &ValidatedBuild,
+        opener: Vec<u32>,
+        precision: Option<f64>,
+    ) -> WvwCombatReport {
         let db = fx::db();
         let (ctx, scenario) = fx::scenario();
         let (stats, _) = engine::calculate_validated_stats(build, &db, "Necromancer", &ctx);
         let mut prepared = engine::prepare_validated_rotation(build, &db, &stats, Some(&scenario))
             .expect("the fixture prepares a rotation");
-        prepared.opener = fx::opener();
+        prepared.opener = opener;
         if let Some(precision) = precision {
             prepared.params.precision = precision;
         }
         engine::simulate_prepared_traced(&prepared, build, &db, Some(&scenario))
             .wvw
             .expect("WvW scenario runs the timeline")
+    }
+
+    fn first_swap_ms(report: &WvwCombatReport) -> Option<u32> {
+        report
+            .trace
+            .iter()
+            .find(|event| event.kind == TraceKind::WeaponSwap)
+            .map(|event| event.t_ms)
+    }
+
+    // ── US2: swapping weapons swaps sigils (T020, T021) ─────────────────────
+
+    /// US2 positive and negative control: a sigil on set 2 fires only after
+    /// the swap; moved to set 1 it fires only before.
+    #[test]
+    fn reaper_swap_loads_set_two_sigils() {
+        let on_two = traced_opener(
+            &fx::build_with_set_two_fire(),
+            fx::opener_with_swap(),
+            Some(3_000.0),
+        );
+        let swap = first_swap_ms(&on_two).expect("the opener crosses to set 2");
+        let fired = events(&on_two, TraceKind::ProcFired, "Superior Sigil of Fire");
+        assert!(
+            !fired.is_empty() && fired.iter().all(|e| e.t_ms >= swap),
+            "set-2 sigil fires only after the swap at {swap} ms: {fired:?}"
+        );
+
+        let on_one = traced_opener(&fx::build(), fx::opener_with_swap(), Some(3_000.0));
+        let swap = first_swap_ms(&on_one).expect("the opener crosses to set 2");
+        let fired = events(&on_one, TraceKind::ProcFired, "Superior Sigil of Fire");
+        assert!(
+            !fired.is_empty() && fired.iter().all(|e| e.t_ms < swap),
+            "set-1 sigil fires only before the swap at {swap} ms: {fired:?}"
+        );
+    }
+
+    /// US2 timing control: the same sigil on both sets keeps one cooldown
+    /// across the swap.
+    #[test]
+    fn reaper_swap_keeps_icd_across_sets() {
+        let mut both = fx::build();
+        both.set_sigil_seats([
+            Some(crate::validation::ValidatedItem {
+                id: fx::SIGIL_OF_FIRE,
+                name: "Superior Sigil of Fire".into(),
+            }),
+            None,
+            Some(crate::validation::ValidatedItem {
+                id: fx::SIGIL_OF_FIRE,
+                name: "Superior Sigil of Fire".into(),
+            }),
+            None,
+        ]);
+        let report = traced_opener(&both, fx::opener_with_swap(), Some(3_000.0));
+        let swap = first_swap_ms(&report).expect("the opener crosses to set 2");
+        let fired = events(&report, TraceKind::ProcFired, "Superior Sigil of Fire");
+        let skipped = events(&report, TraceKind::ProcSkippedIcd, "Superior Sigil of Fire");
+        assert!(
+            fired.iter().any(|e| e.t_ms < swap),
+            "fires on set 1 before the swap: {fired:?}"
+        );
+        assert!(
+            skipped
+                .iter()
+                .any(|e| e.t_ms >= swap && e.t_ms < swap + 5_000),
+            "a set-2 hit inside the cooldown started on set 1 is skipped: {skipped:?}"
+        );
+        assert!(
+            !fired
+                .iter()
+                .any(|e| e.t_ms >= swap && e.t_ms < fired[0].t_ms + 5_000),
+            "no second fire inside the first 5 s cooldown because the set changed: {fired:?}"
+        );
+    }
+
+    /// US2 scenario 4: a set-2 sigil with a record is modeled, not listed.
+    #[test]
+    fn reaper_set_two_sigil_leaves_coverage_line() {
+        let report = traced(&fx::build_with_set_two_fire(), None);
+        assert!(
+            !report
+                .unmodeled_sources
+                .iter()
+                .any(|s| s.contains("Sigil of Fire")),
+            "the stowed sigil's record loads and it leaves the coverage line: {:?}",
+            report.unmodeled_sources
+        );
+        assert!(
+            report
+                .proc_trials
+                .iter()
+                .any(|trial| trial.source == "Superior Sigil of Fire"),
+            "the stowed sigil's record is loaded (it has a trial entry): {:?}",
+            report.proc_trials
+        );
     }
 
     fn open_profile(duration_ms: u32, events: Vec<EnemyEvent>) -> WvwProfile {
@@ -4902,9 +5033,12 @@ mod reaper_experiments {
             !events(&worn, TraceKind::ProcFired, "Superior Sigil of Fire").is_empty(),
             "worn: the on-crit sigil fires (Sprint 2)"
         );
+        let first_swap = first_swap_ms(&stowed).unwrap_or(u32::MAX);
         assert!(
             events(&stowed, TraceKind::ProcUnmodeled, "Superior Sigil of Fire").is_empty()
-                && events(&stowed, TraceKind::ProcFired, "Superior Sigil of Fire").is_empty(),
+                && events(&stowed, TraceKind::ProcFired, "Superior Sigil of Fire")
+                    .iter()
+                    .all(|e| e.t_ms >= first_swap),
             "stowed: the sigil is absent from the fight before a swap"
         );
         assert!(
