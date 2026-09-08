@@ -13,6 +13,8 @@ use super::theme;
 
 static GRAPHICS_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 static REQUESTED: Mutex<Option<std::collections::HashSet<String>>> = Mutex::new(None);
+static GEAR_URLS: Mutex<Option<std::collections::HashMap<String, Option<String>>>> =
+    Mutex::new(None);
 
 pub fn set_graphics_dir(dir: PathBuf) {
     if let Ok(mut g) = GRAPHICS_DIR.lock() {
@@ -169,6 +171,73 @@ pub fn paint_avatar(ui: &Ui, url: Option<&str>, p: [f32; 2], size: f32, letter: 
 
 pub fn item_url(db: &GameDb, id: u32) -> Option<&str> {
     db.items.get(&id).and_then(|i| i.icon.as_deref())
+}
+
+/// A representative icon for a gear slot the build names by prefix only (an
+/// optimized plate carries no item ids): the lowest-id exotic, else ascended,
+/// cached piece of that slot, armour weight and stat prefix. Memoised per
+/// slot key; the scan is one pass over the cached items of the type.
+pub fn gear_slot_url(db: &GameDb, profession: &str, slot: &str, prefix: &str) -> Option<String> {
+    let (item_type, detail, weight) = match slot {
+        "Helm" | "Shoulders" | "Coat" | "Gloves" | "Leggings" | "Boots" => (
+            "Armor",
+            slot,
+            gw2_optimizer::data::profession_profiles::profiles().armor_weight(profession),
+        ),
+        "Backpack" => ("Back", "", None),
+        "Accessory1" | "Accessory2" => ("Trinket", "Accessory", None),
+        "Ring1" | "Ring2" => ("Trinket", "Ring", None),
+        "Amulet" => ("Trinket", "Amulet", None),
+        _ => return None,
+    };
+    let key = format!("{item_type}|{detail}|{}|{prefix}", weight.unwrap_or(""));
+    let mut memo = GEAR_URLS.lock().ok()?;
+    let memo = memo.get_or_insert_with(std::collections::HashMap::new);
+    if let Some(hit) = memo.get(&key) {
+        return hit.clone();
+    }
+    let stat_ids: Vec<u32> = db
+        .itemstats
+        .values()
+        .filter(|s| s.name.eq_ignore_ascii_case(prefix.trim()))
+        .map(|s| s.id)
+        .collect();
+    let mut best: Option<(u8, u32, &str)> = None;
+    for id in db.items_by_type.get(item_type).into_iter().flatten() {
+        let Some(item) = db.items.get(id) else {
+            continue;
+        };
+        let Some(icon) = item.icon.as_deref() else {
+            continue;
+        };
+        let details = item.details.as_ref();
+        if !detail.is_empty() && details.and_then(|d| d.detail_type.as_deref()) != Some(detail) {
+            continue;
+        }
+        if weight.is_some() && details.and_then(|d| d.weight_class.as_deref()) != weight {
+            continue;
+        }
+        // A fixed-stat piece names the prefix in its infix; a selectable
+        // piece (every Marauder back item in the cache) lists it in its
+        // stat choices. A piece of the slot with neither is the last resort.
+        let infix = details
+            .and_then(|d| d.infix_upgrade.as_ref())
+            .and_then(|i| i.id);
+        let carries_prefix = infix.is_some_and(|i| stat_ids.contains(&i))
+            || details.is_some_and(|d| d.stat_choices.iter().any(|c| stat_ids.contains(c)));
+        let rank = u8::from(!carries_prefix) * 4
+            + match item.rarity.as_str() {
+                "Exotic" => 0,
+                "Ascended" => 1,
+                _ => 2,
+            };
+        if best.is_none_or(|(r, bid, _)| (rank, *id) < (r, bid)) {
+            best = Some((rank, *id, icon));
+        }
+    }
+    let url = best.map(|(_, _, u)| u.to_string());
+    memo.insert(key, url.clone());
+    url
 }
 
 pub fn skill_url(db: &GameDb, id: u32) -> Option<&str> {
