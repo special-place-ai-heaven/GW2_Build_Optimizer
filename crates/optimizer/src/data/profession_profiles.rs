@@ -98,7 +98,6 @@ impl ProfessionProfiles {
         self.map.get(profession)
     }
 
-    /// Number of loaded profiles.
     pub fn len(&self) -> usize {
         self.map.len()
     }
