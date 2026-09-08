@@ -15,6 +15,7 @@ pub mod patch_ledger;
 pub mod profession_profiles;
 pub mod quality;
 pub mod rotation_profiles;
+pub mod shroud;
 pub mod slot_budgets;
 pub mod universal_formulas;
 
