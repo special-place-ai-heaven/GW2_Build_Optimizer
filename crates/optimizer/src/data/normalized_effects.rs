@@ -1149,6 +1149,34 @@ mod tests {
 
     // ─── 10. Loader: baseline files parse successfully ───
 
+    /// Sprint 2 (T043): every record that uses this sprint's fields, or the
+    /// coefficient form of a proc, cites a dated wiki read.
+    #[test]
+    fn records_this_sprint_carry_read_dates() {
+        let data = effects();
+        for mode in ["PvE", "PvP", "WvW"] {
+            for effect in data.effects_for_mode(mode) {
+                let sprint2 = effect.health_threshold.is_some()
+                    || effect.proc_chance.is_some()
+                    || effect.trigger_scope.is_some()
+                    || (effect.category == EffectCategory::ProcEffect
+                        && effect.value.is_resolved()
+                        && matches!(effect.value, FactualValue::Resolved(v) if v <= 2.0));
+                if sprint2 {
+                    assert!(
+                        effect
+                            .source
+                            .as_deref()
+                            .is_some_and(|s| s.contains("(read 20")),
+                        "{mode} {} has no dated source: {:?}",
+                        effect.effect_id,
+                        effect.source
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_embedded_effects_load_successfully() {
         let data = effects();
