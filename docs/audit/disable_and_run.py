@@ -86,7 +86,12 @@ CONTROLS = {
         "reaper_shroud_drains_and_exits",
     ),
     # Sprint 3 controls (specs/007-trait-triggers): filled as each mechanism lands
-    "shroud_enter": (WT, "", "", "necro_shroud_enter_fires_once_at_entry"),
+    "shroud_enter": (
+        WT,
+        "        self.trigger_procs(TriggerRule::OnShroudEnter, Some(skill_id), false, 1.0);",
+        "        let _ = (TriggerRule::OnShroudEnter, skill_id); // seen-failing: entry site off",
+        "necro_shroud_enter_fires_once_at_entry",
+    ),
     "prereq": (WT, "", "", "necro_chilled_prerequisite_gates_chilling_nova"),
     "scope": (WT, "", "", "necro_shout_scope_fires_on_shouts_only"),
     "population": (WT, "", "", "population_havoc_credits_five_or_cap"),

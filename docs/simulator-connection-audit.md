@@ -248,6 +248,20 @@ Quoted blocks: `docs/audit/sprint3-failures.md` § coverage. Full lib run after 
 
 ### 9.2 Shroud
 
+US1 closed for the mechanism. `enter_shroud` ends with `trigger_procs(OnShroudEnter, entry skill)` and `exit_shroud(why)` starts with `trigger_procs(OnShroudExit)` while the state still stands (so an in-shroud prerequisite on an exit record holds); `why` reaches the `TraitFired` detail. `ConditionalKind::InShroud` is built from a `Conditional` record with `prerequisite.in_shroud: true` (strike or crit-damage payload), switched in `update_conditionals` (called at both transitions) and traced as `ShroudBonusActive`/`Ended`; a crit-damage bonus enters the strike through `strike_crit_factor_with_crit_damage` (percentage points on top of the ferocity multiplier). `ProcSpec.prerequisite` is carried; this step evaluates the shroud member only (`prerequisite_holds`), a foe member refuses with `foe prerequisite not evaluated` until 9.3. Every proc keeps its `ProcFired`; a trait record adds `TraitFired` with `at entry` / `at exit ({why})` and counts into `trait_fire_counts`. A shroud record that never fired because no shroud was entered goes on the coverage line as `(shroud never entered)` at the end of the run.
+
+| kind | test | disabled by (harness entry) | seen failing | passes now |
+|---|---|---|---|---|
+| positive control (entry) | `necro_shroud_enter_fires_once_at_entry` | `shroud_enter`: the entry call a no-op | `the entry record fires once at the entry; trace: [… no TraitFired …] left: 0 right: 1` (before the site: `ProcUnmodeled "Speed of Shadows (on-shroud-enter)" "no firing site"`) | one `TraitFired` at the `ShroudEntered` tick, Swiftness on |
+| timing (exit, three ways) | `necro_shroud_exit_fires_for_every_why` | `shroud_enter` run (exit needs an entry) | — | one fire each: `at exit (exit skill)`, `at exit (life force 0)` by drain, by a 6 000 strike at 3 000 ms |
+| conditional (in shroud) | `necro_in_shroud_bonus_active_only_inside` | — | — | Gravedigger equal with and without, Life Rend + Soul Spiral higher, `×1.15 crit damage` on at entry, off at exit |
+| Scourge rule | `necro_desert_shroud_is_the_scourge_entry` | — | — | Desert Shroud enters and fires; Manifest Sand Shade never |
+| ablation | `necro_removed_trait_changes_results` | — | — | an entry burst record raises `total_damage`; without it no fire |
+| determinism | `necro_results_repeat_identically` | — | — | ten runs identical (trace, coverage, counts) |
+| refusal (no shroud) | `necro_shroud_trigger_without_shroud_floor_never_fires` | — | — | refused entry, no fire, `Speed of Shadows (shroud never entered)` with class `NoFiringSite` |
+
+Deferred to 9.5: a timed strike bonus after a proc (Soul Barbs' +10 % for 10 s) needs a `ConditionalKind` with an expiry; the entry-burst record stands in for it here. Full lib run after the step: 1 172 passed, 16.33 s.
+
 ### 9.3 Prerequisites and scopes
 
 ### 9.4 Population

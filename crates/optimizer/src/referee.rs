@@ -1358,6 +1358,7 @@ mod tests {
                 resource_model_complete: true,
                 unmodeled_sources: Vec::new(),
                 coverage: Vec::new(),
+                trait_fire_counts: std::collections::BTreeMap::new(),
                 trace: Vec::new(),
                 trace_truncated: false,
                 proc_trials: Vec::new(),
