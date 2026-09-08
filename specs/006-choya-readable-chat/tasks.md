@@ -78,17 +78,17 @@ description: "Task list for Choya readable chat (006)"
 
 ### Tests
 
-- [ ] T015 [P] [US2] Add tests in `crates/addon/src/ui/comparison.rs`: `tab_kind_from_suggestion` (empty `source_url` → Optimized; GuildJen URL → Published("GuildJen"); Current pseudo-tab when a character is selected); `published_label_is_site_and_build`
-- [ ] T016 [P] [US2] Add test `tab_tints_keep_contrast_over_every_preset` in `crates/addon/src/ui/theme.rs`: for each preset and the custom-theme extremes (all-black, all-white base), the three fills differ pairwise and from `panel_bg` by at least the RGB distance the existing WCAG gate tests use
-- [ ] T017 [P] [US2] Add test `loaded_suggestion_pushes_not_replaces` in `crates/addon/src/ui/main_view/tabs/saveload.rs`: two suggestions in the strip, load a third → three tabs; load one with an existing label → still three, that tab replaced
+- [X] T015 [P] [US2] Add tests in `crates/addon/src/ui/comparison.rs`: `tab_kind_from_suggestion` (empty `source_url` → Optimized; GuildJen URL → Published("GuildJen"); Current pseudo-tab when a character is selected); `published_label_is_site_and_build`
+- [X] T016 [P] [US2] Add test `tab_tints_keep_contrast_over_every_preset` in `crates/addon/src/ui/theme.rs`: for each preset and the custom-theme extremes (all-black, all-white base), the three fills differ pairwise and from `panel_bg` by at least the RGB distance the existing WCAG gate tests use
+- [X] T017 [P] [US2] Add test `loaded_suggestion_pushes_not_replaces` in `crates/addon/src/ui/main_view/tabs/saveload.rs`: two suggestions in the strip, load a third → three tabs; load one with an existing label → still three, that tab replaced
 
 ### Implementation
 
-- [ ] T018 [US2] Add `enum TabKind { Current, Optimized, Published(String) }` and `fn tab_kind(s: &BuildSuggestion) -> TabKind` (derived, never stored) in `crates/addon/src/ui/comparison.rs`; site from `source_url` via the existing `site_colour` host mapping; T015 green
-- [ ] T019 [US2] Add `pub fn tab_tint(kind_colour: [f32;4]) -> TabTint { fill, rim, selected_fill, selected_text }` to `crates/addon/src/ui/theme.rs` per research R2 (`lerp(pal().chip_idle_fill, kind, 0.30)`, rim at chip rim alpha, selected kind at 0.85 with `gold_button_text`); T016 green
-- [ ] T020 [US2] Rewrite the strip in `render_comparison` (`crates/addon/src/ui/comparison.rs` ~line 519): always render when a character is selected or >1 suggestion; first tab Current (`cmp.tab_current`) → `show_optimized = false`; each suggestion tab styled with `tab_tint(CURRENT | OPTIMIZED | site_colour)` via `push_style_color` on `Selectable` header/hovered/active; Published label `"{site} · {build}"`; strip wraps like `render_result_pane_tabs`
-- [ ] T021 [US2] Change `apply_loaded_suggestion` in `crates/addon/src/ui/main_view/tabs/saveload.rs` to push (replace same label) instead of clearing the strip; T017 green
-- [ ] T022 [US2] Run the US2 tests, `cargo fmt --all`; commit "Comparison: current, optimized and published tabs tinted by kind; loads push (006 US2)"
+- [X] T018 [US2] Add `enum TabKind { Current, Optimized, Published(String) }` and `fn tab_kind(s: &BuildSuggestion) -> TabKind` (derived, never stored) in `crates/addon/src/ui/comparison.rs`; site from `source_url` via the existing `site_colour` host mapping; T015 green
+- [X] T019 [US2] Add `pub fn tab_tint(kind_colour: [f32;4]) -> TabTint { fill, rim, selected_fill, selected_text }` to `crates/addon/src/ui/theme.rs` per research R2 (`lerp(pal().chip_idle_fill, kind, 0.30)`, rim at chip rim alpha, selected kind at 0.85 with `gold_button_text`); T016 green
+- [X] T020 [US2] Rewrite the strip in `render_comparison` (`crates/addon/src/ui/comparison.rs` ~line 519): always render when a character is selected or >1 suggestion; first tab Current (`cmp.tab_current`) → `show_optimized = false`; each suggestion tab styled with `tab_tint(CURRENT | OPTIMIZED | site_colour)` via `push_style_color` on `Selectable` header/hovered/active; Published label `"{site} · {build}"`; strip wraps like `render_result_pane_tabs`
+- [X] T021 [US2] Change `apply_loaded_suggestion` in `crates/addon/src/ui/main_view/tabs/saveload.rs` to push (replace same label) instead of clearing the strip; T017 green
+- [X] T022 [US2] Run the US2 tests, `cargo fmt --all`; commit "Comparison: current, optimized and published tabs tinted by kind; loads push (006 US2)"
 
 **Checkpoint**: US2 complete and independently testable.
 
