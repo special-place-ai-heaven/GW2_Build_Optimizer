@@ -1,0 +1,4 @@
+{"at":"2026-09-07T22:39:35.879Z","event":"start","label":"candidate-1-diagnostic"}
+{"at":"2026-09-07T22:39:37.345Z","event":"prompt","chars":66531,"tools":20}
+{"at":"2026-09-07T22:40:16.362Z","event":"result","status":"FAIL","model":"google/gemini-3.8-flash","rounds":2,"wire":3,"seconds":39,"failure_kind":"validation","validation_detail":"1 validation error(s): Gear prefix 'Marauder's' not found"}
+{"at":"2026-09-07T22:40:16.367Z","event":"exit","code":1}

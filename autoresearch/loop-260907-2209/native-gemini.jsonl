@@ -1,0 +1,4 @@
+{"at":"2026-09-07T22:32:07.646Z","event":"start","label":"native-gemini"}
+{"at":"2026-09-07T22:32:08.923Z","event":"prompt","chars":66531,"tools":20}
+{"at":"2026-09-07T22:32:11.104Z","event":"result","status":"FAIL","model":"gemini-3.8-flash","rounds":2,"wire":3,"seconds":2.2}
+{"at":"2026-09-07T22:32:11.111Z","event":"exit","code":1}

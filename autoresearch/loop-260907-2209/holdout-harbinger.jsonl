@@ -1,0 +1,4 @@
+{"at":"2026-09-07T22:48:01.056Z","event":"start","label":"holdout-harbinger"}
+{"at":"2026-09-07T22:48:02.279Z","event":"prompt","chars":67263,"tools":20}
+{"at":"2026-09-07T22:48:11.699Z","event":"result","status":"FAIL","model":"gemini-2.5-flash","rounds":2,"wire":3,"seconds":9.4,"failure_kind":"unclassified","specs":[]}
+{"at":"2026-09-07T22:48:11.704Z","event":"exit","code":1}

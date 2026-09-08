@@ -1,0 +1,385 @@
+{
+  "guard": "pass",
+  "baseline": [
+    {
+      "at": "2026-09-07T22:29:27.747Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 8,
+      "wire": 9,
+      "seconds": 102.9
+    },
+    {
+      "at": "2026-09-07T22:30:00.306Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "rounds": 3,
+      "wire": 4,
+      "seconds": 32.6
+    },
+    {
+      "at": "2026-09-07T22:31:04.363Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 4,
+      "wire": 5,
+      "seconds": 64.1
+    },
+    {
+      "at": "2026-09-07T22:31:46.414Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 42.1
+    },
+    {
+      "at": "2026-09-07T22:32:43.852Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 5,
+      "wire": 6,
+      "seconds": 57.4
+    },
+    {
+      "at": "2026-09-07T22:33:14.630Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "rounds": 2,
+      "wire": 4,
+      "seconds": 30.8
+    }
+  ],
+  "candidate": [
+    {
+      "at": "2026-09-08T15:21:05.211Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 51.1,
+      "failure_kind": null,
+      "specs": [
+        "Spite",
+        "Soul Reaping",
+        "Reaper"
+      ]
+    },
+    {
+      "at": "2026-09-08T15:21:57.960Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 52.7,
+      "failure_kind": "missing-slots",
+      "validation_detail": "plate has missing weapons, upgrades or gear prefixes",
+      "specs": []
+    },
+    {
+      "at": "2026-09-08T15:22:46.119Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 48.2,
+      "failure_kind": null,
+      "specs": [
+        "Spite",
+        "Soul Reaping",
+        "Reaper"
+      ]
+    },
+    {
+      "at": "2026-09-08T15:23:16.055Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 29.9,
+      "failure_kind": null,
+      "specs": [
+        "Reaper",
+        "Soul Reaping",
+        "Blood Magic"
+      ]
+    },
+    {
+      "at": "2026-09-08T15:24:41.266Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 5,
+      "wire": 6,
+      "seconds": 85.2,
+      "failure_kind": null,
+      "specs": [
+        "Spite",
+        "Soul Reaping",
+        "Reaper"
+      ]
+    },
+    {
+      "at": "2026-09-08T15:25:02.376Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 21.1,
+      "failure_kind": null,
+      "specs": [
+        "Soul Reaping",
+        "Spite",
+        "Reaper"
+      ]
+    }
+  ],
+  "prefix_candidate": [
+    {
+      "at": "2026-09-07T22:48:44.080Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 5,
+      "wire": 6,
+      "seconds": 290,
+      "failure_kind": "transport",
+      "specs": []
+    },
+    {
+      "at": "2026-09-07T22:49:14.614Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 30.5,
+      "failure_kind": null,
+      "specs": [
+        "Reaper",
+        "Soul Reaping",
+        "Blood Magic"
+      ]
+    },
+    {
+      "at": "2026-09-07T22:50:50.545Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 9,
+      "wire": 10,
+      "seconds": 95.9,
+      "failure_kind": null,
+      "specs": [
+        "Spite",
+        "Soul Reaping",
+        "Reaper"
+      ]
+    },
+    {
+      "at": "2026-09-07T22:51:49.044Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "rounds": 3,
+      "wire": 4,
+      "seconds": 58.5,
+      "failure_kind": "validation",
+      "validation_detail": "1 validation error(s): Sigil 'Superior [PERSON_NAME] of the Night' not found in game data",
+      "specs": []
+    }
+  ],
+  "discarded_candidate": [
+    {
+      "at": "2026-09-07T22:35:05.281Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 50.4,
+      "failure_kind": "validation"
+    },
+    {
+      "at": "2026-09-07T22:36:17.075Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 71.8,
+      "failure_kind": "specializations"
+    },
+    {
+      "at": "2026-09-07T22:37:12.126Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 4,
+      "wire": 5,
+      "seconds": 55.1,
+      "failure_kind": "validation"
+    },
+    {
+      "at": "2026-09-07T22:37:48.952Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 36.8,
+      "failure_kind": "missing-slots"
+    },
+    {
+      "at": "2026-09-07T22:38:32.576Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 43.6,
+      "failure_kind": "validation"
+    },
+    {
+      "at": "2026-09-07T22:39:04.521Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 31.9,
+      "failure_kind": null
+    }
+  ],
+  "holdout": [
+    {
+      "at": "2026-09-08T15:24:44.483Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "gemini-3.8-flash",
+      "rounds": 2,
+      "wire": 5,
+      "seconds": 231.3,
+      "failure_kind": "unclassified",
+      "specs": []
+    },
+    {
+      "at": "2026-09-08T15:31:25.679Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "gemini-3.8-flash",
+      "rounds": 4,
+      "wire": 7,
+      "seconds": 314.9,
+      "failure_kind": "transport",
+      "specs": []
+    },
+    {
+      "at": "2026-09-08T15:29:29.733Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 9,
+      "wire": 10,
+      "seconds": 100.7,
+      "failure_kind": null,
+      "specs": [
+        "Blood Magic",
+        "Soul Reaping",
+        "Scourge"
+      ],
+      "route": "openrouter"
+    },
+    {
+      "at": "2026-09-08T19:02:27.137Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "google/gemini-3.8-flash",
+      "rounds": 5,
+      "wire": 6,
+      "seconds": 25.9,
+      "failure_kind": null,
+      "specs": [
+        "Curses",
+        "Death Magic",
+        "Ritualist"
+      ],
+      "route": "openrouter"
+    }
+  ],
+  "previous_holdout": [
+    {
+      "at": "2026-09-07T22:46:38.724Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "gemini-2.5-flash",
+      "rounds": 3,
+      "wire": 4,
+      "seconds": 19.5,
+      "failure_kind": null,
+      "specs": [
+        "Spite",
+        "Soul Reaping",
+        "Reaper"
+      ]
+    },
+    {
+      "at": "2026-09-07T22:48:11.699Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "gemini-2.5-flash",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 9.4,
+      "failure_kind": "unclassified",
+      "specs": []
+    }
+  ],
+  "native_gemini": [
+    {
+      "at": "2026-09-07T22:32:11.104Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "gemini-3.8-flash",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 2.2
+    },
+    {
+      "at": "2026-09-07T22:34:42.303Z",
+      "event": "result",
+      "status": "FAIL",
+      "model": "gemini-3.8-flash",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 1.7,
+      "failure_kind": "daily-quota"
+    },
+    {
+      "at": "2026-09-07T22:44:37.568Z",
+      "event": "result",
+      "status": "PASS",
+      "model": "gemini-2.5-flash",
+      "rounds": 2,
+      "wire": 3,
+      "seconds": 16.3,
+      "failure_kind": null,
+      "specs": [
+        "Spite",
+        "Soul Reaping",
+        "Reaper"
+      ]
+    }
+  ]
+}

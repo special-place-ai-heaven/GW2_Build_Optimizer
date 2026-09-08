@@ -1,0 +1,4 @@
+{"at":"2026-09-07T22:44:20.109Z","event":"start","label":"native-gemini-alternate"}
+{"at":"2026-09-07T22:44:21.312Z","event":"prompt","chars":67241,"tools":20}
+{"at":"2026-09-07T22:44:37.568Z","event":"result","status":"PASS","model":"gemini-2.5-flash","rounds":2,"wire":3,"seconds":16.3,"failure_kind":null,"specs":["Spite","Soul Reaping","Reaper"]}
+{"at":"2026-09-07T22:44:37.614Z","event":"exit","code":0}
