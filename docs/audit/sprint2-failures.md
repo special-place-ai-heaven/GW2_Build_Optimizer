@@ -97,9 +97,61 @@ the stowed sigil's record is loaded (it has a trial entry): []
 
 ### reaper_scholar_applies_only_above_threshold
 
+Before the timeline had conditional specs (2026-09-08), all three US3 controls and the
+PvE guard's first run:
+
+```
+thread 'rotation::wvw_timeline::reaper_experiments::reaper_scholar_applies_only_above_threshold' (1629080) panicked at crates\optimizer\src\rotation\wvw_timeline.rs:4916:9:
+the threshold is true at the start of the fight: []
+
+--
+thread 'rotation::wvw_timeline::reaper_experiments::reaper_unresolved_conditional_stays_named' (1689712) panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5043:9:
+named as unresolved: ["Superior Rune of the Scholar (on-health-threshold)"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+--
+thread 'rotation::wvw_timeline::reaper_experiments::reaper_thief_stacks_cap_and_expire' (1661240) panicked at crates\optimizer\src\rotation\wvw_timeline.rs:4994:9:
+six qualifying weapon-skill hits gain or refresh: []
+
+--
+thread 'referee::tests::pve_output_unchanged_by_conditional_tagging' (1689748) panicked at crates\optimizer\src\referee.rs:2974:13:
+PvE value 0 moved: got [0.01988142845871873, 0.0, 0.05594285714285714, 0.15, 0.4302897574123989, 0.03833333333333334, 0.09310281831080738], pinned [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+```
+
+Harness after the edit (`threshold`: the threshold forced true; `stack`: the cap removed):
+
+```
+### threshold
+file: crates/optimizer/src/rotation/wvw_timeline.rs
+disabled: let holds = if above {
+test: reaper_scholar_applies_only_above_threshold
+panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5126:9:
+the bonus expires at the crossing: []
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1147 filtered out; finished in 0.01s
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+restored: byte-identical
+
+### stack
+file: crates/optimizer/src/rotation/wvw_timeline.rs
+disabled: spec.stacks = (spec.stacks + 1).min(max);
+test: reaper_thief_stacks_cap_and_expire
+panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5180:9:
+never a sixth stack: [TraceEvent { t_ms: 400, kind: StackGained, source: "Relic of the Thief", detail: "1/5" }, TraceEvent { t_ms: 750, kind: StackGained, source: "Relic of the Thief", detail: "2/5" }, TraceEvent { t_ms: 1250, kind: StackGained, source: "Relic of the Thief", detail: "3/5" }, TraceEvent { t_ms: 1550, kind: StackGained, source: "Relic of the Thief", detail: "4/5" }, TraceEvent { t_ms: 1800, kind: StackGained, source: "Relic of the Thief", detail: "5/5" }, TraceEvent { t_ms: 3050, kind: StackGained, source: "Relic of the Thief", detail: "6/5" }, TraceEvent { t_ms: 9250, kind: StackGained, source: "Relic of the Thief", detail: "1/5" }, TraceEvent { t_ms: 9600, kind: StackGained, source: "Relic of the Thief", detail: "2/5" }]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1147 filtered out; finished in 0.01s
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+restored: byte-identical
+```
+
 ### reaper_thief_stacks_cap_and_expire
 
+See the block above (same runs).
+
 ### reaper_unresolved_conditional_stays_named
+
+See the block above: before the edit the rune was named "(on-health-threshold)", an unsupported trigger, never "(unresolved value)".
 
 ## US4 dark combos
 
