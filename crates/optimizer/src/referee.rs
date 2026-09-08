@@ -2941,6 +2941,284 @@ mod tests {
         // (CONN-01-04). They cannot be compared here.
     }
 
+    /// SC-005 (Sprint 2, T041): a real Necromancer Reaper build from the
+    /// character cache, real skills and traits through the real builder,
+    /// evaluated in WvW. Needs `dev.cfg`; run with `--ignored`.
+    ///
+    /// The cached build's own upgrades are printed with the coverage line
+    /// (they may or may not have records); then the same build carries the
+    /// three sources this sprint recorded and each must execute.
+    #[test]
+    #[ignore = "reads the game cache through dev.cfg"]
+    fn reaper_cached_build_has_recorded_sources() {
+        use crate::rotation::wvw_timeline::TraceKind;
+        let Ok(cache_dir) = gw2_api::dev_config::cache_dir() else {
+            println!("no dev.cfg: nothing to check");
+            return;
+        };
+        let cache = gw2_api::cache::DataCache::new(cache_dir.clone());
+        let db = GameDb::load(&cache).expect("the cache holds a full GameDb");
+        let reaper_spec = db
+            .specializations
+            .values()
+            .find(|s| s.name == "Reaper" && s.profession == "Necromancer")
+            .map(|s| s.id)
+            .expect("Reaper exists");
+
+        // The first cached Necromancer build tab that runs Reaper.
+        let mut found: Option<(String, serde_json::Value, serde_json::Value)> = None;
+        for entry in std::fs::read_dir(&cache_dir).expect("cache dir") {
+            let path = entry.expect("entry").path();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            if !name.starts_with("char_") || !name.ends_with("_buildtabs.json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("read build tabs");
+            let tabs: serde_json::Value = serde_json::from_str(&text).expect("json");
+            let Some(tabs) = tabs.as_array() else {
+                continue;
+            };
+            for tab in tabs {
+                let build = &tab["build"];
+                let is_reaper = build["profession"] == "Necromancer"
+                    && build["specializations"]
+                        .as_array()
+                        .is_some_and(|specs| specs.iter().any(|s| s["id"] == reaper_spec));
+                if is_reaper {
+                    let equip_path = path.with_file_name(name.replace("_buildtabs", "_equiptabs"));
+                    let equip: serde_json::Value = std::fs::read_to_string(&equip_path)
+                        .ok()
+                        .and_then(|t| serde_json::from_str(&t).ok())
+                        .unwrap_or(serde_json::Value::Null);
+                    let equip_tab = equip
+                        .as_array()
+                        .and_then(|tabs| {
+                            tabs.iter()
+                                .find(|e| e["tab"] == tab["tab"])
+                                .or_else(|| tabs.iter().find(|e| e["is_active"] == true))
+                                .cloned()
+                        })
+                        .unwrap_or(serde_json::Value::Null);
+                    found = Some((name.clone(), build.clone(), equip_tab));
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        let Some((file, build, equip)) = found else {
+            println!("no Reaper build tab in the cache: nothing to check");
+            return;
+        };
+        println!("cached Reaper build from {file}: {}", build["name"]);
+
+        let trait_name = |id: u64| db.traits.get(&(id as u32)).map(|t| t.name.clone());
+        let specs: Vec<serde_json::Value> = build["specializations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| {
+                let name = db
+                    .specializations
+                    .get(&(s["id"].as_u64().unwrap() as u32))
+                    .map(|sp| sp.name.clone())
+                    .unwrap_or_default();
+                let traits: Vec<String> = s["traits"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|t| t.as_u64().and_then(trait_name))
+                    .collect();
+                serde_json::json!({"name": name, "traits": traits})
+            })
+            .collect();
+        let skill_name = |v: &serde_json::Value| {
+            v.as_u64()
+                .and_then(|id| db.skills.get(&(id as u32)))
+                .map(|s| s.name.clone())
+        };
+        let utilities: Vec<serde_json::Value> = build["skills"]["utilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|u| serde_json::json!(skill_name(u)))
+            .collect();
+
+        // Equipment: weapon types and the cached upgrades.
+        let slot = |name: &str| {
+            equip["equipment"]
+                .as_array()
+                .and_then(|items| items.iter().find(|e| e["slot"] == name).cloned())
+        };
+        let item_type = |v: &serde_json::Value| {
+            v["id"]
+                .as_u64()
+                .and_then(|id| db.items.get(&(id as u32)))
+                .and_then(|i| i.details.as_ref().and_then(|d| d.detail_type.clone()))
+        };
+        let upgrade_names = |v: &serde_json::Value| -> Vec<String> {
+            v["upgrades"]
+                .as_array()
+                .map(|u| {
+                    u.iter()
+                        .filter_map(|id| id.as_u64())
+                        .filter_map(|id| db.items.get(&(id as u32)).map(|i| i.name.clone()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let a1 = slot("WeaponA1").unwrap_or(serde_json::Value::Null);
+        let a2 = slot("WeaponA2").unwrap_or(serde_json::Value::Null);
+        let b1 = slot("WeaponB1").unwrap_or(serde_json::Value::Null);
+        let b2 = slot("WeaponB2").unwrap_or(serde_json::Value::Null);
+        let weapons = serde_json::json!({
+            "set1": {"main": item_type(&a1), "off": item_type(&a2)},
+            "set2": {"main": item_type(&b1), "off": item_type(&b2)},
+        });
+        let cached_rune = slot("Coat")
+            .map(|coat| upgrade_names(&coat))
+            .and_then(|u| u.first().cloned());
+        let mut cached_sigils = upgrade_names(&a1);
+        cached_sigils.extend(upgrade_names(&a2));
+        cached_sigils.extend(upgrade_names(&b1));
+        cached_sigils.extend(upgrade_names(&b2));
+        let cached_relic = slot("Relic")
+            .and_then(|r| r["id"].as_u64())
+            .and_then(|id| db.items.get(&(id as u32)).map(|i| i.name.clone()));
+        println!(
+            "cached upgrades: rune {cached_rune:?}, sigils {cached_sigils:?}, relic {cached_relic:?}"
+        );
+
+        let (bal, scenario) = crate::rotation::reaper_fixture::scenario();
+        let weights = OptimizationWeights::default();
+        let evaluate = |rune: Option<String>, sigils: Vec<String>, relic: Option<String>| {
+            let mut plate = serde_json::json!({
+                "specializations": specs,
+                "weapons": weapons,
+                "skills": {
+                    "heal": skill_name(&build["skills"]["heal"]),
+                    "utilities": utilities,
+                    "elite": skill_name(&build["skills"]["elite"]),
+                },
+                "rune": rune,
+                "sigils": sigils,
+                "relic": relic,
+                "stat_prefix": "Marauder",
+                "explanation": "cached build",
+            });
+            let parsed =
+                crate::prompts::parse_gemini_build(&plate.to_string()).expect("plate parses");
+            let mut validated =
+                crate::validation::validate_gemini_build(&parsed, &db, "Necromancer");
+            if !validated.errors.is_empty() {
+                // The cached weapons may not validate (aquatic/legendary
+                // quirks); fall back to a real land kit and say so.
+                println!(
+                    "cached weapons rejected ({:?}); using Greatsword / Axe + Focus",
+                    validated.errors
+                );
+                plate["weapons"] = serde_json::json!({
+                    "set1": {"main": "Greatsword", "off": null},
+                    "set2": {"main": "Axe", "off": "Focus"},
+                });
+                let parsed =
+                    crate::prompts::parse_gemini_build(&plate.to_string()).expect("plate parses");
+                validated = crate::validation::validate_gemini_build(&parsed, &db, "Necromancer");
+            }
+            assert!(validated.errors.is_empty(), "{:?}", validated.errors);
+            let report = super::evaluate_validated_build_with(
+                &validated,
+                &db,
+                "Necromancer",
+                &weights,
+                &bal,
+                &scenario,
+                &[],
+            );
+            let (stats, _) =
+                crate::engine::calculate_validated_stats(&validated, &db, "Necromancer", &bal);
+            let mut prepared =
+                crate::engine::prepare_validated_rotation(&validated, &db, &stats, Some(&scenario))
+                    .expect("prepares");
+            prepared.params.precision = 3_000.0;
+            let traced = crate::engine::simulate_prepared_traced(
+                &prepared,
+                &validated,
+                &db,
+                Some(&scenario),
+            )
+            .wvw
+            .expect("WvW");
+            (report, traced)
+        };
+
+        // 1. The build as cached.
+        let (report, traced) = evaluate(cached_rune, cached_sigils, cached_relic);
+        println!(
+            "as cached: viable {} quality {:?}
+coverage: {:?}",
+            report.viability.is_viable, report.quality, traced.unmodeled_sources
+        );
+        let equipped_without_record: Vec<&String> = traced
+            .unmodeled_sources
+            .iter()
+            .filter(|s| s.ends_with("(no record)") && !s.contains('"'))
+            .collect();
+        println!("equipped triggered sources without a record: {equipped_without_record:?}");
+
+        // 2. The same real build carrying this sprint's recorded sources.
+        let (report, traced) = evaluate(
+            Some("Superior Rune of the Scholar".into()),
+            vec![
+                "Superior Sigil of Fire".into(),
+                "Superior Sigil of Force".into(),
+            ],
+            Some("Relic of the Thief".into()),
+        );
+        println!(
+            "with recorded sources: viable {} quality {:?}
+coverage: {:?}",
+            report.viability.is_viable, report.quality, traced.unmodeled_sources
+        );
+        for name in [
+            "Superior Sigil of Fire",
+            "Superior Rune of the Scholar",
+            "Relic of the Thief",
+        ] {
+            assert!(
+                !traced.unmodeled_sources.iter().any(|s| s.starts_with(name)),
+                "{name} left the coverage line: {:?}",
+                traced.unmodeled_sources
+            );
+        }
+        let has = |kind: TraceKind, source: &str| {
+            traced
+                .trace
+                .iter()
+                .any(|e| e.kind == kind && e.source.starts_with(source))
+        };
+        assert!(
+            has(TraceKind::ProcFired, "Superior Sigil of Fire"),
+            "Fire fired"
+        );
+        assert!(
+            has(
+                TraceKind::ConditionalActivated,
+                "Superior Rune of the Scholar"
+            ),
+            "Scholar active"
+        );
+        assert!(
+            has(TraceKind::StackGained, "Relic of the Thief"),
+            "Thief stacked"
+        );
+    }
+
     /// FR-010 guard (Sprint 2, T029): tagging conditional clauses in the
     /// parser and dividing them out on the WvW path must not move a single
     /// PvE number. Pinned before the parser change (commit e531a75).
