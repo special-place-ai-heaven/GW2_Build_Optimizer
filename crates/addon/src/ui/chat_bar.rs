@@ -258,7 +258,7 @@ fn draw_bubble_text(ui: &Ui, p: [f32; 2], lines: &[Line], msg_i: usize) {
                 let pos = [p[0] + BUBBLE_PAD + placed.x * scale, ty];
                 let text = placed.span.text.as_str();
                 let col = match &placed.span.style {
-                    SpanStyle::Plain | SpanStyle::Bold => th.cream,
+                    SpanStyle::Plain | SpanStyle::Bold | SpanStyle::Bullet => th.cream,
                     SpanStyle::Italic if has_italic => th.cream,
                     SpanStyle::Italic => th.muted,
                     SpanStyle::Name | SpanStyle::Arrow | SpanStyle::Link(_) => th.gold,
@@ -273,6 +273,35 @@ fn draw_bubble_text(ui: &Ui, p: [f32; 2], lines: &[Line], msg_i: usize) {
                     SpanStyle::Italic => {
                         let _italic = fonts::push_italic();
                         dl.add_text(pos, col, text);
+                    }
+                    // Shapes, not glyphs: `→` and `•` are missing from some
+                    // atlases and drew as `?` (in-game 2026-09-08).
+                    SpanStyle::Arrow => {
+                        let w = ui.calc_text_size(text)[0];
+                        let y = ty + line_h * 0.5;
+                        let (x0, x1) = (pos[0] + 3.0 * scale, pos[0] + w - 3.0 * scale);
+                        let h = (line_h * 0.18).max(2.0);
+                        dl.add_line([x0, y], [x1 - h, y], th.gold)
+                            .thickness(1.5 * scale)
+                            .build();
+                        dl.add_triangle(
+                            [x1 - h * 1.6, y - h],
+                            [x1, y],
+                            [x1 - h * 1.6, y + h],
+                            th.gold,
+                        )
+                        .filled(true)
+                        .build();
+                    }
+                    SpanStyle::Bullet => {
+                        let w = ui.calc_text_size(text)[0];
+                        dl.add_circle(
+                            [pos[0] + w * 0.35, ty + line_h * 0.55],
+                            (line_h * 0.13).max(2.0),
+                            th.cream,
+                        )
+                        .filled(true)
+                        .build();
                     }
                     SpanStyle::Link(url) => {
                         dl.add_text(pos, col, text);
