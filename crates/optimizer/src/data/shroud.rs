@@ -57,6 +57,11 @@ impl ShroudTable {
         self.shrouds.get(&entry_skill_id)
     }
 
+    /// The row whose name matches (fixtures and renamed ids).
+    pub fn row_by_name(&self, name: &str) -> Option<&ShroudRow> {
+        self.shrouds.values().find(|row| row.name == name)
+    }
+
     /// Life force capacity for a health pool (wiki `Life force`: 69 %).
     pub fn pool_for(&self, max_health: f64) -> f64 {
         max_health * self.life_force_pool_pct_of_health / 100.0

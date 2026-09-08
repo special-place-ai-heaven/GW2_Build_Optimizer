@@ -202,10 +202,68 @@ First run failed on its own premise (the finisher landed at 3 200 ms, inside the
 
 ### reaper_shroud_refused_without_life_force
 
+Before the shroud existed in the timeline (2026-09-08), all three runtime controls:
+
+```
+test rotation::wvw_timeline::reaper_experiments::reaper_shroud_refused_without_life_force ... FAILED
+test rotation::wvw_timeline::reaper_experiments::reaper_life_force_gain_capped ... FAILED
+test rotation::wvw_timeline::reaper_experiments::reaper_shroud_drains_and_exits ... FAILED
+
+--
+thread 'rotation::wvw_timeline::reaper_experiments::reaper_shroud_refused_without_life_force' (1787744) panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5400:9:
+entry refused: [TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "\"Chilled to the Bone!\" (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "\"You Are All Weaklings!\" (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "Death Spiral (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "Death's Charge (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "Dusk Strike (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "Ghastly Claws (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: ProcUnmodeled, s
+--
+thread 'rotation::wvw_timeline::reaper_experiments::reaper_life_force_gain_capped' (2437192) panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5429:9:
+Gravedigger's 8 % fact is credited: []
+--
+thread 'rotation::wvw_timeline::reaper_experiments::reaper_shroud_drains_and_exits' (2415876) panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5482:32:
+entered after the generators: [TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "\"Chilled to the Bone!\" (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "\"You Are All Weaklings!\" (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "Death Spiral (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "Death's Charge (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "Dusk Strike (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "Ghastly Claws (no record)", detail: "no record" }, TraceEvent { t_ms: 0, kind: P
+--
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 1152 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+```
+
+Harness `shroud_floor` (entry floor ignored) and `drain` (drain zeroed) after the edit:
+
+```
+### shroud_floor
+file: crates/optimizer/src/rotation/wvw_timeline.rs
+disabled: self.resources.get(&rule.kind).copied().unwrap_or(0.0) >= rule.cost.max(rule.entry_floor)
+test: reaper_shroud_refused_without_life_force
+panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5642:9:
+entry refused: [TraceEvent { t_ms: 0, kind: ShroudEntered, source: "Reaper's Shroud", detail: "0% life force" }, TraceEvent { t_ms: 50, kind: CastInterrupted, source: "Reaper's Shroud", detail: "0 hits lost" }, TraceEvent { t_ms: 50, kind: ShroudExited, source: "Reaper's Shroud", detail: "life force 0" }, TraceEvent { t_ms: 1050, kind: HitLanded, source: "Well of Suffering", detail: "149.4" }, TraceEvent { t_ms: 1150, kind: HitLanded, source: "Well of Suffering", detail: "149.4" }, TraceEvent { t_ms: 1250, kind: HitLanded, source: "Well of Suffering", detail: "149.4" }, TraceEvent { t_ms: 1350, kind: HitLanded, source: "Well of Suffering", detail: "149.4" }, TraceEvent { t_ms: 1450, kind: HitLanded, source: "Well of Suffering", detail: "149.4" }, TraceEvent { t_ms: 1450, kind: LifeForceGained, source: "Well of Suffering", detail: "5% → 5%" }, TraceEvent { t_ms: 2050, kind: HitLanded, source: "Gravedigger", detail: "1120.5" }, TraceEvent { t_ms: 2400, kind: HitLanded, source: "Gravedigger", detail: "1120.5" }, TraceEvent { t_ms: 2400, kind: LifeForceGained, source: "Gravedigger", detail: "8% → 13%" }]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1156 filtered out; finished in 0.01s
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+restored: byte-identical
+
+### drain
+file: crates/optimizer/src/rotation/wvw_timeline.rs
+disabled: *pool = (*pool - drain * seconds).max(0.0);
+test: reaper_shroud_drains_and_exits
+panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5742:32:
+exits at zero: []
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1156 filtered out; finished in 0.01s
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+restored: byte-identical
+```
+
 ### reaper_life_force_gain_capped
+
+See the block above (same run). The production WvW profile interrupts the opener, so the three controls run on an open profile with the engine's rules (`traced_open`).
 
 ### reaper_shroud_drains_and_exits
 
+See the block above (same run).
+
 ### shroud_bar_is_prepared_from_transform_skills
 
+Written together with `shroud_bar_for_build` (T048): before it the function did not exist, so the control could not compile (`error[E0425]: cannot find function shroud_bar_for_build`), the same seen-failing shape Sprint 1 recorded for a missing field.
+
 ### resource_model_completeness_matches_previous_list
+
+Written together with the derived rule (T050): the old allowlist returned `false` for Necromancer, which is the assertion the new rule flips; Thief, Revenant, Warrior, Mesmer stay `true`, Guardian, Elementalist, Engineer, Ranger stay `false`.

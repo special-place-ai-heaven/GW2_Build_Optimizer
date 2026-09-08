@@ -584,6 +584,19 @@ enum ConditionalKind {
     },
 }
 
+/// The Necromancer in shroud (`specs/005-wvw-proc-sites`, US6): the weapon
+/// bar is stowed for the shroud bar, life force drains, incoming damage goes
+/// to the pool at the mode's reduction, healing does nothing, and the shroud
+/// ends at zero or on the exit skill (wiki `Death Shroud`, read 2026-09-08).
+struct ShroudState {
+    entry_skill_id: u32,
+    drain_per_second: f64,
+    /// Share of incoming damage the pool takes (WvW: 0.5).
+    damage_factor: f64,
+    /// Recharge the entry skill gets when the shroud ends.
+    exit_recharge_ms: u32,
+}
+
 /// Unequipped weapon strength (wiki `Weapon strength`, read 2026-09-08): the
 /// value sigil flame blasts and similar procs use instead of the held weapon.
 const UNEQUIPPED_WEAPON_STRENGTH: f64 = 690.5;
@@ -693,6 +706,10 @@ struct Timeline<'a> {
     resources: HashMap<ResourceKind, f64>,
     resource_blocked_skills: HashSet<u32>,
     resource_model_complete: bool,
+    in_shroud: Option<ShroudState>,
+    weapon_set_before_shroud: u8,
+    /// Entry skills already refused once (one reason line each).
+    shroud_refused: HashSet<u32>,
 }
 
 /// Run the WvW exchange model. Effects resolve at cast completion, so incoming
@@ -860,6 +877,9 @@ impl<'a> Timeline<'a> {
             resources: initial_resources(resource_rules),
             resource_blocked_skills: HashSet::new(),
             resource_model_complete,
+            in_shroud: None,
+            weapon_set_before_shroud: 1,
+            shroud_refused: HashSet::new(),
         };
         state.load_normalized_effects(active_effects);
         state
@@ -1147,6 +1167,7 @@ impl<'a> Timeline<'a> {
             self.set_skill_cooldown(skill_id, cooldown_ms);
         }
         self.successful_action_count += 1;
+        self.gain_resource_on_use(self.skills[pending.skill_idx].skill_id);
         let protected_before = pending.protected_at_start || pending.saved_by_charge;
         let first_damage_event = self.damage_events.len();
         let control_before = self.control_landed_ms;
@@ -1198,6 +1219,14 @@ impl<'a> Timeline<'a> {
         let skill = &self.skills[skill_idx];
         self.pay_resource(skill.skill_id);
         self.resource_blocked_skills.remove(&skill.skill_id);
+        if let Some(rule) = self.resource_rules.get(&skill.skill_id).cloned() {
+            if rule.enters_shroud {
+                self.enter_shroud(skill.skill_id, &rule);
+            } else if rule.exits_shroud {
+                self.exit_shroud("exit skill");
+            }
+        }
+        let skill = &self.skills[skill_idx];
         self.apply_incoming_confusion_on_skill_use();
         let quickness = self.has_buff("Quickness");
         let cast_ms = if quickness {
@@ -1263,7 +1292,8 @@ impl<'a> Timeline<'a> {
                 continue;
             }
             if !self.skill_available(&self.skills[idx]) {
-                if self.weapon_swap_cooldown_ms.is_some()
+                if matches!(self.skills[idx].weapon_set, 1 | 2)
+                    && self.weapon_swap_cooldown_ms.is_some()
                     && self.now_ms >= self.weapon_swap_ready_ms
                 {
                     return None;
@@ -1272,6 +1302,12 @@ impl<'a> Timeline<'a> {
                 continue;
             }
             if !self.can_pay_resource(want) {
+                if self.note_shroud_refusal(want) {
+                    // A shroud entry the pool cannot afford is skipped with a
+                    // readable reason; the rest of the opener goes on.
+                    self.opener_cursor += 1;
+                    continue;
+                }
                 break;
             }
             self.opener_cursor += 1;
@@ -1288,6 +1324,7 @@ impl<'a> Timeline<'a> {
         let mut best: Option<(usize, f64)> = None;
         let mut filler = None;
         let mut highest_unpaid: Option<(u32, f64)> = None;
+        let mut refused_entries: Vec<u32> = Vec::new();
         for (idx, skill) in self.skills.iter().enumerate() {
             if self.cooldown_ready_ms[idx] > self.now_ms || !self.skill_available(skill) {
                 continue;
@@ -1336,6 +1373,10 @@ impl<'a> Timeline<'a> {
                 priority -= 500_000.0;
             }
             if !self.can_pay_resource(skill.skill_id) {
+                if self.is_shroud_entry(skill.skill_id) {
+                    refused_entries.push(skill.skill_id);
+                    continue;
+                }
                 if highest_unpaid
                     .as_ref()
                     .is_none_or(|(_, blocked_priority)| priority > *blocked_priority)
@@ -1347,6 +1388,9 @@ impl<'a> Timeline<'a> {
             if best.as_ref().is_none_or(|(_, score)| priority > *score) {
                 best = Some((idx, priority));
             }
+        }
+        for skill_id in refused_entries {
+            self.note_shroud_refusal(skill_id);
         }
         let legal_priority = best.as_ref().map(|(_, score)| *score).unwrap_or(0.0);
         if let Some((skill_id, blocked_priority)) = highest_unpaid {
@@ -1362,6 +1406,10 @@ impl<'a> Timeline<'a> {
     }
 
     fn try_weapon_swap(&mut self) {
+        if self.in_shroud.is_some() {
+            // wiki `Death Shroud`: no weapon swap while in shroud.
+            return;
+        }
         let Some(cooldown_ms) = self.weapon_swap_cooldown_ms else {
             return;
         };
@@ -1502,6 +1550,14 @@ impl<'a> Timeline<'a> {
         if self.avoids_attack(unblockable) || self.consume_stability() {
             return;
         }
+        self.cancel_pending_cast();
+        self.disabled_until_ms = self.disabled_until_ms.max(self.at(duration_ms));
+        self.protected_run_ms = 0;
+    }
+
+    /// The pending cast dies: its unlanded hits are lost and the skill gets
+    /// the interrupt recharge (control, or a forced shroud exit).
+    fn cancel_pending_cast(&mut self) {
         if let Some(pending) = self.pending.take() {
             if pending.started_at_ms < self.now_ms {
                 self.interrupted_casts += 1;
@@ -1520,8 +1576,114 @@ impl<'a> Timeline<'a> {
             }
             self.set_skill_cooldown(skill_id, INTERRUPT_COOLDOWN_MS);
         }
-        self.disabled_until_ms = self.disabled_until_ms.max(self.at(duration_ms));
-        self.protected_run_ms = 0;
+    }
+
+    fn is_shroud_entry(&self, skill_id: u32) -> bool {
+        self.resource_rules
+            .get(&skill_id)
+            .is_some_and(|rule| rule.enters_shroud)
+    }
+
+    /// A shroud entry the pool cannot afford: one readable reason per
+    /// entry skill and a trace event. Returns whether `skill_id` is one.
+    fn note_shroud_refusal(&mut self, skill_id: u32) -> bool {
+        let Some(rule) = self.resource_rules.get(&skill_id).cloned() else {
+            return false;
+        };
+        if !rule.enters_shroud {
+            return false;
+        }
+        if self.shroud_refused.insert(skill_id) {
+            let cap = resource_cap(ResourceKind::LifeForce, self.params.max_health).max(1.0);
+            let have = self
+                .resources
+                .get(&ResourceKind::LifeForce)
+                .copied()
+                .unwrap_or(0.0);
+            let name = self.skill_name(skill_id);
+            let reason = format!(
+                "{name} needs {:.0}% life force, had {:.0}%",
+                rule.entry_floor / cap * 100.0,
+                have / cap * 100.0
+            );
+            self.trace(TraceKind::ShroudRefused, &name, reason.clone());
+            self.shroud_refusals.push(reason);
+        }
+        true
+    }
+
+    fn enter_shroud(&mut self, skill_id: u32, rule: &SkillResourceRule) {
+        let exit_recharge_ms = self
+            .skills
+            .iter()
+            .find(|s| s.skill_id == skill_id)
+            .map(|s| s.cooldown_ms)
+            .unwrap_or(10_000);
+        self.weapon_set_before_shroud = self.active_weapon_set;
+        self.active_weapon_set = super::SHROUD_SET;
+        self.in_shroud = Some(ShroudState {
+            entry_skill_id: skill_id,
+            drain_per_second: rule.drain_per_second.max(0.0),
+            damage_factor: if rule.shroud_damage_factor.is_nan() {
+                1.0
+            } else {
+                rule.shroud_damage_factor
+            },
+            exit_recharge_ms,
+        });
+        let cap = resource_cap(ResourceKind::LifeForce, self.params.max_health).max(1.0);
+        let have = self
+            .resources
+            .get(&ResourceKind::LifeForce)
+            .copied()
+            .unwrap_or(0.0);
+        let name = self.skill_name(skill_id);
+        self.trace(
+            TraceKind::ShroudEntered,
+            &name,
+            format!("{:.0}% life force", have / cap * 100.0),
+        );
+    }
+
+    /// Leave shroud: `why` is `exit skill`, `opener` or `life force 0`; the
+    /// forced exit cancels the pending cast the way an interrupt does.
+    fn exit_shroud(&mut self, why: &str) {
+        let Some(state) = self.in_shroud.take() else {
+            return;
+        };
+        self.active_weapon_set = self.weapon_set_before_shroud;
+        if why == "life force 0" {
+            self.cancel_pending_cast();
+        }
+        self.set_skill_cooldown(state.entry_skill_id, state.exit_recharge_ms);
+        let name = self.skill_name(state.entry_skill_id);
+        self.trace(TraceKind::ShroudExited, &name, why);
+    }
+
+    /// Life force credited when a cast resolves (Percent fact "Life Force").
+    fn gain_resource_on_use(&mut self, skill_id: u32) {
+        let Some(rule) = self.resource_rules.get(&skill_id).cloned() else {
+            return;
+        };
+        if rule.gain_on_use <= 0.0 {
+            return;
+        }
+        let cap = resource_cap(rule.kind, self.params.max_health);
+        let resource = self.resources.entry(rule.kind).or_default();
+        *resource = (*resource + rule.gain_on_use).min(cap);
+        let pool = *resource;
+        if rule.kind == ResourceKind::LifeForce {
+            let name = self.skill_name(skill_id);
+            self.trace(
+                TraceKind::LifeForceGained,
+                &name,
+                format!(
+                    "{:.0}% → {:.0}%",
+                    rule.gain_on_use / cap.max(1.0) * 100.0,
+                    pool / cap.max(1.0) * 100.0
+                ),
+            );
+        }
     }
 
     fn receive_condition(&mut self, condition: String, stacks: u32, duration_ms: u32) {
@@ -1631,6 +1793,19 @@ impl<'a> Timeline<'a> {
             }
         }
         self.barrier_absorbed += absorbed;
+        if let Some(factor) = self.in_shroud.as_ref().map(|s| s.damage_factor) {
+            // In shroud the pool takes the (reduced) hit; what the pool
+            // cannot cover overflows to health.
+            let to_pool = remaining * factor;
+            let pool = self.resources.entry(ResourceKind::LifeForce).or_default();
+            let taken = to_pool.min(*pool);
+            *pool -= taken;
+            self.incoming_damage += taken;
+            remaining = to_pool - taken;
+            if *pool <= 0.0 {
+                self.exit_shroud("life force 0");
+            }
+        }
         self.incoming_damage += remaining;
         self.player_health = (self.player_health - remaining).max(0.0);
     }
@@ -2226,7 +2401,12 @@ impl<'a> Timeline<'a> {
             .and_then(|id| self.skills.iter().find(|s| s.skill_id == id))
             .map(|s| s.weapon_set)
             .filter(|set| matches!(set, 1 | 2))
-            .unwrap_or(self.active_weapon_set)
+            .unwrap_or(if self.active_weapon_set == super::SHROUD_SET {
+                // Sigils on the stowed weapon keep working in shroud.
+                self.weapon_set_before_shroud
+            } else {
+                self.active_weapon_set
+            })
     }
 
     /// The sources `load_normalized_effects` could not model are known before
@@ -2470,6 +2650,10 @@ impl<'a> Timeline<'a> {
     }
 
     fn heal(&mut self, amount: f64) {
+        if self.in_shroud.is_some() {
+            // wiki `Death Shroud`: necromancers cannot be healed in shroud.
+            return;
+        }
         let before = self.player_health;
         self.player_health = (self.player_health + amount).min(self.params.max_health);
         self.healing += self.player_health - before;
@@ -2525,7 +2709,7 @@ impl<'a> Timeline<'a> {
         let Some(rule) = self.resource_rules.get(&skill_id) else {
             return true;
         };
-        self.resources.get(&rule.kind).copied().unwrap_or(0.0) >= rule.cost
+        self.resources.get(&rule.kind).copied().unwrap_or(0.0) >= rule.cost.max(rule.entry_floor)
     }
 
     fn pay_resource(&mut self, skill_id: u32) {
@@ -2558,6 +2742,13 @@ impl<'a> Timeline<'a> {
 
     fn regenerate_resources(&mut self) {
         let seconds = TIMELINE_TICK_MS as f64 / 1_000.0;
+        if let Some(drain) = self.in_shroud.as_ref().map(|s| s.drain_per_second) {
+            let pool = self.resources.entry(ResourceKind::LifeForce).or_default();
+            *pool = (*pool - drain * seconds).max(0.0);
+            if *pool <= 0.0 {
+                self.exit_shroud("life force 0");
+            }
+        }
         if let Some(initiative) = self.resources.get_mut(&ResourceKind::Initiative) {
             *initiative = (*initiative + seconds).min(12.0);
         }
@@ -4870,6 +5061,54 @@ mod reaper_experiments {
             .expect("WvW scenario runs the timeline")
     }
 
+    /// The fixture with the engine's resource rules on an open profile (no
+    /// enemy pressure), trace on: the shroud experiments need casts that
+    /// resolve, and the production WvW profile interrupts the opener.
+    fn traced_open(build: &ValidatedBuild, opener: &[u32], duration_ms: u32) -> WvwCombatReport {
+        let db = fx::db();
+        let (ctx, scenario) = fx::scenario();
+        let (stats, _) = engine::calculate_validated_stats(build, &db, "Necromancer", &ctx);
+        let prepared = engine::prepare_validated_rotation(build, &db, &stats, Some(&scenario))
+            .expect("the fixture prepares a rotation");
+        let (rules, complete) = engine::wvw_resource_rules(
+            build,
+            &prepared.skills,
+            &db,
+            "Necromancer",
+            &ctx,
+            prepared.params.max_health,
+        );
+        let mut timeline = Timeline::new(
+            &prepared.skills,
+            &prepared.params,
+            open_profile(duration_ms, vec![]),
+            still_enemy(),
+            &[],
+            &rules,
+            complete,
+            Vec::new(),
+        );
+        timeline.opener = opener;
+        timeline.trace_enabled = true;
+        timeline.run();
+        timeline.report()
+    }
+
+    /// Copies with the shroud bar always held, for experiments that press
+    /// a shroud skill without modelling the shroud itself.
+    fn unshrouded(skills: &[RotationSkill]) -> Vec<RotationSkill> {
+        skills
+            .iter()
+            .cloned()
+            .map(|mut skill| {
+                if skill.weapon_set == super::super::SHROUD_SET {
+                    skill.weapon_set = 0;
+                }
+                skill
+            })
+            .collect()
+    }
+
     fn first_swap_ms(report: &WvwCombatReport) -> Option<u32> {
         report
             .trace
@@ -5289,7 +5528,10 @@ mod reaper_experiments {
     #[test]
     fn reaper_dark_whirl_life_steals() {
         let p = prepared();
-        let skills = only(&p.skills, &[fx::NIGHTFALL, fx::SHROUD_4, fx::GS_AUTO]);
+        let skills = unshrouded(&only(
+            &p.skills,
+            &[fx::NIGHTFALL, fx::SHROUD_4, fx::GS_AUTO],
+        ));
         // A wound first, so the leeching heal has something to fill.
         let wound = p.params.max_health * 0.3;
         let with_field = run(
@@ -5341,7 +5583,7 @@ mod reaper_experiments {
     #[test]
     fn reaper_expired_field_makes_no_combo() {
         let p = prepared();
-        let skills = only(
+        let skills = unshrouded(&only(
             &p.skills,
             &[
                 fx::NIGHTFALL,
@@ -5353,7 +5595,7 @@ mod reaper_experiments {
                 fx::SIGNET_OF_VAMPIRISM,
                 fx::GS_AUTO,
             ],
-        );
+        ));
         // Nightfall lasts 5 s; five casts push Soul Spiral past it.
         let report = run(
             &skills,
@@ -5384,6 +5626,138 @@ mod reaper_experiments {
             events(&report, TraceKind::ComboResolved, "Soul Spiral")
         );
         assert_eq!(report.combo_activations, 0);
+    }
+
+    // ── US6: life force and shroud (T044, T045) ─────────────────────────────
+
+    /// US6 scenario 2: with no life force, shroud entry is refused with a
+    /// readable reason and the shroud skills never land.
+    #[test]
+    fn reaper_shroud_refused_without_life_force() {
+        let report = traced_open(
+            &fx::build(),
+            &[fx::REAPER_SHROUD, fx::SHROUD_4, fx::SHROUD_1],
+            6_000,
+        );
+        assert!(
+            !events(&report, TraceKind::ShroudRefused, "Reaper's Shroud").is_empty(),
+            "entry refused: {:?}",
+            report.trace.iter().take(12).collect::<Vec<_>>()
+        );
+        // The scheduler may bank life force with the generators and enter
+        // later; the refusal comes first and nothing from the shroud bar
+        // lands before that entry.
+        let refused_at = events(&report, TraceKind::ShroudRefused, "Reaper's Shroud")[0].t_ms;
+        let entered_at = events(&report, TraceKind::ShroudEntered, "Reaper's Shroud")
+            .first()
+            .map(|e| e.t_ms)
+            .unwrap_or(u32::MAX);
+        assert!(
+            refused_at < entered_at,
+            "refused at {refused_at} before any entry at {entered_at}"
+        );
+        assert!(
+            report
+                .shroud_refusals
+                .iter()
+                .any(|r| r.contains("needs 10% life force")),
+            "a readable reason: {:?}",
+            report.shroud_refusals
+        );
+        assert!(
+            landed(&report, "Soul Spiral").is_empty() && landed(&report, "Life Rend").is_empty()
+                || events(&report, TraceKind::HitLanded, "Soul Spiral")
+                    .iter()
+                    .chain(&events(&report, TraceKind::HitLanded, "Life Rend"))
+                    .all(|e| e.t_ms >= entered_at),
+            "shroud skills never land outside shroud"
+        );
+    }
+
+    /// US6 scenario 1: a skill's Life Force fact raises the pool by that
+    /// share of the cap, and the pool never passes the cap.
+    #[test]
+    fn reaper_life_force_gain_capped() {
+        let report = traced_open(&fx::build(), &[fx::GRAVEDIGGER], 3_000);
+        let gained = events(&report, TraceKind::LifeForceGained, "Gravedigger");
+        assert!(
+            gained.first().is_some_and(|e| e.detail.starts_with("8%")),
+            "Gravedigger's 8 % fact is credited: {gained:?}"
+        );
+
+        let p = prepared();
+        let rule = SkillResourceRule {
+            skill_id: fx::GRAVEDIGGER,
+            kind: ResourceKind::LifeForce,
+            gain_on_use: 1.0e9,
+            ..Default::default()
+        };
+        let skills = only(&p.skills, &[fx::GRAVEDIGGER, fx::GS_AUTO]);
+        let mut timeline = Timeline::new(
+            &skills,
+            &p.params,
+            open_profile(3_000, vec![]),
+            still_enemy(),
+            &[],
+            &[rule],
+            true,
+            Vec::new(),
+        );
+        timeline.opener = &[fx::GRAVEDIGGER];
+        timeline.run();
+        let pool = timeline.resources[&ResourceKind::LifeForce];
+        let cap = resource_cap(ResourceKind::LifeForce, p.params.max_health);
+        assert!(
+            (pool - cap).abs() < 1e-6,
+            "gain past the cap is discarded: pool {pool} cap {cap}"
+        );
+    }
+
+    /// US6 scenario 3: shroud entered with the generators' life force
+    /// drains at the Reaper rate and ends at zero; weapon skills do not
+    /// land while it is up.
+    #[test]
+    fn reaper_shroud_drains_and_exits() {
+        let report = traced_open(
+            &fx::build(),
+            &[
+                fx::GRAVEDIGGER,
+                fx::DEATH_SPIRAL,
+                fx::REAPER_SHROUD,
+                fx::SHROUD_4,
+                fx::SHROUD_1,
+            ],
+            15_000,
+        );
+        let entered = events(&report, TraceKind::ShroudEntered, "Reaper's Shroud");
+        let entry = entered
+            .first()
+            .map(|e| e.t_ms)
+            .unwrap_or_else(|| panic!("entered after the generators: {:?}", report.trace));
+        let exited = events(&report, TraceKind::ShroudExited, "Reaper's Shroud");
+        let exit = exited
+            .iter()
+            .find(|e| e.detail.contains("life force 0"))
+            .map(|e| e.t_ms)
+            .unwrap_or_else(|| panic!("exits at zero: {exited:?}"));
+        // 8 % + 6 % of the pool at 5 %/s (WvW Reaper drain) ≈ 2.8 s, minus
+        // whatever shroud skills do not refill.
+        assert!(
+            (entry + 2_000..=entry + 3_500).contains(&exit),
+            "drain at 5 %/s from 14 %: entered {entry}, exited {exit}"
+        );
+        for skill in ["Gravedigger", "Death Spiral", "Dusk Strike"] {
+            assert!(
+                events(&report, TraceKind::HitLanded, skill)
+                    .iter()
+                    .all(|e| e.t_ms < entry || e.t_ms > exit),
+                "{skill} never lands inside shroud"
+            );
+        }
+        assert!(
+            !landed(&report, "Soul Spiral").is_empty() || !landed(&report, "Life Rend").is_empty(),
+            "shroud skills land inside shroud"
+        );
     }
 
     // ── Diagnostics (T022) ──────────────────────────────────────────────────
