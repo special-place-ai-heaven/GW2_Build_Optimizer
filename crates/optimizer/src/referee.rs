@@ -1349,6 +1349,8 @@ mod tests {
                 unmodeled_sources: Vec::new(),
                 trace: Vec::new(),
                 trace_truncated: false,
+                proc_trials: Vec::new(),
+                shroud_refusals: Vec::new(),
             }),
         }
     }

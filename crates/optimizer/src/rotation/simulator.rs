@@ -1321,9 +1321,20 @@ pub(super) fn strike_crit_factor_with_bonus(
         return 1.0;
     }
     let f = crate::data::universal_formulas::formulas();
-    let chance = ((f.crit_chance(precision) + crit_chance_bonus_pct) / 100.0).clamp(0.0, 1.0);
+    let chance = crit_chance_fraction(precision, crit_chance_bonus_pct);
     let crit_mult = f.crit_damage(ferocity) / 100.0;
     1.0 + chance * (crit_mult - 1.0)
+}
+
+/// Critical chance as a fraction in [0, 1], the same number the expected-crit
+/// damage factor above uses; zero precision means zero chance (the factor
+/// short-circuits to 1.0 there too).
+pub(super) fn crit_chance_fraction(precision: f64, crit_chance_bonus_pct: f64) -> f64 {
+    if precision <= 0.0 {
+        return 0.0;
+    }
+    let f = crate::data::universal_formulas::formulas();
+    ((f.crit_chance(precision) + crit_chance_bonus_pct) / 100.0).clamp(0.0, 1.0)
 }
 
 /// Intensity-stack cap from `data/formulas/conditions.json` `max_stacks`.

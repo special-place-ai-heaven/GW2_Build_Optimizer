@@ -3405,11 +3405,12 @@ mod tests {
             v["gates"].as_array().map(|g| g.len()),
             Some(report.viability.gates.len())
         );
-        // The unsupported on-crit sigil reaches Choya's evidence by name.
+        // The on-crit sigil executes (Sprint 2) and is no longer in Choya's
+        // coverage note; the sources without a record still are.
         assert!(
             v["coverage_note"]
                 .as_str()
-                .is_some_and(|s| s.contains("Superior Sigil of Fire (on-crit)")),
+                .is_some_and(|s| !s.contains("Sigil of Fire") && s.contains("(no record)")),
             "coverage_note: {}",
             v["coverage_note"]
         );

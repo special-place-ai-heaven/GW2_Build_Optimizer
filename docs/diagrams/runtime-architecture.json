@@ -1,0 +1,253 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "GW2 Build Optimizer runtime",
+    "locale": "en",
+    "output": "runtime-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/special-place-ai-heaven/GW2_Build_Optimizer",
+      "provider": "github",
+      "revision": "47214638052c3f0fd4d0c7c9d41cfc39282cd370"
+    },
+    "views": [
+      {
+        "id": "primary-path",
+        "label": "Optimize path",
+        "focus": ["player", "overlay", "optimizer", "gamedb"],
+        "note": "Player request through the overlay worker into optimize_v2 and in-process GameDb."
+      },
+      {
+        "id": "game-data",
+        "label": "Game data plane",
+        "focus": ["overlay", "gw2api", "gamedb", "arenanet"],
+        "note": "Cache fill and character reads use Gw2Client against api.guildwars2.com/v2."
+      },
+      {
+        "id": "trust-boundary",
+        "label": "Trust and keys",
+        "focus": ["secrets", "overlay", "llm", "feedback"],
+        "note": "API keys stay in addon_dir; LLM and feedback leave the process over HTTPS."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "player",
+      "type": "external",
+      "label": "Player",
+      "sublabel": "GW2 client",
+      "pos": [40, 250],
+      "size": [130, 60],
+      "sources": [
+        { "path": "crates/addon/src/lib.rs", "line": 157, "end_line": 170, "label": "toggle keybind" }
+      ]
+    },
+    {
+      "id": "overlay",
+      "type": "frontend",
+      "label": "Overlay UI",
+      "sublabel": "addon cdylib · ImGui",
+      "tag": "Nexus-hosted",
+      "pos": [300, 250],
+      "size": [160, 64],
+      "sources": [
+        { "path": "crates/addon/src/lib.rs", "line": 26, "end_line": 33, "label": "nexus::export" },
+        { "path": "crates/addon/src/lib.rs", "line": 130, "end_line": 218, "label": "on_load" },
+        { "path": "crates/addon/src/ui/main_view/optimize_flow.rs", "line": 72, "label": "optimize entry" }
+      ]
+    },
+    {
+      "id": "optimizer",
+      "type": "backend",
+      "label": "Optimizer engine",
+      "sublabel": "crates/optimizer",
+      "tag": "optimize_v2",
+      "pos": [580, 250],
+      "size": [160, 64],
+      "sources": [
+        { "path": "crates/addon/src/ui/main_view/optimize_flow.rs", "line": 234, "end_line": 272, "label": "worker call" },
+        { "path": "crates/optimizer/src/engine.rs", "line": 2204, "end_line": 2296, "label": "optimize_v2" },
+        { "path": "crates/addon/src/state.rs", "line": 392, "label": "spawn_worker" }
+      ]
+    },
+    {
+      "id": "gamedb",
+      "type": "database",
+      "label": "GameDb + cache",
+      "sublabel": "addon_dir/cache",
+      "pos": [860, 250],
+      "size": [160, 64],
+      "sources": [
+        { "path": "crates/optimizer/src/gamedb.rs", "line": 50, "label": "GameDb::load" },
+        { "path": "crates/gw2api/src/cache.rs", "line": 20, "label": "DataCache" }
+      ]
+    },
+    {
+      "id": "secrets",
+      "type": "security",
+      "label": "AppConfig",
+      "sublabel": "config.json",
+      "tag": "GW2 + LLM keys",
+      "pos": [300, 80],
+      "size": [160, 64],
+      "sources": [
+        { "path": "crates/core/src/config.rs", "line": 478, "label": "AppConfig" },
+        { "path": "crates/core/src/config.rs", "line": 1031, "end_line": 1033, "label": "setup complete" }
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "LLM providers",
+      "sublabel": "one active provider",
+      "pos": [580, 80],
+      "size": [160, 64],
+      "sources": [
+        { "path": "crates/optimizer/src/llm/mod.rs", "line": 404, "end_line": 452, "label": "create_client" }
+      ]
+    },
+    {
+      "id": "feedback",
+      "type": "external",
+      "label": "Feedback API",
+      "sublabel": "feedback.robagentic.tech",
+      "pos": [40, 420],
+      "size": [160, 64],
+      "sources": [
+        { "path": "crates/addon/src/feedback/client.rs", "line": 14, "label": "BASE URL" },
+        { "path": "server/feedback/src/main.rs", "line": 7, "end_line": 35, "label": "axum server" }
+      ]
+    },
+    {
+      "id": "gw2api",
+      "type": "backend",
+      "label": "Gw2Client",
+      "sublabel": "crates/gw2api",
+      "tag": "300 burst · 5/s",
+      "pos": [580, 420],
+      "size": [160, 64],
+      "sources": [
+        { "path": "crates/gw2api/src/client.rs", "line": 12, "label": "BASE_URL" },
+        { "path": "crates/gw2api/src/client.rs", "line": 159, "label": "Gw2Client" },
+        { "path": "crates/gw2api/src/download.rs", "line": 58, "end_line": 73, "label": "download_all" }
+      ]
+    },
+    {
+      "id": "arenanet",
+      "type": "external",
+      "label": "ArenaNet API",
+      "sublabel": "api.guildwars2.com/v2",
+      "pos": [860, 420],
+      "size": [160, 64],
+      "sources": [
+        { "path": "crates/gw2api/src/client.rs", "line": 12, "label": "v2 base" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "GW2 process · Nexus-hosted DLL",
+      "wraps": ["overlay", "optimizer", "gamedb", "secrets", "gw2api"],
+      "pad": 18
+    },
+    {
+      "kind": "security-group",
+      "label": "addon_dir · API keys",
+      "wraps": ["secrets"],
+      "pad": 14
+    }
+  ],
+  "connections": [
+    {
+      "id": "player-to-overlay",
+      "from": "player",
+      "to": "overlay",
+      "label": "Optimize",
+      "variant": "emphasis"
+    },
+    {
+      "id": "overlay-to-optimizer",
+      "from": "overlay",
+      "to": "optimizer",
+      "label": "optimize_v2",
+      "variant": "emphasis"
+    },
+    {
+      "id": "optimizer-to-gamedb",
+      "from": "optimizer",
+      "to": "gamedb",
+      "label": "in-process read"
+    },
+    {
+      "id": "overlay-to-secrets",
+      "from": "overlay",
+      "to": "secrets",
+      "label": "config.json",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "optimizer-to-llm",
+      "from": "optimizer",
+      "to": "llm",
+      "label": "optional advisor",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "overlay-to-feedback",
+      "from": "overlay",
+      "to": "feedback",
+      "label": "POST /v1/reports",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "overlay-to-gw2api",
+      "from": "overlay",
+      "to": "gw2api",
+      "label": "cache fill",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "gw2api-to-arenanet",
+      "from": "gw2api",
+      "to": "arenanet",
+      "label": "HTTPS /v2"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Primary path",
+      "items": [
+        "Nexus loads the DLL; Optimize spawns optimize_v2 against in-process GameDb",
+        "Fallbacks stay off the graph: beam → synergy → legacy"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Data and APIs",
+      "items": [
+        "download_all fills addon_dir/cache; optimize never calls ArenaNet",
+        "LLM is Gemini, OpenAI, Anthropic, or OpenRouter; chat/radio/news share the process"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Trust",
+      "items": [
+        "Setup needs a GW2 key, the active LLM key, and a cache build number",
+        "Feedback is axum + Postgres on a separate host; the DLL only POSTs"
+      ]
+    }
+  ]
+}

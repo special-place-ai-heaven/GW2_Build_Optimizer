@@ -37,6 +37,7 @@
       "value": 3.0,
       "stacking_rule": "Multiplicative",
       "trigger_rule": "OnHealthThreshold",
+      "health_threshold": { "above": true, "percent": 90.0 },
       "uptime_model": { "kind": "Unknown" },
       "evidence_level": "Derived",
       "source": "https://wiki.guildwars2.com/wiki/Superior_Rune_of_the_Scholar",

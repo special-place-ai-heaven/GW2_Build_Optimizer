@@ -15,8 +15,8 @@ use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
 
 use super::combat_model::{corrupt_into, EnemyDummy};
 use super::simulator::{
-    alacrity_cd_advance_ms, condition_tick_damage, reference_armor, strike_crit_factor_with_bonus,
-    SimParams,
+    alacrity_cd_advance_ms, condition_tick_damage, crit_chance_fraction, reference_armor,
+    strike_crit_factor_with_bonus, SimParams,
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect, SkillSlot};
@@ -126,22 +126,39 @@ const WVW_BARRIER_HEALTH_FRACTION: f64 = 0.25;
 // newest page wins until someone measures it.
 const INTERRUPT_COOLDOWN_MS: u32 = 4_000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ResourceKind {
+    #[default]
     Initiative,
     Energy,
     Adrenaline,
     Illusions,
     Blades,
+    /// Necromancer life force, in absolute units; the cap is 69 % of max
+    /// health (`data/formulas/shroud.json`).
+    LifeForce,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SkillResourceRule {
     pub skill_id: u32,
     pub kind: ResourceKind,
     pub cost: f64,
     pub gain_on_hit: f64,
     pub spend_all: bool,
+    // Sprint 2 (specs/005-wvw-proc-sites): life force and shroud
+    /// Resource credited when the cast resolves (Percent fact "Life Force").
+    pub gain_on_use: f64,
+    /// Minimum pool to start the cast (shroud entry: 10 % of the cap).
+    pub entry_floor: f64,
+    /// Pool lost per second while this skill's shroud is active.
+    pub drain_per_second: f64,
+    /// Incoming damage taken by the pool while in this shroud, as a
+    /// fraction after reduction (WvW: 0.5).
+    pub shroud_damage_factor: f64,
+    /// This skill enters / exits shroud.
+    pub enters_shroud: bool,
+    pub exits_shroud: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -192,6 +209,13 @@ pub struct WvwCombatReport {
     pub trace: Vec<TraceEvent>,
     /// True when an event past the cap was dropped.
     pub trace_truncated: bool,
+    /// Seeded on-crit trials, one entry per proc source. Empty unless
+    /// [`WvwTimelineInput::trace`] was set.
+    pub proc_trials: Vec<ProcTrial>,
+    /// Readable reasons a shroud entry was refused, e.g. `Reaper's Shroud
+    /// needs 10% life force, had 4%`. The referee appends them to the
+    /// quality reasons.
+    pub shroud_refusals: Vec<String>,
 }
 
 /// Upper bound on [`WvwCombatReport::trace`]. The 513th event is dropped and
@@ -218,6 +242,26 @@ pub enum TraceKind {
     ProcUnmodeled,
     CastInterrupted,
     WeaponSwap,
+    // Sprint 2 (specs/005-wvw-proc-sites)
+    ConditionalActivated,
+    ConditionalExpired,
+    StackGained,
+    ComboResolved,
+    ShroudEntered,
+    ShroudExited,
+    ShroudRefused,
+    LifeForceGained,
+}
+
+/// Seeded-trial summary for one proc source, trace mode only
+/// (`specs/005-wvw-proc-sites`, R1): how often the proc fired across the
+/// fixed seeds, beside the expected-value count the ranking uses.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ProcTrial {
+    pub source: String,
+    pub mean: f64,
+    pub min: u32,
+    pub max: u32,
 }
 
 pub struct WvwTimelineInput<'a> {
@@ -499,7 +543,59 @@ struct ProcSpec {
     internal_cooldown_ms: u32,
     next_ready_ms: u32,
     operation: Option<crate::data::normalized_effects::StatusOperation>,
+    // Sprint 2 (specs/005-wvw-proc-sites)
+    /// 0 for traits, runes, relics and skills; 1 or 2 for a sigil's seat.
+    /// A sigil fires only while its set is held.
+    weapon_set: u8,
+    /// Record proc chance, 1.0 when absent.
+    proc_chance: f64,
+    /// Expected-value probability mass accumulated since the last cooldown
+    /// start (R1): the cooldown begins when it reaches 1.0.
+    mass: f64,
+    scope: crate::data::normalized_effects::TriggerScope,
 }
+
+/// Unequipped weapon strength (wiki `Weapon strength`, read 2026-09-08): the
+/// value sigil flame blasts and similar procs use instead of the held weapon.
+const UNEQUIPPED_WEAPON_STRENGTH: f64 = 690.5;
+
+/// How an on-crit proc's chance enters the result (R1): expected value in
+/// ranking, Bernoulli draws from a fixed seed in the diagnostic trials.
+enum CritMode {
+    Expected,
+    Seeded(XorShift64Star),
+}
+
+/// Ten-line PRNG for the trace-only trials; no dependency.
+struct XorShift64Star(u64);
+
+impl XorShift64Star {
+    fn new(seed: u64) -> Self {
+        Self(seed.max(1))
+    }
+
+    fn next_f64(&mut self) -> f64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64
+    }
+}
+
+/// Fixed trial seeds: reproducible, and eight is enough to bracket the
+/// expected value on a 30 s opener.
+const TRIAL_SEEDS: [u64; 8] = [
+    0x9E37_79B9_7F4A_7C15,
+    0x9E37_79B9_7F4A_7C16,
+    0x9E37_79B9_7F4A_7C17,
+    0x9E37_79B9_7F4A_7C18,
+    0x9E37_79B9_7F4A_7C19,
+    0x9E37_79B9_7F4A_7C1A,
+    0x9E37_79B9_7F4A_7C1B,
+    0x9E37_79B9_7F4A_7C1C,
+];
 
 struct Timeline<'a> {
     skills: &'a [RotationSkill],
@@ -558,6 +654,10 @@ struct Timeline<'a> {
     trace_enabled: bool,
     trace: Vec<TraceEvent>,
     trace_truncated: bool,
+    shroud_refusals: Vec<String>,
+    crit_mode: CritMode,
+    /// `ProcFired` count per proc source, for the trials (trace only).
+    proc_fire_counts: HashMap<String, u32>,
     protection_multiplier: f64,
     resource_rules: HashMap<u32, SkillResourceRule>,
     resources: HashMap<ResourceKind, f64>,
@@ -598,7 +698,57 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
     timeline.trace_enabled = trace;
     timeline.trace_loaded_unmodeled();
     timeline.run();
-    timeline.report()
+    let mut report = timeline.report();
+    if trace {
+        // Diagnostics only (R1): the same fight eight more times with real
+        // on-crit draws, so the trace can say how far the expected-value
+        // process is from a proc that either fires or does not.
+        let sources: Vec<String> = timeline
+            .proc_specs
+            .iter()
+            .map(|spec| spec.source_name.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let mut counts: HashMap<String, Vec<u32>> = HashMap::new();
+        for seed in TRIAL_SEEDS {
+            let mut trial = Timeline::new(
+                skills,
+                params,
+                timeline.profile.clone(),
+                enemy,
+                active_effects,
+                resource_rules,
+                resource_model_complete,
+                Vec::new(),
+            );
+            trial.weapon_swap_cooldown_ms = weapon_swap_cooldown_ms;
+            trial.opener = opener;
+            trial.crit_mode = CritMode::Seeded(XorShift64Star::new(seed));
+            trial.run();
+            for source in &sources {
+                counts
+                    .entry(source.clone())
+                    .or_default()
+                    .push(trial.proc_fire_counts.get(source).copied().unwrap_or(0));
+            }
+        }
+        let mut sources = sources;
+        sources.sort();
+        report.proc_trials = sources
+            .into_iter()
+            .map(|source| {
+                let runs = &counts[&source];
+                ProcTrial {
+                    mean: runs.iter().map(|&n| f64::from(n)).sum::<f64>() / runs.len() as f64,
+                    min: runs.iter().copied().min().unwrap_or(0),
+                    max: runs.iter().copied().max().unwrap_or(0),
+                    source,
+                }
+            })
+            .collect();
+    }
+    report
 }
 
 impl<'a> Timeline<'a> {
@@ -664,6 +814,9 @@ impl<'a> Timeline<'a> {
             trace_enabled: false,
             trace: Vec::new(),
             trace_truncated: false,
+            shroud_refusals: Vec::new(),
+            crit_mode: CritMode::Expected,
+            proc_fire_counts: HashMap::new(),
             protection_multiplier: crate::data::boon_condition_formulas::boons()
                 .protection_multiplier(),
             resource_rules: resource_rules
@@ -693,9 +846,11 @@ impl<'a> Timeline<'a> {
                 continue;
             }
 
-            let supported = matches!(effect.trigger_rule, TriggerRule::OnHit)
-                || (matches!(effect.trigger_rule, TriggerRule::OnSkillUse)
-                    && matches!(effect.source_type, SourceType::Skill));
+            let supported = matches!(
+                effect.trigger_rule,
+                TriggerRule::OnHit | TriggerRule::OnCrit
+            ) || (matches!(effect.trigger_rule, TriggerRule::OnSkillUse)
+                && matches!(effect.source_type, SourceType::Skill));
             if !supported {
                 self.note_unmodeled(format!(
                     "{} ({})",
@@ -741,6 +896,15 @@ impl<'a> Timeline<'a> {
                     .unwrap_or(0),
                 next_ready_ms: 0,
                 operation: effect.status_operation.clone(),
+                weapon_set: 0,
+                proc_chance: effect
+                    .proc_chance
+                    .as_ref()
+                    .and_then(resolved)
+                    .copied()
+                    .unwrap_or(1.0),
+                mass: 0.0,
+                scope: effect.trigger_scope.clone().unwrap_or_default(),
             });
         }
     }
@@ -918,7 +1082,12 @@ impl<'a> Timeline<'a> {
             }
             self.apply_skill_effect(skill_id, &effect, protected_before);
         }
-        self.trigger_procs(TriggerRule::OnSkillUse, Some(skill_id), protected_before);
+        self.trigger_procs(
+            TriggerRule::OnSkillUse,
+            Some(skill_id),
+            protected_before,
+            1.0,
+        );
         let protected = protected_before || self.control_owned();
         if protected {
             self.protected_action_count += 1;
@@ -1173,7 +1342,7 @@ impl<'a> Timeline<'a> {
         for effect in self.skills[idx].effects.clone() {
             self.apply_skill_effect(skill_id, &effect, true);
         }
-        self.trigger_procs(TriggerRule::OnSkillUse, Some(skill_id), true);
+        self.trigger_procs(TriggerRule::OnSkillUse, Some(skill_id), true, 1.0);
         for event in &mut self.damage_events[first_damage_event..] {
             event.protected = true;
         }
@@ -1484,7 +1653,18 @@ impl<'a> Timeline<'a> {
                 }
                 self.remove_defense(CoverKind::Stealth);
                 self.gain_resource_on_hit(skill_id);
-                self.trigger_procs(TriggerRule::OnHit, Some(skill_id), protected);
+                self.trigger_procs(TriggerRule::OnHit, Some(skill_id), protected, 1.0);
+                // On-crit procs (CONN-00-06): one chance per landed hit at the
+                // crit chance the damage line above already priced in.
+                let crit = crit_chance_fraction(
+                    self.params.precision,
+                    self.params.crit_chance_bonus + fury_bonus,
+                );
+                if crit > 0.0 {
+                    for _ in 0..*hit_count {
+                        self.trigger_procs(TriggerRule::OnCrit, Some(skill_id), protected, crit);
+                    }
+                }
             }
             SkillEffect::ApplyCondition {
                 condition,
@@ -1684,17 +1864,28 @@ impl<'a> Timeline<'a> {
         }
     }
 
+    /// `scale` is the expected-value weight of the firing (1.0 for a certain
+    /// proc). Stacks and counts are whole numbers in the game, so the scaled
+    /// amount rounds to nearest and a rounding to zero applies nothing.
+    // ponytail: fractional boon stacks would need a fractional ledger; the
+    // rounding is the approximation the trace's trials measure against.
     fn apply_operation(
         &mut self,
         operation: Option<&crate::data::normalized_effects::StatusOperation>,
+        scale: f64,
     ) {
         let Some(operation) = operation else {
             return;
         };
-        let amount = resolved(&operation.amount_value)
+        let amount = (resolved(&operation.amount_value)
             .copied()
             .unwrap_or(1.0)
-            .max(1.0) as u32;
+            .max(1.0)
+            * scale)
+            .round() as u32;
+        if amount == 0 {
+            return;
+        }
         let duration = operation
             .base_duration_ms
             .as_ref()
@@ -1812,18 +2003,35 @@ impl<'a> Timeline<'a> {
             .unwrap_or_else(|| format!("skill {skill_id}"))
     }
 
+    /// `weight` is the probability that this event is the proc's trigger:
+    /// 1.0 for a landed hit or a skill use, the critical chance for the
+    /// on-crit call. Expected-value mode applies `weight × proc_chance` of
+    /// the effect and starts the cooldown once a whole proc's worth of mass
+    /// has accumulated (R1); seeded mode draws.
     fn trigger_procs(
         &mut self,
         trigger: TriggerRule,
         activating_skill_id: Option<u32>,
         protected: bool,
+        weight: f64,
     ) {
         let mut ready = Vec::new();
         let mut on_cooldown = Vec::new();
         for (idx, proc_spec) in self.proc_specs.iter().enumerate() {
             let source_matches = !matches!(proc_spec.source_type, SourceType::Skill)
                 || activating_skill_id == Some(proc_spec.source_id);
-            if same_trigger(&proc_spec.trigger, &trigger) && source_matches {
+            let set_held =
+                proc_spec.weapon_set == 0 || proc_spec.weapon_set == self.active_weapon_set;
+            let scope_ok = match proc_spec.scope {
+                crate::data::normalized_effects::TriggerScope::Any => true,
+                crate::data::normalized_effects::TriggerScope::WeaponSkillWithRecharge => {
+                    activating_skill_id
+                        .and_then(|id| self.skills.iter().find(|s| s.skill_id == id))
+                        .is_some_and(|s| s.weapon_set != 0 && s.cooldown_ms > 0)
+                }
+            };
+            if same_trigger(&proc_spec.trigger, &trigger) && source_matches && set_held && scope_ok
+            {
                 if proc_spec.next_ready_ms <= self.now_ms {
                     ready.push(idx);
                 } else {
@@ -1842,27 +2050,54 @@ impl<'a> Timeline<'a> {
                 format!("ready at {ready_at} ms"),
             );
         }
+        let on_crit = matches!(trigger, TriggerRule::OnCrit);
         for idx in ready {
-            let (category, value, duration_ms, operation, cooldown, name) = {
+            let chance = weight * self.proc_specs[idx].proc_chance;
+            let p = match (&mut self.crit_mode, on_crit) {
+                (CritMode::Seeded(rng), true) => {
+                    if rng.next_f64() < chance {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }
+                _ => chance,
+            };
+            if p <= 0.0 {
+                continue;
+            }
+            let (category, value, duration_ms, operation, name) = {
                 let proc_spec = &mut self.proc_specs[idx];
-                proc_spec.next_ready_ms =
-                    self.now_ms.saturating_add(proc_spec.internal_cooldown_ms);
+                proc_spec.mass += p;
+                if proc_spec.mass >= 1.0 - 1e-9 {
+                    proc_spec.mass -= 1.0;
+                    proc_spec.next_ready_ms =
+                        self.now_ms.saturating_add(proc_spec.internal_cooldown_ms);
+                }
                 (
                     proc_spec.category.clone(),
                     proc_spec.value,
                     proc_spec.duration_ms,
                     proc_spec.operation.clone(),
-                    proc_spec.internal_cooldown_ms,
                     proc_spec.source_name.clone(),
                 )
             };
-            match category {
+            let fired = match category {
                 EffectCategory::StrikeDamagePct => {
-                    let proc_damage = self.params.weapon_strength * self.params.power
-                        / reference_armor()
-                        * as_ratio(value);
-                    self.record_damage(proc_damage, protected);
-                    self.trace(TraceKind::ProcFired, &name, format!("{category:?}"));
+                    // A coefficient (≤ 2.0) is a flame-blast style proc on
+                    // the unequipped weapon strength that cannot crit (wiki
+                    // `Superior Sigil of Fire`, read 2026-09-08); a percent
+                    // is a share of the held weapon's strike as before.
+                    let proc_damage = if value <= 2.0 {
+                        UNEQUIPPED_WEAPON_STRENGTH * self.params.power / reference_armor()
+                            * value
+                            * self.params.strike_mult
+                    } else {
+                        self.params.weapon_strength * self.params.power / reference_armor()
+                            * as_ratio(value)
+                    };
+                    self.record_damage(proc_damage * p, protected);
+                    true
                 }
                 EffectCategory::AppliesBoon
                 | EffectCategory::AppliesCondition
@@ -1871,19 +2106,23 @@ impl<'a> Timeline<'a> {
                 | EffectCategory::RemovesCondition
                 | EffectCategory::ConvertsConditionToBoon
                 | EffectCategory::TransfersCondition => {
-                    self.apply_operation(operation.as_ref());
-                    self.trace(TraceKind::ProcFired, &name, format!("{category:?}"));
+                    self.apply_operation(operation.as_ref(), p);
+                    true
                 }
                 EffectCategory::OutgoingHealingPct if duration_ms > 0 => {
-                    self.heal(value.max(0.0));
-                    self.trace(TraceKind::ProcFired, &name, format!("{category:?}"));
+                    self.heal(value.max(0.0) * p);
+                    true
                 }
                 _ => {
-                    let _ = cooldown;
                     let source_type = self.proc_specs[idx].source_type.clone();
                     let source_id = self.proc_specs[idx].source_id;
                     self.note_unmodeled_proc(&source_type, source_id, &name);
+                    false
                 }
+            };
+            if fired {
+                *self.proc_fire_counts.entry(name.clone()).or_default() += 1;
+                self.trace(TraceKind::ProcFired, &name, format!("{category:?} ×{p:.2}"));
             }
         }
     }
@@ -2066,7 +2305,8 @@ impl<'a> Timeline<'a> {
         if let Some(rule) = self.resource_rules.get(&skill_id) {
             if rule.gain_on_hit > 0.0 {
                 let resource = self.resources.entry(rule.kind).or_default();
-                *resource = (*resource + rule.gain_on_hit).min(resource_cap(rule.kind));
+                *resource = (*resource + rule.gain_on_hit)
+                    .min(resource_cap(rule.kind, self.params.max_health));
             }
         }
         if self.resources.contains_key(&ResourceKind::Adrenaline) {
@@ -2162,6 +2402,8 @@ impl<'a> Timeline<'a> {
                 .collect(),
             trace: self.trace.clone(),
             trace_truncated: self.trace_truncated,
+            proc_trials: Vec::new(),
+            shroud_refusals: self.shroud_refusals.clone(),
         }
     }
 
@@ -2363,19 +2605,20 @@ fn initial_resources(rules: &[SkillResourceRule]) -> HashMap<ResourceKind, f64> 
                 ResourceKind::Initiative => 12.0,
                 ResourceKind::Energy => 50.0,
                 ResourceKind::Adrenaline => 10.0,
-                ResourceKind::Illusions | ResourceKind::Blades => 0.0,
+                ResourceKind::Illusions | ResourceKind::Blades | ResourceKind::LifeForce => 0.0,
             });
     }
     resources
 }
 
-fn resource_cap(kind: ResourceKind) -> f64 {
+fn resource_cap(kind: ResourceKind, max_health: f64) -> f64 {
     match kind {
         ResourceKind::Initiative => 12.0,
         ResourceKind::Energy => 100.0,
         ResourceKind::Adrenaline => 30.0,
         ResourceKind::Illusions => 3.0,
         ResourceKind::Blades => 5.0,
+        ResourceKind::LifeForce => crate::data::shroud::table().pool_for(max_health),
     }
 }
 
@@ -2467,6 +2710,7 @@ mod tests {
             cost,
             gain_on_hit,
             spend_all,
+            ..Default::default()
         }
     }
 
@@ -3374,27 +3618,32 @@ mod tests {
             next_tick_ms: 1_000,
         });
 
-        timeline.trigger_procs(TriggerRule::OnSkillUse, Some(1), false);
+        timeline.trigger_procs(TriggerRule::OnSkillUse, Some(1), false, 1.0);
         assert_eq!(timeline.incoming_conditions.len(), 1);
-        timeline.trigger_procs(TriggerRule::OnSkillUse, Some(9120), false);
+        timeline.trigger_procs(TriggerRule::OnSkillUse, Some(9120), false, 1.0);
         assert!(timeline.incoming_conditions.is_empty());
     }
 
     #[test]
     fn unsupported_normalized_trigger_degrades_coverage() {
+        // A `Conditional` record without a health threshold has no firing
+        // site (on-crit gained one in Sprint 2): it is named, never fired.
         let data = crate::data::normalized_effects::effects();
-        let effect = data
+        let mut effect = data
             .effects_for_mode("WvW")
             .iter()
             .find(|effect| matches!(effect.trigger_rule, TriggerRule::OnCrit))
-            .expect("OnCrit normalized effect");
+            .expect("OnCrit normalized effect")
+            .clone();
+        effect.trigger_rule = TriggerRule::Conditional;
+        effect.health_threshold = None;
         let params = params();
         let timeline = Timeline::new(
             &[],
             &params,
             profile(2_000, vec![]),
             open_enemy(false),
-            &[effect],
+            &[&effect],
             &[],
             true,
             Vec::new(),
@@ -3431,6 +3680,9 @@ mod tests {
             max_stacks: None,
             status_operation: None,
             inner_category: None,
+            health_threshold: None,
+            proc_chance: None,
+            trigger_scope: None,
         }
     }
 
@@ -3453,7 +3705,7 @@ mod tests {
         assert_eq!(timeline.proc_specs.len(), 2);
 
         for _ in 0..5 {
-            timeline.trigger_procs(TriggerRule::OnHit, None, false);
+            timeline.trigger_procs(TriggerRule::OnHit, None, false, 1.0);
         }
 
         assert_eq!(timeline.unmodeled_names.len(), 2);
@@ -4281,6 +4533,9 @@ mod tests {
             max_stacks: None,
             status_operation: None,
             inner_category: None,
+            health_threshold: None,
+            proc_chance: None,
+            trigger_scope: None,
         };
         let params = params();
         let timeline = Timeline::new(
@@ -4434,6 +4689,58 @@ mod reaper_experiments {
             .iter()
             .map(|event| event.detail.parse::<f64>().expect("damage detail"))
             .collect()
+    }
+
+    // ── Sprint 2 fixture variants (specs/005-wvw-proc-sites, T002) ──────────
+
+    #[test]
+    fn sprint2_fixture_variants_are_consistent() {
+        let set_two = fx::build_with_set_two_fire();
+        assert_eq!(set_two.active_sigil_ids(), vec![fx::SIGIL_OF_FORCE]);
+        assert_eq!(set_two.sigils.len(), 2);
+
+        let db = fx::db();
+        let (ctx, _) = fx::scenario();
+        let (marauder, _) =
+            engine::calculate_validated_stats(&fx::build(), &db, "Necromancer", &ctx);
+        let (soldier, _) = engine::calculate_validated_stats(
+            &fx::build_with_zero_precision(),
+            &db,
+            "Necromancer",
+            &ctx,
+        );
+        assert!(
+            soldier.get("Precision") < marauder.get("Precision"),
+            "Soldier carries no precision"
+        );
+
+        let records = fx::records_with_threshold_and_stack();
+        assert!(records[0].health_threshold.is_some());
+        assert_eq!(
+            records[1].trigger_scope,
+            Some(crate::data::normalized_effects::TriggerScope::WeaponSkillWithRecharge)
+        );
+        assert_eq!(
+            records[1].max_stacks,
+            Some(crate::data::FactualValue::Resolved(5))
+        );
+
+        let p = prepared();
+        let sets: Vec<u8> = fx::opener_with_swap()
+            .iter()
+            .map(|id| {
+                p.skills
+                    .iter()
+                    .find(|s| s.skill_id == *id)
+                    .unwrap()
+                    .weapon_set
+            })
+            .collect();
+        assert_eq!(
+            sets,
+            vec![1, 2],
+            "the swap opener crosses from set 1 to set 2"
+        );
     }
 
     // ── Diagnostics (T022) ──────────────────────────────────────────────────
@@ -4592,18 +4899,21 @@ mod reaper_experiments {
         ]);
         let stowed = traced(&stowed_build, None);
         assert!(
-            !events(&worn, TraceKind::ProcUnmodeled, "Superior Sigil of Fire").is_empty(),
-            "worn: the on-crit sigil is at least named as unmodeled"
+            !events(&worn, TraceKind::ProcFired, "Superior Sigil of Fire").is_empty(),
+            "worn: the on-crit sigil fires (Sprint 2)"
         );
         assert!(
             events(&stowed, TraceKind::ProcUnmodeled, "Superior Sigil of Fire").is_empty()
                 && events(&stowed, TraceKind::ProcFired, "Superior Sigil of Fire").is_empty(),
-            "stowed: the sigil is absent from the fight"
+            "stowed: the sigil is absent from the fight before a swap"
         );
-        assert_eq!(
-            stowed.unmodeled_sources.len() + 1,
-            worn.unmodeled_sources.len(),
-            "stowed: one fewer unmodeled source than worn: {:?} vs {:?}",
+        assert!(
+            !worn
+                .unmodeled_sources
+                .iter()
+                .chain(&stowed.unmodeled_sources)
+                .any(|s| s.starts_with("Superior Sigil of Fire")),
+            "the sigil is modeled worn and stowed alike; neither names it: {:?} vs {:?}",
             stowed.unmodeled_sources,
             worn.unmodeled_sources
         );
@@ -4774,23 +5084,26 @@ mod reaper_experiments {
 
     // ── Unsupported control (regression test of the coverage remedy) ────────
 
+    /// US1 positive control (was Sprint 1's `reaper_unsupported_oncrit_is_named_not_zeroed`,
+    /// inverted): with the on-crit firing site the shipped Sigil of Fire
+    /// record fires from the fixture's critical hits and leaves the coverage
+    /// line.
     #[test]
-    fn reaper_unsupported_oncrit_is_named_not_zeroed() {
-        // Precision forced to a 100 % critical chance: if on-crit procs
-        // fired anywhere, they would fire here.
+    fn reaper_oncrit_positive_control_fires_from_crits() {
+        // Precision forced to a 100 % critical chance.
         let with_fire = traced(&fx::build(), Some(3_000.0));
         assert!(
-            events(&with_fire, TraceKind::ProcFired, "Superior Sigil of Fire").is_empty(),
-            "no on-crit proc fires (there is no firing site)"
+            !events(&with_fire, TraceKind::ProcFired, "Superior Sigil of Fire").is_empty(),
+            "the on-crit sigil fires from the opener's critical hits; trace: {:?}",
+            with_fire.trace.iter().take(16).collect::<Vec<_>>()
         );
         assert!(
-            !events(
-                &with_fire,
-                TraceKind::ProcUnmodeled,
-                "Superior Sigil of Fire"
-            )
-            .is_empty(),
-            "the sigil is reported as unmodeled, not silently zeroed"
+            !with_fire
+                .unmodeled_sources
+                .iter()
+                .any(|s| s.contains("Sigil of Fire")),
+            "an executed on-crit record leaves the coverage line: {:?}",
+            with_fire.unmodeled_sources
         );
 
         let mut bare_build = fx::build();
@@ -4798,22 +5111,97 @@ mod reaper_experiments {
         bare_build.sigil_seats = SigilSlots::new([None, Some(fx::SIGIL_OF_FORCE), None, None]);
         let bare = traced(&bare_build, Some(3_000.0));
         assert!(
-            (with_fire.total_damage - bare.total_damage).abs() < 1e-6,
-            "the sigil adds nothing to the fight either way: {} vs {}",
+            with_fire.total_damage > bare.total_damage,
+            "the sigil now adds to the fight: {} vs {}",
             with_fire.total_damage,
             bare.total_damage
         );
+    }
 
-        // The remedy (CONN-00-04): the report carries the name, and the
-        // referee's coverage line is built from it.
+    /// US1 negative control: no critical chance, no on-crit proc, and the
+    /// sigil is worth nothing.
+    #[test]
+    fn reaper_oncrit_zero_precision_never_fires() {
+        let with_fire = traced(&fx::build_with_zero_precision(), Some(0.0));
         assert!(
-            with_fire
-                .unmodeled_sources
-                .iter()
-                .any(|s| s == "Superior Sigil of Fire (on-crit)"),
-            "the report names the unmodeled source: {:?}",
-            with_fire.unmodeled_sources
+            events(&with_fire, TraceKind::ProcFired, "Superior Sigil of Fire").is_empty(),
+            "no crit chance, no proc: {:?}",
+            events(&with_fire, TraceKind::ProcFired, "Superior Sigil of Fire")
         );
+        let mut bare_build = fx::build_with_zero_precision();
+        bare_build.sigils.retain(|s| s.id != fx::SIGIL_OF_FIRE);
+        bare_build.sigil_seats = SigilSlots::new([None, Some(fx::SIGIL_OF_FORCE), None, None]);
+        let bare = traced(&bare_build, Some(0.0));
+        assert!(
+            (with_fire.total_damage - bare.total_damage).abs() < 1e-9,
+            "the sigil adds nothing without crits: {} vs {}",
+            with_fire.total_damage,
+            bare.total_damage
+        );
+    }
+
+    /// US1 timing control: the internal cooldown bounds the rate. With a
+    /// certain crit, the first hit fires and every hit inside the next 5 s
+    /// is skipped for the cooldown.
+    #[test]
+    fn reaper_oncrit_icd_bounds_rate() {
+        let p = prepared();
+        let mut params = p.params.clone();
+        params.precision = 3_000.0;
+        let record = fx::sigil_of_fire();
+        let report = run(
+            &p.skills,
+            &params,
+            &[fx::GRAVEDIGGER, fx::DEATH_SPIRAL, fx::GS_AUTO],
+            &[&record],
+            open_profile(4_500, vec![]),
+        );
+        let fired = events(&report, TraceKind::ProcFired, "Superior Sigil of Fire");
+        let skipped = events(&report, TraceKind::ProcSkippedIcd, "Superior Sigil of Fire");
+        assert_eq!(
+            fired.len(),
+            1,
+            "one fire inside one 5 s cooldown window; trace: {:?}",
+            report.trace
+        );
+        assert!(
+            !skipped.is_empty(),
+            "the later hits are skipped for the cooldown and say so"
+        );
+        assert!(
+            landed(&report, "Gravedigger").len() + landed(&report, "Death Spiral").len() >= 3,
+            "the opener landed several hits inside the window"
+        );
+    }
+
+    /// US1 scenario 5 (SC-009): the trace's seeded trials bracket the
+    /// expected-value count the ranking uses.
+    #[test]
+    fn reaper_oncrit_trials_bracket_expected_value() {
+        let report = traced(&fx::build(), Some(3_000.0));
+        let expected: f64 = events(&report, TraceKind::ProcFired, "Superior Sigil of Fire")
+            .iter()
+            .map(|event| {
+                event
+                    .detail
+                    .rsplit('×')
+                    .next()
+                    .and_then(|p| p.trim().parse::<f64>().ok())
+                    .unwrap_or(1.0)
+            })
+            .sum();
+        let trial = report
+            .proc_trials
+            .iter()
+            .find(|trial| trial.source == "Superior Sigil of Fire")
+            .unwrap_or_else(|| panic!("trials exist for the sigil: {:?}", report.proc_trials));
+        assert!(
+            (trial.mean - expected).abs() <= 1.0,
+            "trial mean {} within one proc of the expected count {}",
+            trial.mean,
+            expected
+        );
+        assert!(f64::from(trial.min) <= trial.mean && trial.mean <= f64::from(trial.max));
     }
     // ── Fixture records against the runtime's own semantics ─────────────────
 
@@ -4834,11 +5222,12 @@ mod reaper_experiments {
             "the OnHit record fires"
         );
         assert!(
-            report
-                .unmodeled_sources
-                .iter()
-                .any(|s| s == "Superior Sigil of Fire (on-crit)"),
-            "the OnCrit record is named, not fired: {:?}",
+            !events(&report, TraceKind::ProcFired, "Superior Sigil of Fire").is_empty()
+                && !report
+                    .unmodeled_sources
+                    .iter()
+                    .any(|s| s.starts_with("Superior Sigil of Fire")),
+            "the OnCrit record fires (Sprint 2) and is not named: {:?}",
             report.unmodeled_sources
         );
         assert!(
