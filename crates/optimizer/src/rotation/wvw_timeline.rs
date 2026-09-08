@@ -1174,6 +1174,7 @@ impl<'a> Timeline<'a> {
                     | TriggerRule::OnShroudEnter
                     | TriggerRule::OnShroudExit
                     | TriggerRule::OnConditionApplied
+                    | TriggerRule::OnConditionRemoved
                     | TriggerRule::OnBoonApplied
                     | TriggerRule::OnBoonStripped
                     | TriggerRule::Periodic
@@ -1793,6 +1794,14 @@ impl<'a> Timeline<'a> {
         let mut damage = raw_damage;
         if self.has_defense(CoverKind::Protection) {
             damage *= self.protection_multiplier;
+        }
+        // wiki `Death's Carapace` (read 2026-09-08): 20 toughness per stack
+        // in WvW, 30 stacks at most; a strike scales with 1 / armor, so the
+        // profile's strike (built on `params.armor`) shrinks by that ratio.
+        let carapace = 20.0 * self.buff_stacks("Death's Carapace").min(30) as f64;
+        if carapace > 0.0 {
+            let armor = self.params.armor.max(1_000.0);
+            damage *= armor / (armor + carapace);
         }
         self.absorb_damage(damage);
     }
@@ -3024,8 +3033,19 @@ impl<'a> Timeline<'a> {
                     // `Shroud_N`: the Nth skill of the shroud bar (wiki
                     // "shroud skill N"); otherwise the slot head before `_`.
                     if let Some(n) = slot.strip_prefix("Shroud_") {
-                        return s.weapon_set == super::SHROUD_SET
-                            && s.slot_name.as_deref() == Some(format!("Weapon_{n}").as_str());
+                        // wiki `Shade`: a Scourge has no shroud bar and its
+                        // shade skills (F1..F5) count as its shroud skills.
+                        let has_shroud_bar = self
+                            .skills
+                            .iter()
+                            .any(|k| k.weapon_set == super::SHROUD_SET);
+                        let (set, head) = if has_shroud_bar {
+                            (super::SHROUD_SET, "Weapon")
+                        } else {
+                            (s.weapon_set, "Profession")
+                        };
+                        return s.weapon_set == set
+                            && s.slot_name.as_deref() == Some(format!("{head}_{n}").as_str());
                     }
                     s.slot_name.as_deref().is_some_and(|name| {
                         name.split('_')
@@ -3437,10 +3457,17 @@ impl<'a> Timeline<'a> {
 
     fn cleanse(&mut self, count: u32) {
         let removed = count.min(self.incoming_conditions.len() as u32);
+        let mut last = None;
         for _ in 0..removed {
-            self.incoming_conditions.pop();
+            last = self.incoming_conditions.pop();
         }
         self.conditions_cleansed += removed;
+        // Sprint 3 convergence (Shrouded Removal): "when removing conditions
+        // from yourself" is a removal that found one; a cleanse of nothing
+        // is not a firing site.
+        if let Some(gone) = last {
+            self.status_trigger(TriggerRule::OnConditionRemoved, &gone.name, None, false);
+        }
     }
 
     fn heal(&mut self, amount: f64) {
@@ -3817,6 +3844,7 @@ fn trigger_label(trigger: &TriggerRule) -> &'static str {
         TriggerRule::OnShroudEnter => "on-shroud-enter",
         TriggerRule::OnShroudExit => "on-shroud-exit",
         TriggerRule::OnConditionApplied => "on-condition-applied",
+        TriggerRule::OnConditionRemoved => "on-condition-removed",
         TriggerRule::OnBoonApplied => "on-boon-applied",
         TriggerRule::OnBoonStripped => "on-boon-stripped",
         TriggerRule::Periodic => "periodic",
@@ -3932,6 +3960,10 @@ fn same_trigger(left: &TriggerRule, right: &TriggerRule) -> bool {
             | (
                 TriggerRule::OnConditionApplied,
                 TriggerRule::OnConditionApplied
+            )
+            | (
+                TriggerRule::OnConditionRemoved,
+                TriggerRule::OnConditionRemoved
             )
             | (TriggerRule::OnBoonApplied, TriggerRule::OnBoonApplied)
             | (TriggerRule::OnBoonStripped, TriggerRule::OnBoonStripped)
@@ -5032,6 +5064,7 @@ mod tests {
             prerequisite: None,
             scale_by: None,
             healing_power_coefficient: None,
+            derived_from: Vec::new(),
             coverage: None,
         }
     }
@@ -5889,6 +5922,7 @@ mod tests {
             prerequisite: None,
             scale_by: None,
             healing_power_coefficient: None,
+            derived_from: Vec::new(),
             coverage: None,
         };
         let params = params();
@@ -8012,6 +8046,118 @@ mod necro_experiments {
     // ---- The Necromancer catalogue (US3): every executable record in
     // data/normalized_effects/2026-01-13/wvw.json fires on one press order.
 
+    /// A record of the shipped catalogue by effect id.
+    fn catalogue_record(effect_id: &str) -> NormalizedEffect {
+        crate::data::normalized_effects::effects()
+            .effects_for_mode("WvW")
+            .iter()
+            .find(|e| e.effect_id == effect_id)
+            .cloned()
+            .unwrap_or_else(|| panic!("{effect_id} is in the WvW catalogue"))
+    }
+
+    /// Convergence (SC-001, T083): Death's Carapace is a stacking toughness
+    /// effect. Armored Shroud's 5 stacks at the entry scale a later strike
+    /// by armor / (armor + 100) (wiki `Death's Carapace`: 20 per stack).
+    #[test]
+    fn necro_carapace_scales_incoming_strikes_by_armor() {
+        let record = catalogue_record("trait:856:0");
+        let strike = || {
+            vec![EnemyEvent {
+                at_ms: 4_000,
+                kind: EnemyEventKind::Strike {
+                    damage: 1_000.0,
+                    unblockable: true,
+                },
+            }]
+        };
+        let (with, buffs) = open_with(&[fx::REAPER_SHROUD], &[&record], 5_000, strike());
+        let (without, _) = open_with(&[fx::REAPER_SHROUD], &[], 5_000, strike());
+        assert_eq!(
+            events(&with, TraceKind::TraitFired, "Armored Shroud").len(),
+            1,
+            "{:?}",
+            with.trace
+        );
+        assert!(buffs.iter().any(|b| b == "Death's Carapace"), "{buffs:?}");
+        let armor = prepared().params.armor.max(1_000.0);
+        let expected = armor / (armor + 100.0);
+        let ratio = with.incoming_damage / without.incoming_damage;
+        assert!(
+            (ratio - expected).abs() < 1e-6,
+            "incoming {} vs {}: ratio {ratio} expected {expected}",
+            with.incoming_damage,
+            without.incoming_damage
+        );
+    }
+
+    /// Convergence (T083): `OnConditionRemoved` fires on a cleanse that
+    /// removed something and never on a cleanse of nothing.
+    #[test]
+    fn necro_condition_removed_needs_a_removed_condition() {
+        let cleanse = catalogue_record("trait:1922:0");
+        let gain = catalogue_record("trait:1922:2");
+        assert_eq!(gain.trigger_rule, TriggerRule::OnConditionRemoved);
+        let crippled = vec![EnemyEvent {
+            at_ms: 0,
+            kind: EnemyEventKind::Condition {
+                condition: "Crippled".into(),
+                stacks: 1,
+                duration_ms: 30_000,
+            },
+        }];
+        let gains = |r: &WvwCombatReport| {
+            events(r, TraceKind::TraitFired, "Shrouded Removal")
+                .into_iter()
+                .filter(|e| e.detail.starts_with("AppliesBoon"))
+                .count()
+        };
+        let (clean, _) = open_with(&[fx::REAPER_SHROUD], &[&cleanse, &gain], 3_000, vec![]);
+        assert_eq!(gains(&clean), 0, "nothing to remove: {:?}", clean.trace);
+        let (afflicted, buffs) =
+            open_with(&[fx::REAPER_SHROUD], &[&cleanse, &gain], 3_000, crippled);
+        assert!(gains(&afflicted) >= 1, "{:?}", afflicted.trace);
+        assert!(buffs.iter().any(|b| b == "Death's Carapace"), "{buffs:?}");
+    }
+
+    /// Spec edge case (T085): a Scourge with no shade out. With no shroud
+    /// bar, the shade skill in F1 is "shroud skill 1" for a `Shroud_1`
+    /// record; a bar with a shroud keeps Weapon_1 of the shroud bar.
+    #[test]
+    fn necro_scourge_shade_skill_is_shroud_skill_one() {
+        const SHADE: u32 = 40_006;
+        let p = prepared();
+        let mut skills: Vec<RotationSkill> = p
+            .skills
+            .iter()
+            .filter(|s| s.weapon_set != super::super::SHROUD_SET)
+            .cloned()
+            .collect();
+        let mut shade = synthetic_skill(&p.skills, SHADE, "Manifest Sand Shade", vec![]);
+        shade.weapon_set = 0;
+        shade.slot_name = Some("Profession_1".into());
+        skills.push(shade);
+        let record = catalogue_record("trait:875:0");
+        let (report, _) = open_with_skills(Some(skills), &[SHADE], &[&record], 2_000, vec![]);
+        assert!(
+            !events(&report, TraceKind::TraitFired, "Unyielding Blast").is_empty(),
+            "the shade is shroud skill 1: {:?}",
+            report.trace
+        );
+        // With the shroud bar present the same slot name is not a shroud skill.
+        let mut with_bar = p.skills.clone();
+        let mut shade = synthetic_skill(&p.skills, SHADE, "Manifest Sand Shade", vec![]);
+        shade.weapon_set = 0;
+        shade.slot_name = Some("Profession_1".into());
+        with_bar.push(shade);
+        let (report, _) = open_with_skills(Some(with_bar), &[SHADE], &[&record], 2_000, vec![]);
+        assert!(
+            events(&report, TraceKind::TraitFired, "Unyielding Blast").is_empty(),
+            "{:?}",
+            report.trace
+        );
+    }
+
     /// One press order that reaches every trigger kind and scope the
     /// catalogue uses: a chill before the crits, a fear, a blind, a burn, a
     /// torment, a boon on the player, a corrupt, an elixir, a shout, a
@@ -8024,6 +8170,7 @@ mod necro_experiments {
         const FURY: u32 = 41_014;
         const CORRUPT: u32 = 41_015;
         const ELIXIR: u32 = 41_016;
+        const POISON: u32 = 41_017;
         let p = prepared();
         let condition = |name: &str| SkillEffect::ApplyCondition {
             condition: name.into(),
@@ -8070,6 +8217,12 @@ mod necro_experiments {
         ));
         skills.push(synthetic_skill(
             &p.skills,
+            POISON,
+            "Poison Skill",
+            vec![condition("Poisoned")],
+        ));
+        skills.push(synthetic_skill(
+            &p.skills,
             FURY,
             "Fury Skill",
             vec![SkillEffect::ApplyBuff {
@@ -8104,7 +8257,7 @@ mod necro_experiments {
         // and the exit at the end.
         let base = fx::opener_catalogue();
         let mut opener = vec![
-            base[0], base[1], FEAR, BLIND, BURN, TORMENT, FURY, CORRUPT, ELIXIR,
+            base[0], base[1], FEAR, BLIND, BURN, TORMENT, POISON, FURY, CORRUPT, ELIXIR,
         ];
         opener.extend_from_slice(&base[2..4]);
         opener.push(fx::SIGNET_OF_VAMPIRISM);
@@ -8148,6 +8301,16 @@ mod necro_experiments {
         // Diagnostic run: the production cap would cut a 40 s catalogue
         // fight short of its shroud exit.
         timeline.trace_cap = 8_192;
+        // Convergence: the cleanse records need conditions on the player so
+        // `OnConditionRemoved` has something to fire on (non-damaging ones).
+        for name in ["Crippled", "Weakness", "Vulnerability"] {
+            timeline.incoming_conditions.push(TimedCondition {
+                name: name.into(),
+                stacks: 1,
+                expires_at_ms: 60_000,
+                next_tick_ms: 1_000,
+            });
+        }
         timeline.opener = &opener;
         timeline.trace_enabled = true;
         timeline.trace_loaded_unmodeled();
