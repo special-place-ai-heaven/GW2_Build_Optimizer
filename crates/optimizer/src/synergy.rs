@@ -863,8 +863,6 @@ pub fn template_explanation(
     parts.join(" ")
 }
 
-// Helper Functions
-
 fn weight_for_stat(stat: &StatType, weights: &OptimizationWeights) -> f64 {
     match stat {
         StatType::Power => weights.power * 0.8,

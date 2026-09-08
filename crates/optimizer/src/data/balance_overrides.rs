@@ -35,7 +35,6 @@ pub fn try_load_balance_overrides() -> Result<BalanceOverrides, Vec<DataLoadErro
     )
 }
 
-
 #[derive(Debug, Error)]
 pub enum BalanceOverrideError {
     #[error("JSON parse error: {0}")]
@@ -149,7 +148,6 @@ impl BalanceOverrides {
         self.files.values().map(|f| f.entities.len()).sum()
     }
 }
-
 
 /// Parse and validate a single override file from JSON text.
 pub fn load_override_file(json: &str) -> Result<OverrideFile, BalanceOverrideError> {

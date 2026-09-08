@@ -193,7 +193,6 @@ impl BuildStorage {
         (builds, skipped)
     }
 
-    /// Delete a saved build by name.
     pub fn delete(&self, name: &str) -> Result<(), String> {
         let filename = sanitize_filename(name);
         let path = self.saves_dir.join(format!("{}.json", filename));

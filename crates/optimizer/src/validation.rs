@@ -38,8 +38,6 @@ pub const TRINKET_SLOTS: [GearSlot; 6] = [
 /// Set 2 never draws slot budgets today (inactive-set invariant).
 pub const WEAPON_SET1_SLOTS: [GearSlot; 2] = [GearSlot::WeaponSet1Main, GearSlot::WeaponSet1Off];
 
-// Public types
-
 /// A fully validated and resolved build from Gemini output.
 pub type ValidatedPets = (Option<u32>, Option<u32>, Option<u32>, Option<u32>);
 
@@ -538,7 +536,6 @@ pub fn validate_gemini_build(
         ..ValidatedBuild::default()
     };
 
-    // Validate each component
     validate_specializations(response, db, profession_name, &mut result);
     if result.specializations.len() != 3 {
         let actual = result.specializations.len();
@@ -611,8 +608,6 @@ pub fn validate_gemini_build(
 
     result
 }
-
-// Sub-validators
 
 fn validate_specializations(
     response: &GeminiBuildResponse,
@@ -768,9 +763,8 @@ fn validate_weapons(
 ) {
     let prof = db.profession(profession_name);
 
-    // Parse weapon sets from the response
-    // The response.weapons is Vec<String> like ["Set 1: Axe / Axe", "Set 2: Greatsword"]
-    // or may be empty if using the new format (parsed differently)
+    // response.weapons is Vec<String> like ["Set 1: Axe / Axe", "Set 2: Greatsword"],
+    // or empty when using the newer field layout.
     let (set1, set2) = parse_weapon_sets_from_response(response);
 
     result.weapons.set1 = validate_weapon_set(&set1, prof, db, result, "Set 1");
@@ -790,7 +784,6 @@ fn validate_weapon_set(
         return set;
     };
 
-    // Validate main hand
     if let Some(ref mh) = weapons.0 {
         if let Some((canonical, info)) = find_weapon(mh, prof) {
             if !info.land_usable(canonical) {
@@ -822,7 +815,6 @@ fn validate_weapon_set(
         }
     }
 
-    // Validate off hand
     if let Some(ref oh) = weapons.1 {
         if let Some((canonical, info)) = find_weapon(oh, prof) {
             if !info.land_usable(canonical) {
@@ -929,10 +921,8 @@ fn validate_skills(
         .filter(|s| db.skill_palette_id(s.id) != 0)
         .collect();
 
-    // Parse skill names from the response
     let (heal_name, utility_names, elite_name) = parse_skill_names_from_response(response);
 
-    // Validate heal
     if let Some(name) = &heal_name {
         result.skills.heal = find_skill_by_name(name, &prof_skills, Some("Heal"), result);
     }
@@ -958,7 +948,6 @@ fn validate_skills(
         result.skills.utilities.push(resolved);
     }
 
-    // Validate elite
     if let Some(name) = &elite_name {
         result.skills.elite = find_skill_by_name(name, &prof_skills, Some("Elite"), result);
     }
@@ -1332,8 +1321,6 @@ fn validate_gear_slot_map(
     }
 }
 
-// Lookup helpers
-
 /// Find a specialization by name (case-insensitive) within a profession's spec list.
 /// Apply is `names_eq` only. A substring of another spec (e.g. "Fire" → Firebrand)
 /// is a warning, not an apply.
@@ -1631,8 +1618,6 @@ fn find_weapon<'a>(
         .iter()
         .find(|(k, _)| gw2_core::i18n::weapon_type_key(k) == needle)
 }
-
-// Parsing helpers
 
 /// A single weapon set as (main-hand, off-hand) names.
 type WeaponSlots = (Option<String>, Option<String>);

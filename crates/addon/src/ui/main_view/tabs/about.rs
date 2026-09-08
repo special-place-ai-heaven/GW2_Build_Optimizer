@@ -822,7 +822,6 @@ fn render_messages(ui: &Ui, state: &mut AddonState) {
     }
 }
 
-/// Render the About tab.
 pub(in crate::ui::main_view) fn render_about_tab(ui: &Ui, state: &mut AddonState) {
     crate::feedback::tasks::ensure_loaded(state);
     crate::feedback::tasks::refresh_on_open(state);

@@ -174,7 +174,6 @@ pub(crate) fn boon_weight(status: &str, weights: &OptimizationWeights) -> f64 {
     }
 }
 
-
 #[derive(Debug, Error)]
 pub enum FormulaLoadError {
     #[error("JSON parse error: {0}")]
@@ -535,7 +534,6 @@ impl ConditionFormulas {
     }
 }
 
-
 fn mode_to_key(mode: &GameMode) -> &'static str {
     match mode {
         GameMode::PvE => "PvE",
@@ -674,7 +672,6 @@ pub fn load_condition_formulas(json: &str) -> Result<ConditionFormulas, FormulaL
 mod tests {
     use super::*;
     use gw2_core::types::GameMode;
-
 
     #[test]
     fn test_embedded_boon_formulas_load_successfully() {

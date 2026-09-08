@@ -106,7 +106,6 @@ pub(super) fn load_characters(state: &mut AddonState) {
                         if !had_cache {
                             s.main.error = Some(e.to_string());
                         }
-                        // Update API health status on failure
                         s.main.api_status = crate::state::ApiStatus::Offline;
                     }
                     None => { /* cancelled — flag reset above */ }

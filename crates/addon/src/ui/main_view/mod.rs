@@ -821,7 +821,6 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
         character::load_character_tabs(state, name);
     }
 
-    // Build Template dropdown
     if !state.main.build_tabs.is_empty() {
         ui.spacing();
         ui.text_colored(theme::pal().muted, t("label.build"));
@@ -915,7 +914,6 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
         }
     }
 
-    // Build resolution indicator
     if state.main.build_loading {
         ui.text_colored(theme::WARN, t("status.resolving"));
     }
