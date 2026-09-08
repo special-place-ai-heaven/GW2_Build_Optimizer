@@ -46,6 +46,12 @@ CONTROLS = {
         "                if crit > 0.0 && false {\n                    for _ in 0..*hit_count {",
         "reaper_oncrit_positive_control_fires_from_crits",
     ),
+    "swap": (
+        WT,
+        "spec.weapon_set = sigil_sets.get(&spec.source_id).copied().unwrap_or(0);",
+        "spec.weapon_set = sigil_sets.get(&spec.source_id).copied().unwrap_or(0).min(1);",
+        "reaper_swap_loads_set_two_sigils",
+    ),
 }
 
 
