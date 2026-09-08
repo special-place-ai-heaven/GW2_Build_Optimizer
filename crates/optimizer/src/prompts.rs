@@ -142,6 +142,10 @@ A build is a machine: triggers fire effects, effects have durations, sources hav
 WHAT THE EXPLANATION MUST SAY.
 Give the synergy chain concretely: what triggers what, on what cooldown, and the uptime or multiplier that results. "Corruptor's Fervor stacks toughness" is not an argument. "Corruptor's Fervor gives Carapace per condition applied, and Harbinger Shroud pulses Torment every second, so Carapace holds near cap in sustained fights" is. Name the weakness the build accepts, in one clause — every build trades something."#;
 
+/// The reply shape every chat prompt asks for (specs/006, FR-002a). The
+/// bubble draws exactly this subset; anything else is shown as plain text.
+pub const REPLY_SHAPE: &str = "REPLY SHAPE for the \"explanation\" field: at most eight short lines; no paragraph longer than two sentences; facts only, no filler, do not restate the question. \"- \" starts a bullet (two leading spaces nest one level). **Name** marks a specialization, trait, skill, rune, sigil, relic or weapon. _aside_ marks an aside. \"Skill A -> Skill B -> Skill C\" is a rotation line, one per line. \"! text\" is a warning line. Write a web address bare (https://...). Newlines inside the JSON string as \\n.";
+
 pub fn new_build_prompt_with_tools(
     profession: &str,
     weights: &OptimizationWeights,
@@ -209,14 +213,17 @@ After gathering data, respond with ONLY a JSON build object:
   "pets": {{"terrestrial": ["PetName", "PetName"], "aquatic": ["PetName", "PetName"]}},
   "legends": ["Legend1", "Legend2"],
   "stat_prefix": "PrefixName",
-  "explanation": "2-3 sentences explaining the build's synergies and rotation."
+  "explanation": "in the REPLY SHAPE below."
 }}
-```"#,
+```
+
+{reply_shape}"#,
         summary = summary,
         profession = profession,
         game_mode = game_mode,
         weights_guidance = weights_guidance,
         discipline = BUILD_DISCIPLINE,
+        reply_shape = REPLY_SHAPE,
     )
 }
 
@@ -274,14 +281,17 @@ After gathering data, respond with ONLY a JSON build object:
   "legends": ["Legend1", "Legend2"],
   "stat_prefix": "...",
   "changes_made": ["Change 1 description", "Change 2 description"],
-  "explanation": "2-3 sentences explaining improvements."
+  "explanation": "in the REPLY SHAPE below."
 }}
-```"#,
+```
+
+{reply_shape}"#,
         summary = summary,
         profession = profession,
         game_mode = game_mode,
         weights_guidance = weights_guidance,
         discipline = BUILD_DISCIPLINE,
+        reply_shape = REPLY_SHAPE,
     )
 }
 
@@ -315,9 +325,12 @@ Profession `unknown` is not a reason to refuse. If they ask for a build without 
 If they greet you, ask a question, or are just chatting — no build. Reply with JSON:
 {{"explanation": "<your spoken reply>", "specializations": []}}
 
-If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, pets, legends, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). An equipped Character loadout in Context is your STARTING POINT, not a licence to name traits from memory — every legal trait name for every specialization is in the PROFESSION REFERENCE, so take them from there rather than from that summary or from recall. Always fill in both weapon sets, all four sigils and the relic, every time you plate a build. Leaving a slot out is not "keep what they had" - it reaches the player as an empty slot. Keep their weapons only if they pinned them; otherwise pick the pair that serves this build and say so. explanation: 2-4 sentences in {reply_language}.
+If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, pets, legends, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). An equipped Character loadout in Context is your STARTING POINT, not a licence to name traits from memory — every legal trait name for every specialization is in the PROFESSION REFERENCE, so take them from there rather than from that summary or from recall. Always fill in both weapon sets, all four sigils and the relic, every time you plate a build. Leaving a slot out is not "keep what they had" - it reaches the player as an empty slot. Keep their weapons only if they pinned them; otherwise pick the pair that serves this build and say so. explanation: in the REPLY SHAPE below, in {reply_language}.
 
-When Context has PROFESSION REFERENCE, UPGRADE REFERENCE and STAT PREFIX REFERENCE, serve the complete JSON plate directly from them: the legal profession names and ranked upgrades are already supplied. Do not re-query rankings for the same radar, calculate alternative stat totals, or simulate by default. Call a tool only if a fact missing from that evidence would change your choice, or the player explicitly requested a numerical comparison; batch independent missing facts in one turn. A wrong name still costs the player the entire build, so take a name only from the reference or a tool result. Use the supplied radar rankings and explain supported mechanisms without inventing precise numbers. explanation: 2-4 sentences in {reply_language}.
+When Context has PROFESSION REFERENCE, UPGRADE REFERENCE and STAT PREFIX REFERENCE, serve the complete JSON plate directly from them: the legal profession names and ranked upgrades are already supplied. Do not re-query rankings for the same radar, calculate alternative stat totals, or simulate by default. Call a tool only if a fact missing from that evidence would change your choice, or the player explicitly requested a numerical comparison; batch independent missing facts in one turn. A wrong name still costs the player the entire build, so take a name only from the reference or a tool result. Use the supplied radar rankings and explain supported mechanisms without inventing precise numbers. The explanation follows the REPLY SHAPE below, in {reply_language}.
+The PROFESSION REFERENCE in Context already holds every specialization, trait and slot skill: plate from it. Call tools only for a fact it does not carry (a rune, sigil or relic ranking, a skill's exact numbers, a simulation), and batch those calls into as few rounds as possible — every round is a request against a small quota. A wrong name still costs the player the entire build, so take a name only from the reference or a tool result. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: in the REPLY SHAPE below, in {reply_language}.
+
+{reply_shape}
 
 The player's message:
 <message>
@@ -368,7 +381,7 @@ A turn is either tool calls or the finished plate, never both: call tools with n
   "stat_prefix": "PrefixName",
   "gear_slots": {{"amulet": "PrefixName", "ring-1": "PrefixName"}},
   "changes_made": ["..."],
-  "explanation": "2-4 sentences in {reply_language}."
+  "explanation": "in the REPLY SHAPE above, in {reply_language}."
 }}
 ```
 
@@ -386,6 +399,7 @@ weapon-set-2-main, weapon-set-2-off. A key naming a slot the build does not wear
         kitchen = kitchen,
         reply_language = reply_language,
         discipline = BUILD_DISCIPLINE,
+        reply_shape = REPLY_SHAPE,
     )
 }
 
@@ -1202,9 +1216,13 @@ After gathering data, respond with ONLY a JSON build object:
   "pets": {"terrestrial": ["PetName", "PetName"], "aquatic": ["PetName", "PetName"]},
   "legends": ["Legend1", "Legend2"],
   "stat_prefix": "PrefixName",
-  "explanation": "2-3 sentences explaining the build's synergies and rotation."
+  "explanation": "in the REPLY SHAPE below."
 }
-```"#;
+```
+
+"#
+            .to_string()
+            + REPLY_SHAPE;
         assert_eq!(prompt, expected, "new_build_prompt_with_tools drift");
     }
 
@@ -1282,9 +1300,13 @@ After gathering data, respond with ONLY a JSON build object:
   "legends": ["Legend1", "Legend2"],
   "stat_prefix": "...",
   "changes_made": ["Change 1 description", "Change 2 description"],
-  "explanation": "2-3 sentences explaining improvements."
+  "explanation": "in the REPLY SHAPE below."
 }
-```"#;
+```
+
+"#
+            .to_string()
+            + REPLY_SHAPE;
         assert_eq!(prompt, expected, "improve_build_prompt_with_tools drift");
     }
 
@@ -1504,6 +1526,23 @@ After gathering data, respond with ONLY a JSON build object:
             !prompt.contains("Write the \"explanation\" field in English"),
             "must not also demand English"
         );
+    }
+
+    #[test]
+    fn reply_shape_paragraph_present_in_all_three_prompts() {
+        let w = OptimizationWeights::preset_power_dps();
+        let prompts = [
+            new_build_prompt_with_tools("Warrior", &w, "PvE"),
+            improve_build_prompt_with_tools("Warrior", &w, "PvE"),
+            chat_refinement_prompt_with_tools("Warrior", "PvE", "hi", "Mode: PvE", "English"),
+        ];
+        for p in &prompts {
+            assert!(p.contains("REPLY SHAPE for the"), "{p}");
+            assert!(
+                !p.contains("2-4 sentences") && !p.contains("2-3 sentences"),
+                "{p}"
+            );
+        }
     }
 }
 

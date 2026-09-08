@@ -5,6 +5,8 @@
 pub mod builder;
 pub mod combat_model;
 pub mod prose;
+#[cfg(test)]
+pub(crate) mod reaper_fixture;
 pub mod simulator;
 pub mod skill_timings;
 pub mod wvw_timeline;
@@ -29,10 +31,18 @@ pub struct RotationSkill {
     pub next_chain: Option<u32>,
     /// Whether this skill is a stunbreak.
     pub is_stunbreak: bool,
-    /// Weapon set this skill belongs to (0=always available, 1=set1, 2=set2).
-    /// Non-weapon skills (heal/utility/elite) use 0.
+    /// Weapon set this skill belongs to (0=always available, 1=set1, 2=set2,
+    /// [`SHROUD_SET`]=only while in shroud). Non-weapon skills
+    /// (heal/utility/elite) use 0.
     pub weapon_set: u8,
 }
+
+/// The Necromancer shroud bar as a third "weapon set": its skills are held
+/// only while in shroud, and sets 1 and 2 are stowed meanwhile (wiki
+/// `Death Shroud`: the shroud skills replace the weapon bar).
+// ponytail: a `Bar` enum would touch eighteen `RotationSkill` literals for
+// the same three states; `weapon_set == 3` reuses the availability check.
+pub const SHROUD_SET: u8 = 3;
 
 /// Skill slot classification — determines priority and auto-attack behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

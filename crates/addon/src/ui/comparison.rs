@@ -2,7 +2,7 @@
 //! Shows current build vs optimized build with full stat tables, bonuses,
 //! effects/resistances, and LLM explanation.
 
-use nexus::imgui::{Selectable, TreeNodeFlags, Ui};
+use nexus::imgui::{TreeNodeFlags, Ui};
 
 use gw2_core::types::{CombatMetrics, GearSlots, ResolvedBuild, RotationBreakdown, StatBlock};
 use gw2_optimizer::gamedb::GameDb;
@@ -50,6 +50,12 @@ pub struct BuildSuggestion {
     pub data_quality: gw2_optimizer::data::DataQuality,
     /// Human-readable reasons for quality degradation (empty when Verified).
     pub quality_reasons: Vec<String>,
+    /// The referee's coverage detail — the source names after
+    /// "Not simulated: " — drawn beside the quality marker through the
+    /// `quality.coverage_line` locale key. `None` when every equipped source
+    /// with a record was executed (which is not a claim that every mechanic
+    /// is modeled). One line, one source of truth (specs/004, FR-010).
+    pub coverage_note: Option<String>,
     /// Where this build was published, when it came from a community site
     /// rather than from Choya. Empty for anything we cooked ourselves.
     ///
@@ -432,15 +438,18 @@ pub(crate) fn render_source_link(ui: &Ui, suggestion: &BuildSuggestion) {
     }
 }
 
-/// A stable colour per community site, for telling their links apart.
+/// Each community site's own brand colour, for telling their links and
+/// tabs apart: GuildJen's pink mark, Hardstuck's red, Snowcrows' sky blue.
+/// The tab tint adapts these to the active theme (`theme::tab_tint`), so
+/// they stay legible on a dark or a light background.
 ///
 /// Anything unrecognised gets the theme's gold, so a fourth site added later
 /// looks deliberate rather than broken.
 fn site_colour(site: &str) -> [f32; 4] {
     match site.to_lowercase().as_str() {
-        "guildjen" => [0.44, 0.75, 0.36, 1.0],
-        "hardstuck" => [0.85, 0.34, 0.31, 1.0],
-        "snowcrows" => [0.36, 0.75, 0.87, 1.0],
+        "guildjen" => [0.95, 0.42, 0.72, 1.0],
+        "hardstuck" => [0.90, 0.30, 0.28, 1.0],
+        "snowcrows" => [0.35, 0.82, 0.86, 1.0],
         _ => crate::ui::theme::pal().gold,
     }
 }
@@ -463,6 +472,52 @@ fn site_name(url: &str) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
+    }
+}
+
+/// Whose build a comparison tab holds. Derived, never stored: a suggestion
+/// with a `source_url` was published somewhere; one without is ours.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TabKind {
+    Current,
+    Optimized,
+    Published(String),
+}
+
+pub fn tab_kind(suggestion: &BuildSuggestion) -> TabKind {
+    if suggestion.source_url.is_empty() {
+        TabKind::Optimized
+    } else {
+        TabKind::Published(site_name(&suggestion.source_url))
+    }
+}
+
+pub fn tab_kind_colour(kind: &TabKind) -> [f32; 4] {
+    match kind {
+        TabKind::Current => crate::ui::theme::CURRENT,
+        TabKind::Optimized => crate::ui::theme::OPTIMIZED,
+        TabKind::Published(site) => site_colour(site),
+    }
+}
+
+/// The tab's text: a published build carries its site's name first.
+pub fn tab_label(suggestion: &BuildSuggestion, i: usize) -> String {
+    let base = if suggestion.label.is_empty() {
+        tf("fmt.build_n", &[("n", &(i + 1).to_string())])
+    } else if suggestion.label.starts_with("Score:") {
+        tf(
+            "fmt.option_n",
+            &[
+                ("n", &(i + 1).to_string()),
+                ("prefix", &suggestion.stat_prefix),
+            ],
+        )
+    } else {
+        suggestion.label.clone()
+    };
+    match tab_kind(suggestion) {
+        TabKind::Published(site) => format!("{site} \u{00b7} {base}"),
+        _ => base,
     }
 }
 
@@ -494,6 +549,27 @@ impl ChatSource {
 }
 
 impl ComparisonState {
+    /// Add a build as a tab beside the others, replacing one with the same
+    /// label. Loading or opening a build never clears the strip (specs/006
+    /// FR-004).
+    pub fn push_or_replace(&mut self, suggestion: BuildSuggestion) {
+        match self
+            .suggestions
+            .iter()
+            .position(|s| s.label == suggestion.label)
+        {
+            Some(at) => {
+                self.suggestions[at] = suggestion;
+                self.selected_suggestion = at;
+            }
+            None => {
+                self.suggestions.push(suggestion);
+                self.selected_suggestion = self.suggestions.len() - 1;
+            }
+        }
+        self.show_optimized = true;
+    }
+
     /// Chat code for the Current / Optimized focus. One strip at the top follows this.
     pub fn chat_focus(&self, current_code: Option<&str>) -> (ChatSource, Option<String>) {
         if self.show_optimized && !self.suggestions.is_empty() {
@@ -505,6 +581,56 @@ impl ComparisonState {
         } else {
             (ChatSource::Character, current_code.map(str::to_string))
         }
+    }
+}
+
+/// One tab per build, tinted by whose it is, so opening a published build
+/// never hides the optimized one behind a twin (specs/006 US2). The Current
+/// tab is the equipped build; it exists whenever there is one. Shared by
+/// the New Build and Improve panes, which used to draw their own strips.
+pub fn render_tab_strip(ui: &Ui, comparison: &mut ComparisonState, has_current: bool) {
+    let tab_count = comparison.suggestions.len();
+    if has_current || tab_count > 1 {
+        let avail = ui.content_region_avail()[0];
+        let mut row_x = 0.0;
+        let mut tabs: Vec<(String, bool, [f32; 4], Option<usize>)> = Vec::new();
+        if has_current {
+            tabs.push((
+                t("cmp.tab_current"),
+                !comparison.show_optimized,
+                crate::ui::theme::CURRENT,
+                None,
+            ));
+        }
+        for (i, suggestion) in comparison.suggestions.iter().enumerate() {
+            tabs.push((
+                tab_label(suggestion, i),
+                comparison.show_optimized && comparison.selected_suggestion == i,
+                tab_kind_colour(&tab_kind(suggestion)),
+                Some(i),
+            ));
+        }
+        for (n, (label, selected, colour, target)) in tabs.iter().enumerate() {
+            let pill_w = ui.calc_text_size(label)[0] + 20.0;
+            if n > 0 {
+                if row_x + pill_w + 6.0 > avail {
+                    row_x = 0.0;
+                } else {
+                    ui.same_line_with_spacing(0.0, 6.0);
+                }
+            }
+            if crate::ui::theme::tinted_pill(ui, label, *selected, &format!("##tab_{n}"), *colour) {
+                match target {
+                    Some(i) => {
+                        comparison.selected_suggestion = *i;
+                        comparison.show_optimized = true;
+                    }
+                    None => comparison.show_optimized = false,
+                }
+            }
+            row_x += pill_w + 6.0;
+        }
+        ui.separator();
     }
 }
 
@@ -561,36 +687,7 @@ pub fn render_comparison(
     }
 
     let tab_count = comparison.suggestions.len();
-    if tab_count > 1 {
-        for (i, suggestion) in comparison.suggestions.iter().enumerate() {
-            let selected = comparison.selected_suggestion == i;
-            let label = if suggestion.label.is_empty() {
-                tf("fmt.build_n", &[("n", &(i + 1).to_string())])
-            } else if suggestion.label.starts_with("Score:") {
-                tf(
-                    "fmt.option_n",
-                    &[
-                        ("n", &(i + 1).to_string()),
-                        ("prefix", &suggestion.stat_prefix),
-                    ],
-                )
-            } else {
-                suggestion.label.clone()
-            };
-            if Selectable::new(&format!("{}##sug_{}", label, i))
-                .selected(selected)
-                .size([0.0, 0.0])
-                .build(ui)
-            {
-                comparison.selected_suggestion = i;
-                comparison.show_optimized = true;
-            }
-            if i < tab_count - 1 {
-                ui.same_line();
-            }
-        }
-        ui.separator();
-    }
+    render_tab_strip(ui, comparison, has_current);
 
     let idx = comparison.selected_suggestion.min(tab_count - 1);
     comparison.selected_suggestion = idx;
@@ -1111,6 +1208,13 @@ fn render_data_quality_badge(ui: &Ui, suggestion: &BuildSuggestion) {
             }
         });
     }
+    if let Some(note) = suggestion.coverage_note.as_deref() {
+        ui.same_line();
+        ui.text_colored(
+            crate::ui::theme::pal().muted,
+            tf("quality.coverage_line", &[("detail", note)]),
+        );
+    }
 }
 
 /// Render benchmark delta vs community reference.
@@ -1489,5 +1593,62 @@ mod tests {
             !production.contains("format!(\"{:?}\", gate.gate)"),
             "render_viability_report must not Debug-dump gate names"
         );
+    }
+}
+
+#[cfg(test)]
+mod tab_tests {
+    use super::*;
+
+    fn published(label: &str, url: &str) -> BuildSuggestion {
+        BuildSuggestion {
+            label: label.into(),
+            source_url: url.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn tab_kind_from_suggestion() {
+        assert_eq!(tab_kind(&published("Reaper", "")), TabKind::Optimized);
+        assert_eq!(
+            tab_kind(&published("Reaper", "https://guildjen.com/reaper/")),
+            TabKind::Published("Guildjen".into())
+        );
+        assert_ne!(
+            tab_kind_colour(&TabKind::Current),
+            tab_kind_colour(&TabKind::Optimized)
+        );
+        assert_eq!(
+            tab_kind_colour(&TabKind::Published("Guildjen".into())),
+            site_colour("guildjen")
+        );
+    }
+
+    #[test]
+    fn published_label_is_site_and_build() {
+        let s = published("Reaper", "https://www.hardstuck.gg/gw2/builds/x");
+        assert_eq!(tab_label(&s, 0), "Hardstuck \u{00b7} Reaper");
+        assert_eq!(tab_label(&published("Reaper", ""), 0), "Reaper");
+        assert_eq!(
+            tab_label(&published("", ""), 2),
+            tf("fmt.build_n", &[("n", "3")])
+        );
+    }
+
+    #[test]
+    fn loaded_suggestion_pushes_not_replaces() {
+        let mut c = ComparisonState {
+            suggestions: vec![published("A", ""), published("B", "")],
+            ..Default::default()
+        };
+        c.push_or_replace(published("C", ""));
+        assert_eq!(c.suggestions.len(), 3);
+        assert_eq!(c.selected_suggestion, 2);
+        c.push_or_replace(published("B", "https://guildjen.com/b"));
+        assert_eq!(c.suggestions.len(), 3);
+        assert_eq!(c.selected_suggestion, 1);
+        assert!(!c.suggestions[1].source_url.is_empty());
+        assert!(c.show_optimized);
     }
 }

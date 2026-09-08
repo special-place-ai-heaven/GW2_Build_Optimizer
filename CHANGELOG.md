@@ -2,6 +2,37 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## Unreleased
+
+### What the simulator simulates in WvW
+
+- Harbinger Shroud and Ritualist's Shroud have their numbers now (wiki, read 2026-09-08): Harbinger drains 5 % a second, reduces nothing, leaves health exposed and lets healing land; Ritualist's drains 3 % in PvE and 5 % in WvW and PvP behind the same 33 % / 50 % reduction as Death Shroud. Blight is not modeled. Scourge has no shroud and never did in the simulation: Manifest Sand Shade is the F1, and shade skills run at all times; their life force costs are not in the API facts and are not modeled.
+
+## 1.14.2 - 2026-09-08
+
+Choya can be read, and the builds it puts beside its own can be told apart.
+
+### Reading Choya
+
+- A reply is shown whole. It used to be cut at 600 characters and end in three dots, with the rest thrown away before it reached the transcript.
+- Replies are laid out, not dumped: bullets on their own lines, names the game knows in the accent colour, bold names, italic asides, warning lines, rotations as `A → B → C`, web addresses underlined and clickable. Choya is asked for that shape and for facts over prose.
+- The comparison tabs say whose build each is: a blue Current tab for what is equipped, a green Optimized tab for what Choya or the optimizer made, and a tab in the site's colour named after the site for a published build. Opening a published build or loading a saved one adds a tab; nothing is replaced.
+- The published-build cards stay while you ask follow-up questions; only a new build replaces them.
+- When the model does not answer, the fallback answers what was asked: a scoring question gets the referee's verdict on the plated build, a build request gets the optimizer's build for the specialisation named, anything else gets a plain line with what to do next. A question about a Reaper no longer comes back as an optimizer run for another profession.
+- While Choya works, the bubble names the step and counts the seconds, says "nothing for N s" when nothing is arriving, and expands on click to the model's live reasoning, or its answer as it streams, or the tools it has called. There is no time limit on the wait any more; Stop ends it and keeps what arrived, Retry asks the model to continue from there. The addon log has one line per step with its duration and outcome.
+
+### Builds side by side
+
+- The Improve and New Build panes share one strip of tabs: Current (blue), Choya's pick (green), and one tab in the site's own colour for every published build the chat offered, present as soon as the cards are, not only after a click. The selected tab is solid with a bright rim and a bar beneath it; the header row keeps one order so switching tabs moves nothing.
+- Site colours are the sites' own: GuildJen pink, Hardstuck red, Snowcrows ice cyan, each adapted in brightness to the active theme.
+- Loading a saved build adds a tab instead of replacing the strip.
+
+### Fixes
+
+- The build and equipment tabs you picked for a character no longer snap back to the in-game active tab when the API refresh lands or the character list is opened.
+- Settings has default Scale and Role beside the default Game Mode; they apply at startup.
+- Rotation arrows and list marks are drawn as shapes, so they render in every font instead of as a question mark.
+
 ## 1.14.1 - 2026-09-07
 
 The evening's question was why no free model produced a build any more. The answer is written down, with the numbers, in `docs/llm-requirements.md`, and this release fixes the parts that were ours.
@@ -20,6 +51,21 @@ The evening's question was why no free model produced a build any more. The answ
 - A free endpoint that takes minutes on one lookup no longer takes the whole run with it: a lookup on a free model is abandoned after 90 seconds and Choya plates from what it has. One in-game run had sat 179 seconds on a single lookup and then timed out writing the build.
 - Gemini's closing request now carries an output cap, so a model that reasons at length cannot spend minutes on it.
 - `cargo run -p gw2-optimizer --example choya_live -- <provider> <model>` runs the real contract against the configured keys and prints PASS or FAIL with the request count. This is what "the model works" means from now on.
+
+### What the simulator now simulates in WvW
+
+- On-crit sigils fire. Ranking counts them at the build's critical chance with the cooldown applied to the expected rate; the diagnostic trace also rolls eight fixed seeds and reports how far the expected value sits from a proc that either fires or does not.
+- Swapping weapons swaps sigils: the sigils on the stowed set load, fire only while their set is held, and keep one cooldown across the swap.
+- Health-threshold and stacking bonuses apply per strike, only while true: Rune of the Scholar above 90 % health, Relic of the Thief up to five stacks for six seconds from weapon skills with a recharge. Nothing is counted twice, and PvE and PvP results are unchanged.
+- Dark field combos resolve: whirl finishers leech, leap and blast grant Dark Aura.
+- Life force and shroud: every Necromancer specialisation shares one shroud shape (10 % to enter, drain per second, damage to the pool at the mode's reduction, no healing inside, out at zero); the shroud bar is built from the game data, and a build that cannot enter shroud says why.
+- The records for Sigil of Fire, Rune of the Scholar and Relic of the Thief are rewritten from the wiki and dated; the resource-model check is derived from the skills instead of a list of professions.
+
+### What the simulator did not simulate
+
+- A build's result now says what it did not simulate, by name, instead of counting it: the quality marker on a comparison carries "Not simulated: Superior Sigil of Fire (on-crit), … and N others" beside it, the same line is in Choya's evidence and appended to a plate's concerns, and a plate served by Choya now shows the referee's Provisional / Verified marker instead of Verified regardless. Nothing is scored differently; the line qualifies, it does not penalise.
+- Choya can ask for the app's own verdict on a whole build: `score_build` takes the complete plate and returns viable, the gate results, the score, the six realized axes, the data quality and the coverage line, computed by the same validated-build and referee path the app uses. The old prefix-only form still works and says so. Three such evaluations per chat request. `simulate_rotation` now says it estimates a skill list on an open dummy and is not a full-build verdict.
+- `docs/simulator-connection-audit.md`: the first slice (Necromancer Reaper, WvW) traced end to end, with the findings, the 8 × 8 matrix and seven kinds of causal experiment behind the line above.
 
 ## 1.14.0 - 2026-09-07
 

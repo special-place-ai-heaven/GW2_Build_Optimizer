@@ -622,6 +622,143 @@ pub fn pill_pulse(ui: &Ui, label: &str, selected: bool, id: &str, pulse: f32) ->
     clicked
 }
 
+/// Colours for one comparison tab of a kind: current (blue), optimized
+/// (green) or published (the site's colour). Fill is the idle chip fill
+/// tinted a third of the way toward the kind; the selected tab is the kind
+/// colour itself with the dark button text every accent passes the WCAG gate
+/// with.
+pub struct TabTint {
+    pub fill: [f32; 4],
+    pub rim: [f32; 4],
+    pub selected_fill: [f32; 4],
+    pub text: [f32; 4],
+    pub selected_text: [f32; 4],
+}
+
+pub fn tab_tint(kind: [f32; 4]) -> TabTint {
+    tab_tint_in(&pal(), kind)
+}
+
+/// Perceived brightness, 0..1 (Rec. 601 weights on gamma-encoded values;
+/// close enough to pick a direction to tint in).
+fn brightness(c: [f32; 3]) -> f32 {
+    0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+}
+
+/// A kind colour (a site's brand, or CURRENT / OPTIMIZED) adapted to the
+/// theme: on a dark ground a dark brand is lifted toward the text colour,
+/// on a light ground a bright brand is pulled toward the dark button text,
+/// so the tint reads as that brand without vanishing into the panel.
+pub fn adapt_kind(p: &Palette, kind: [f32; 4]) -> [f32; 4] {
+    let k = [kind[0], kind[1], kind[2]];
+    let ground = brightness([p.ink[0], p.ink[1], p.ink[2]]);
+    let kb = brightness(k);
+    // Brightness is scaled, not lerped to a neutral: pulling two blues toward
+    // the same grey made them one colour (custom-white, Current vs Snowcrows).
+    let scaled = |target: f32| {
+        let s = target / kb.max(0.01);
+        [
+            (k[0] * s).min(1.0),
+            (k[1] * s).min(1.0),
+            (k[2] * s).min(1.0),
+        ]
+    };
+    let out = if ground < 0.5 {
+        // Dark theme: want the kind at least ~0.45 bright. A brand too dark
+        // to scale up (near black) is lifted toward the text colour instead.
+        if kb >= 0.45 {
+            k
+        } else {
+            let up = scaled(0.45);
+            let short = ((0.45 - brightness(up)) / 0.45).clamp(0.0, 1.0);
+            lerp3(up, [p.cream[0], p.cream[1], p.cream[2]], short)
+        }
+    } else if kb > 0.55 {
+        // Light theme: want the kind at most ~0.55 bright.
+        scaled(0.55)
+    } else {
+        k
+    };
+    [out[0], out[1], out[2], kind[3]]
+}
+
+pub fn tab_tint_in(p: &Palette, kind: [f32; 4]) -> TabTint {
+    let kind = adapt_kind(p, kind);
+    let k = [kind[0], kind[1], kind[2]];
+    let idle = [
+        p.chip_idle_fill[0],
+        p.chip_idle_fill[1],
+        p.chip_idle_fill[2],
+    ];
+    let f = lerp3(idle, k, 0.35);
+    TabTint {
+        fill: [f[0], f[1], f[2], 0.40],
+        rim: [k[0], k[1], k[2], 0.75],
+        selected_fill: [k[0], k[1], k[2], 1.0],
+        text: p.cream,
+        selected_text: p.gold_button_text,
+    }
+}
+
+/// [`pill`] in a kind's colours: the comparison strip's tabs.
+pub fn tinted_pill(ui: &Ui, label: &str, selected: bool, id: &str, kind: [f32; 4]) -> bool {
+    let pad_x = 10.0;
+    let pad_y = 3.0;
+    let sz = ui.calc_text_size(label);
+    let w = (sz[0] + pad_x * 2.0).max(36.0);
+    let h = sz[1] + pad_y * 2.0;
+    let p = ui.cursor_screen_pos();
+    let clicked = ui.invisible_button(id, [w, h]);
+    let hovered = ui.is_item_hovered();
+    let tint = tab_tint(kind);
+    let kind = adapt_kind(&pal(), kind);
+    let fill = if selected {
+        tint.selected_fill
+    } else if hovered {
+        let f = lerp3(
+            [tint.fill[0], tint.fill[1], tint.fill[2]],
+            [kind[0], kind[1], kind[2]],
+            0.4,
+        );
+        [f[0], f[1], f[2], 0.9]
+    } else {
+        tint.fill
+    };
+    let text = if selected {
+        tint.selected_text
+    } else {
+        tint.text
+    };
+    {
+        let dl = ui.get_window_draw_list();
+        dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], fill)
+            .filled(true)
+            .rounding(h * 0.45)
+            .build();
+        // The selected tab is unmistakable: solid brand fill, a bright rim,
+        // bold label and a bar underneath. Idle tabs are a faint wash of
+        // their colour (in-game 2026-09-08: the two looked alike).
+        let rim = if selected { pal().cream } else { tint.rim };
+        dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], rim)
+            .rounding(h * 0.45)
+            .thickness(if selected { 2.0 } else { 1.0 })
+            .build();
+        dl.add_text([p[0] + pad_x, p[1] + pad_y], color_u32(text), label);
+        if selected {
+            dl.add_text([p[0] + pad_x + 1.0, p[1] + pad_y], color_u32(text), label);
+            dl.add_rect(
+                [p[0] + 4.0, p[1] + h + 2.0],
+                [p[0] + w - 4.0, p[1] + h + 5.0],
+                tint.selected_fill,
+            )
+            .filled(true)
+            .rounding(1.5)
+            .build();
+        }
+    }
+    clicked
+}
+
 /// Width of [`switch`] for a given label, so a row can be laid out before it
 /// is drawn.
 pub fn switch_width(ui: &Ui, label: &str) -> f32 {
@@ -2217,5 +2354,89 @@ mod tests {
         assert_eq!(super::list_mark("plain"), None);
         assert!(super::plain_section("Open World"));
         assert!(!super::plain_section("See below for details."));
+    }
+}
+
+#[cfg(test)]
+mod tab_tint_tests {
+    use super::*;
+
+    fn rgb(c: [f32; 4]) -> [f32; 3] {
+        [c[0], c[1], c[2]]
+    }
+
+    fn dist(a: [f32; 3], b: [f32; 3]) -> f32 {
+        ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+    }
+
+    /// The three kinds of tab stay apart from each other and from the panel
+    /// on every preset and at the custom-theme extremes (specs/006 US2).
+    #[test]
+    fn tab_tints_keep_contrast_over_every_preset() {
+        let mut palettes: Vec<(String, Palette)> = PRESETS
+            .iter()
+            .map(|p| {
+                (
+                    p.id.to_string(),
+                    derive_palette(p.bg, p.panel, p.accent, p.text, p.muted),
+                )
+            })
+            .collect();
+        palettes.push(("tyrian-shipped".into(), TYRIAN));
+        palettes.push((
+            "custom-black".into(),
+            derive_palette(
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [1.0, 0.84, 0.38],
+                [1.0, 1.0, 1.0],
+                [0.6, 0.6, 0.6],
+            ),
+        ));
+        palettes.push((
+            "custom-white".into(),
+            derive_palette(
+                [1.0, 1.0, 1.0],
+                [1.0, 1.0, 1.0],
+                [0.8, 0.5, 0.1],
+                [0.0, 0.0, 0.0],
+                [0.4, 0.4, 0.4],
+            ),
+        ));
+        // Current, optimized, and the three published-site brand colours
+        // (GuildJen pink, Hardstuck red, Snowcrows sky blue).
+        let kinds = [
+            CURRENT,
+            OPTIMIZED,
+            [0.95, 0.42, 0.72, 1.0],
+            [0.90, 0.30, 0.28, 1.0],
+            [0.35, 0.82, 0.86, 1.0],
+        ];
+        for (id, p) in &palettes {
+            let fills: Vec<[f32; 3]> = kinds.iter().map(|k| rgb(tab_tint_in(p, *k).fill)).collect();
+            for i in 0..fills.len() {
+                for j in (i + 1)..fills.len() {
+                    let d = dist(fills[i], fills[j]);
+                    assert!(d >= 0.06, "{id}: tab fills {i} and {j} too close ({d:.3})");
+                }
+                for (name, bg) in [("ink", rgb(p.ink)), ("plate", rgb(p.plate))] {
+                    let d = dist(fills[i], bg);
+                    assert!(d >= 0.10, "{id}: tab fill {i} vs {name} too close ({d:.3})");
+                }
+                let sel = rgb(tab_tint_in(p, kinds[i]).selected_fill);
+                let d = dist(sel, fills[i]);
+                assert!(
+                    d >= 0.15,
+                    "{id}: selected tab {i} indistinct from idle ({d:.3})"
+                );
+                // The adapted brand stays readable against the ground.
+                let adapted = rgb(adapt_kind(p, kinds[i]));
+                let db = (brightness(adapted) - brightness(rgb(p.ink))).abs();
+                assert!(
+                    db >= 0.3,
+                    "{id}: kind {i} too close to the ground in brightness ({db:.3})"
+                );
+            }
+        }
     }
 }

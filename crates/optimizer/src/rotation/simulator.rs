@@ -1321,9 +1321,20 @@ pub(super) fn strike_crit_factor_with_bonus(
         return 1.0;
     }
     let f = crate::data::universal_formulas::formulas();
-    let chance = ((f.crit_chance(precision) + crit_chance_bonus_pct) / 100.0).clamp(0.0, 1.0);
+    let chance = crit_chance_fraction(precision, crit_chance_bonus_pct);
     let crit_mult = f.crit_damage(ferocity) / 100.0;
     1.0 + chance * (crit_mult - 1.0)
+}
+
+/// Critical chance as a fraction in [0, 1], the same number the expected-crit
+/// damage factor above uses; zero precision means zero chance (the factor
+/// short-circuits to 1.0 there too).
+pub(super) fn crit_chance_fraction(precision: f64, crit_chance_bonus_pct: f64) -> f64 {
+    if precision <= 0.0 {
+        return 0.0;
+    }
+    let f = crate::data::universal_formulas::formulas();
+    ((f.crit_chance(precision) + crit_chance_bonus_pct) / 100.0).clamp(0.0, 1.0)
 }
 
 /// Intensity-stack cap from `data/formulas/conditions.json` `max_stacks`.
@@ -2486,6 +2497,73 @@ mod tests {
             sim_new.pick_skill(power),
             Some(0),
             "high-crit params pick strike"
+        );
+    }
+    // ── Reaper slice interaction pair (specs/004-simulator-trust) ────────────
+
+    /// 2 × 2 over Might stacks {0, 25} and `strike_mult` {1.0, 1.1} on total
+    /// strike damage. Under the multiplicative model
+    /// `damage = (power + might·30) · strike_mult · …` the interaction term
+    /// `f(A+B) − f(A) − f(B) + f(base)` equals `might·30·0.1·hits`, so its
+    /// sign is positive. eps 1.0 (damage units) absorbs f64 rounding.
+    #[test]
+    fn reaper_interaction_might_times_strike_modifier() {
+        fn strike() -> RotationSkill {
+            RotationSkill {
+                skill_id: 1,
+                name: "strike".into(),
+                slot: SkillSlot::Weapon1,
+                cast_time_ms: 500,
+                cooldown_ms: 0,
+                effects: vec![SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 1.0,
+                }],
+                next_chain: None,
+                is_stunbreak: false,
+                weapon_set: 0,
+            }
+        }
+        fn might(stacks: u32) -> RotationSkill {
+            RotationSkill {
+                skill_id: 2,
+                name: "might".into(),
+                slot: SkillSlot::Utility,
+                cast_time_ms: 250,
+                cooldown_ms: 60_000,
+                effects: vec![SkillEffect::ApplyBuff {
+                    buff: "Might".into(),
+                    stacks,
+                    duration_ms: 60_000,
+                }],
+                next_chain: None,
+                is_stunbreak: false,
+                weapon_set: 0,
+            }
+        }
+        let total = |stacks: u32, strike_mult: f64| -> f64 {
+            let mut params = SimParams::basic(2_000.0, 0.0, 1_100.0);
+            params.strike_mult = strike_mult;
+            let result = simulate_with(
+                &[strike(), might(stacks)],
+                30_000,
+                &params,
+                EnemyDummy::default(),
+            );
+            result.strike_dps * 30.0
+        };
+        let base = total(0, 1.0);
+        let a = total(25, 1.0);
+        let b = total(0, 1.1);
+        let ab = total(25, 1.1);
+        let interaction = ab - a - b + base;
+        assert!(
+            a > base && b > base,
+            "each factor alone raises damage: {base} {a} {b}"
+        );
+        assert!(
+            interaction > 1.0,
+            "multiplicative model predicts a positive interaction; got {interaction} (base {base}, might {a}, mult {b}, both {ab})"
         );
     }
 }

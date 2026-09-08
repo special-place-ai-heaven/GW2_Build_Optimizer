@@ -250,6 +250,30 @@ impl ValidatedBuild {
     /// hand, Force in the off-hand and Air on set 2 compacted to `[Force, Air]`
     /// — and the stat sheet then counted a **carried** sigil as worn and
     /// credited Force to the wrong hand.
+    /// Every socketed sigil by weapon set: `[set 1, set 2]`, holes removed.
+    /// Seats when recorded; otherwise the dense list's first two entries are
+    /// set 1 and the rest set 2, the same reading `active_sigil_ids` uses.
+    pub fn sigil_ids_by_set(&self) -> [Vec<u32>; 2] {
+        if !self.sigil_seats.is_empty() {
+            let seat = |slot: SigilSlot| self.sigil_seats.get(slot);
+            return [
+                seat(SigilSlot::Set1Main)
+                    .into_iter()
+                    .chain(seat(SigilSlot::Set1Off))
+                    .collect(),
+                seat(SigilSlot::Set2Main)
+                    .into_iter()
+                    .chain(seat(SigilSlot::Set2Off))
+                    .collect(),
+            ];
+        }
+        let ids: Vec<u32> = self.sigils.iter().map(|sigil| sigil.id).collect();
+        [
+            ids.iter().take(2).copied().collect(),
+            ids.iter().skip(2).take(2).copied().collect(),
+        ]
+    }
+
     pub fn active_sigil_ids(&self) -> Vec<u32> {
         if !self.sigil_seats.is_empty() {
             return self
@@ -1966,6 +1990,10 @@ mod tests {
             },
         ];
         assert_eq!(dense.active_sigil_ids(), vec![10, 20]);
+
+        // Sprint 2: both sets, seats and dense alike.
+        assert_eq!(result.sigil_ids_by_set(), [vec![10], vec![20]]);
+        assert_eq!(dense.sigil_ids_by_set(), [vec![10, 20], vec![30]]);
     }
 
     fn sigil_db() -> GameDb {

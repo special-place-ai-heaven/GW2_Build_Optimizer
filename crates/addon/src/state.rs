@@ -389,6 +389,13 @@ impl AddonState {
     /// Returns `false` when the OS refused to create the thread, in which case the
     /// work never started — a caller that set a "loading" flag first should clear it.
     /// A failed pin still spawns (old crash window) rather than refusing the worker.
+    /// Cancel every worker on the current token and hand out a fresh one, so
+    /// a Stop ends the request in flight without touching the next.
+    pub fn cancel_and_renew(&mut self) {
+        self.cancel_token.cancel();
+        self.cancel_token = CancellationToken::new();
+    }
+
     pub fn spawn_worker<F>(&self, name: &'static str, work: F) -> bool
     where
         F: FnOnce(CancellationToken) + Send + 'static,
@@ -476,6 +483,102 @@ impl AddonState {
 
         crate::ui::save_config_detached(self);
         Ok(())
+    }
+}
+
+/// Live output of the chat request in flight (specs/006 US5). Written only
+/// through [`ChatLiveSink`]; reset on every send; read by the bubble.
+#[derive(Default)]
+pub struct LiveOutput {
+    pub step: Option<gw2_optimizer::llm::live::Step>,
+    pub step_started: Option<std::time::Instant>,
+    /// Last byte or tool event. Stall = now - this >= `STALL_AFTER`.
+    pub last_activity: Option<std::time::Instant>,
+    pub reasoning: String,
+    pub content: String,
+    /// One line per tool call, in order.
+    pub tools: Vec<String>,
+    pub mode: gw2_optimizer::llm::live::LiveMode,
+    /// The player toggled the bubble open.
+    pub expanded: bool,
+    /// One extra line the bubble shows (a retry that starts over).
+    pub note: String,
+}
+
+/// Silence long enough to name in the bubble.
+pub const STALL_AFTER: std::time::Duration = std::time::Duration::from_secs(20);
+
+impl LiveOutput {
+    /// A fresh request; the player's expand choice is kept.
+    pub fn reset(&mut self) {
+        let expanded = self.expanded;
+        *self = LiveOutput {
+            expanded,
+            last_activity: Some(std::time::Instant::now()),
+            step_started: Some(std::time::Instant::now()),
+            ..Default::default()
+        };
+    }
+
+    fn touch(&mut self) {
+        self.last_activity = Some(std::time::Instant::now());
+    }
+
+    /// Seconds since anything arrived, once that is at least `STALL_AFTER`.
+    pub fn stalled_for(&self, now: std::time::Instant) -> Option<u64> {
+        let since = now.saturating_duration_since(self.last_activity?);
+        (since >= STALL_AFTER).then_some(since.as_secs())
+    }
+
+    pub fn elapsed_in_step(&self, now: std::time::Instant) -> u64 {
+        self.step_started
+            .map(|t| now.saturating_duration_since(t).as_secs())
+            .unwrap_or(0)
+    }
+
+    pub fn apply(&mut self, event: gw2_optimizer::llm::live::LiveEvent) {
+        use gw2_optimizer::llm::live::{LiveEvent, LiveMode};
+        match event {
+            LiveEvent::Step(step) => {
+                self.step = Some(step);
+                self.step_started = Some(std::time::Instant::now());
+                self.touch();
+            }
+            LiveEvent::Reasoning(text) => {
+                self.reasoning.push_str(&text);
+                self.mode = LiveMode::Reasoning;
+                self.touch();
+            }
+            LiveEvent::Content(text) => {
+                self.content.push_str(&text);
+                if self.mode != LiveMode::Reasoning {
+                    self.mode = LiveMode::Content;
+                }
+                self.touch();
+            }
+            LiveEvent::ToolCall(name) => {
+                self.tools.push(name);
+                self.touch();
+            }
+            LiveEvent::Mode(mode) => {
+                // A reader that already saw reasoning is not downgraded by a
+                // later loop restart.
+                if self.mode != LiveMode::Reasoning || mode == LiveMode::AtOnce {
+                    self.mode = mode;
+                }
+            }
+        }
+    }
+}
+
+/// The sink the chat worker installs on its thread.
+pub struct ChatLiveSink(pub Arc<Mutex<LiveOutput>>);
+
+impl gw2_optimizer::llm::live::LiveSink for ChatLiveSink {
+    fn event(&self, event: gw2_optimizer::llm::live::LiveEvent) {
+        if let Ok(mut live) = self.0.lock() {
+            live.apply(event);
+        }
     }
 }
 
@@ -599,6 +702,9 @@ pub struct MainState {
     pub chat_epoch: u64,
     /// Wall-clock start of the current kitchen wait (400s, not frame-counted).
     pub chat_wait_started: Option<std::time::Instant>,
+    /// What the in-flight chat request is doing, fed by the transports through
+    /// `gw2_optimizer::llm::live` and read by the thinking bubble each frame.
+    pub chat_live: Arc<Mutex<LiveOutput>>,
     /// Frame counter for "Copied!" tooltip feedback.
     pub copy_feedback_frames: u32,
     // Dynamic model list
@@ -918,6 +1024,27 @@ pub fn init(addon_dir: PathBuf) {
         _ => gw2_core::types::GameMode::PvE,
     };
     main.weights = OptimizationWeights::default_for_mode(main.game_mode.label());
+    // Saved defaults for scale and role, so the left panel opens the way the
+    // player set it in Settings instead of on the first chip (2026-09-08).
+    if let Some(tier) = config.default_combat_tier.as_deref() {
+        use gw2_optimizer::scenario::CombatTier;
+        if let Some(t) = [CombatTier::Solo, CombatTier::Party, CombatTier::Squad]
+            .into_iter()
+            .find(|t| format!("{t:?}") == tier)
+        {
+            main.combat_tier = t;
+        }
+    }
+    if let Some(role) = config.default_role.as_deref() {
+        if let Some(r) = gw2_optimizer::scenario::RoleObjective::play_roles_for(&main.game_mode)
+            .iter()
+            .copied()
+            .find(|r| format!("{r:?}") == role)
+        {
+            main.selected_role = Some(r);
+            main.weights = r.to_weights_for(&main.game_mode, main.combat_tier);
+        }
+    }
     main.chat.history = crate::ui::chat_bar::load_history(&addon_dir);
     main.hydrate_benchmarks_from_disk(&addon_dir);
     crate::ui::icons::set_graphics_dir(addon_dir.join("cache").join("graphics"));
@@ -2205,5 +2332,57 @@ mod tests {
         assert!(mid > start);
         assert!(mid < 1.0);
         assert!((download_fraction(13, 13, 17232, 17232, false) - 1.0).abs() < 1e-5);
+    }
+}
+
+#[cfg(test)]
+mod live_output_tests {
+    use super::*;
+    use gw2_optimizer::llm::live::{LiveEvent, LiveMode, Step};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn stall_after_20s() {
+        let mut live = LiveOutput::default();
+        let now = Instant::now();
+        assert_eq!(live.stalled_for(now), None);
+        live.last_activity = Some(now - Duration::from_secs(21));
+        assert_eq!(live.stalled_for(now), Some(21));
+        live.last_activity = Some(now - Duration::from_secs(5));
+        assert_eq!(live.stalled_for(now), None);
+    }
+
+    #[test]
+    fn reset_on_send_keeps_only_the_expand_choice() {
+        let mut live = LiveOutput::default();
+        live.apply(LiveEvent::Step(Step::Lookup(1)));
+        live.apply(LiveEvent::Reasoning("a".into()));
+        live.apply(LiveEvent::Content("b".into()));
+        live.apply(LiveEvent::ToolCall("score_build".into()));
+        live.expanded = true;
+        assert_eq!(live.mode, LiveMode::Reasoning);
+        live.reset();
+        assert!(live.expanded);
+        assert!(live.reasoning.is_empty() && live.content.is_empty() && live.tools.is_empty());
+        assert_eq!(live.step, None);
+        assert_eq!(live.mode, LiveMode::ToolsOnly);
+    }
+
+    #[test]
+    fn elapsed_in_step_and_mode_upgrade() {
+        let mut live = LiveOutput::default();
+        assert_eq!(live.elapsed_in_step(Instant::now()), 0);
+        live.apply(LiveEvent::Step(Step::Writing));
+        live.step_started = Some(Instant::now() - Duration::from_secs(7));
+        assert_eq!(live.elapsed_in_step(Instant::now()), 7);
+        live.apply(LiveEvent::Content("x".into()));
+        assert_eq!(live.mode, LiveMode::Content);
+        live.apply(LiveEvent::Reasoning("y".into()));
+        live.apply(LiveEvent::Mode(LiveMode::ToolsOnly));
+        assert_eq!(
+            live.mode,
+            LiveMode::Reasoning,
+            "a loop restart does not hide reasoning"
+        );
     }
 }

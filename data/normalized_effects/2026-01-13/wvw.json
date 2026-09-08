@@ -26,7 +26,7 @@
       "trigger_rule": "Passive",
       "uptime_model": { "kind": "AlwaysOn" },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Superior_Rune_of_the_Scholar"
+      "source": "https://wiki.guildwars2.com/wiki/Superior_Rune_of_the_Scholar (read 2026-09-08: +5% strike damage while health is above 90%)"
     },
     {
       "effect_id": "rune:24836:1",
@@ -37,9 +37,10 @@
       "value": 5.0,
       "stacking_rule": "Multiplicative",
       "trigger_rule": "OnHealthThreshold",
+      "health_threshold": { "above": true, "percent": 90.0 },
       "uptime_model": { "kind": "Unknown" },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Superior_Rune_of_the_Scholar",
+      "source": "https://wiki.guildwars2.com/wiki/Superior_Rune_of_the_Scholar (read 2026-09-08: +5% strike damage while health is above 90%)",
       "inner_category": "StrikeDamagePct"
     },
     {
@@ -134,15 +135,12 @@
       "source_id": 24548,
       "source_name": "Superior Sigil of Fire",
       "category": "ProcEffect",
-      "value": 512.0,
+      "value": 0.85,
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnCrit",
-      "uptime_model": {
-        "kind": "Derived",
-        "uptime": 0.33
-      },
-      "evidence_level": "Derived",
-      "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Fire",
+      "uptime_model": { "kind": "Unknown" },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Fire (read 2026-09-08: flame blast on critical hit, 0.85 coefficient on the unequipped 690.5 weapon strength, cannot crit, 5 s cooldown)",
       "internal_cooldown": 5.0,
       "inner_category": "StrikeDamagePct"
     },
@@ -262,16 +260,17 @@
       "source_type": "Relic",
       "source_id": 100916,
       "source_name": "Relic of the Thief",
-      "category": "StrikeDamagePct",
-      "value": 10.0,
-      "stacking_rule": "Highest",
-      "trigger_rule": "Passive",
-      "uptime_model": {
-        "kind": "Estimated",
-        "uptime": 0.75
-      },
-      "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Relic_of_the_Thief"
+      "category": "TriggeredEffect",
+      "value": 1.0,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "OnHit",
+      "uptime_model": { "kind": "Unknown" },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Relic_of_the_Thief (read 2026-09-08: +1% strike damage per stack for 6 s, max 5 stacks, on striking with a weapon skill that has a recharge or resource cost, refresh on trigger)",
+      "effect_duration": 6.0,
+      "max_stacks": 5,
+      "inner_category": "StrikeDamagePct",
+      "trigger_scope": "WeaponSkillWithRecharge"
     }
   ]
 }
