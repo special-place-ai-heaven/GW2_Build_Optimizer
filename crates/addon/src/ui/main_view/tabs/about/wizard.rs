@@ -858,7 +858,6 @@ fn fail_copy(r: &FailReason, draft: &Draft, feedback: &FeedbackState, now: u64) 
     fail_text(r)
 }
 
-
 /// What the player did this frame; applied after every widget has rendered so
 /// no `&Draft` is alive while the state is mutated.
 enum Action {

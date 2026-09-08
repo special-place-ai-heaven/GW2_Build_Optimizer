@@ -2004,7 +2004,6 @@ fn swap_weapons(
     out
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

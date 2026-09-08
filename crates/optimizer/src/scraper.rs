@@ -31,7 +31,6 @@ use crate::benchmark::{BenchmarkBuild, ScrapeResult};
 const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0";
 
-
 /// Sentinel error string set on `ScrapeResult.error` when a scrape was skipped
 /// because cancellation was requested before it started.
 pub const CANCELLED_ERROR: &str = "cancelled";
@@ -1866,7 +1865,6 @@ fn redirect_stays_on_request_host(request_host: Option<&str>, next_host: Option<
         _ => false,
     }
 }
-
 
 fn build_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
     // What Firefox sends on a top-level navigation, because that is what

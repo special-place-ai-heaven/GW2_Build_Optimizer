@@ -43,7 +43,6 @@ pub fn render_card_header(ui: &Ui, title: &str, color: [f32; 4]) {
     ui.dummy([0.0, 24.0]);
 }
 
-
 fn truncate_to_width(ui: &Ui, text: &str, max_w: f32) -> String {
     if ui.calc_text_size(text)[0] <= max_w {
         return text.to_string();
