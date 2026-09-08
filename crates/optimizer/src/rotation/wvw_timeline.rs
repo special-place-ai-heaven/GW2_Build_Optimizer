@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
+use crate::data::fight_population::FightPopulation;
 use crate::data::normalized_effects::{
     EffectCategory, NormalizedEffect, OperationType, SourceType, TargetSide, TriggerRule,
 };
@@ -213,6 +214,18 @@ pub struct WvwCombatReport {
     pub coverage: Vec<CoverageEntry>,
     /// Trait records that fired at least once, by source name (US1).
     pub trait_fire_counts: BTreeMap<String, u32>,
+    // Fight population (FR-003a): counted onto extra foes and allies.
+    /// Strike damage credited to secondary foes; already in `total_damage`
+    /// and, when protected, in `protected_damage`.
+    pub cleave_damage: f64,
+    /// Condition stack-seconds credited to secondary foes.
+    pub cleave_condition_stack_seconds: f64,
+    /// Boon stack-seconds credited to allies (0 in every Solo fight).
+    pub ally_boon_stack_seconds: f64,
+    /// Healing credited to allies.
+    pub ally_healing: f64,
+    /// Conditions cleansed from allies (0 in every Solo fight).
+    pub ally_cleanses: u32,
     /// Bounded event trace. Empty unless [`WvwTimelineInput::trace`] was set;
     /// capped at [`TRACE_CAP`] events.
     pub trace: Vec<TraceEvent>,
@@ -302,6 +315,9 @@ pub struct WvwTimelineInput<'a> {
     /// Each socketed sigil's weapon set (1 or 2; 0 = on both), so a sigil's
     /// procs fire only while its set is held (CONN-00-07).
     pub sigil_sets: HashMap<u32, u8>,
+    /// Foes and allies for the scenario's scale (FR-003a): target-facing
+    /// effects are counted onto them within each record's cap.
+    pub population: FightPopulation,
     /// Exact in-combat weapon swap cooldown for this profession. `None`
     /// means the active specialization cannot swap weapons in combat.
     pub weapon_swap_cooldown_ms: Option<u32>,
@@ -751,6 +767,13 @@ struct Timeline<'a> {
     prerequisite_refused: HashSet<String>,
     /// Any `Periodic` record loaded: the tick calls the site only then.
     has_periodic: bool,
+    /// Fight population (FR-003a); Solo unless the caller says otherwise.
+    population: FightPopulation,
+    cleave_damage: f64,
+    cleave_condition_stack_seconds: f64,
+    ally_boon_stack_seconds: f64,
+    ally_healing: f64,
+    ally_cleanses: u32,
     /// Any shroud entry happened this fight (shroud records that never fired
     /// otherwise get the shroud-floor reason at the end).
     shroud_entered_once: bool,
@@ -779,6 +802,7 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
         resource_rules,
         resource_model_complete,
         coverage,
+        population,
         sigil_sets,
         weapon_swap_cooldown_ms,
         trace,
@@ -796,6 +820,7 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
     );
     timeline.weapon_swap_cooldown_ms = weapon_swap_cooldown_ms;
     timeline.assign_sigil_sets(&sigil_sets);
+    timeline.population = population;
     timeline.opener = opener;
     timeline.trace_enabled = trace;
     timeline.trace_loaded_unmodeled();
@@ -826,6 +851,7 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
             );
             trial.weapon_swap_cooldown_ms = weapon_swap_cooldown_ms;
             trial.assign_sigil_sets(&sigil_sets);
+            trial.population = population;
             trial.opener = opener;
             trial.crit_mode = CritMode::Seeded(XorShift64Star::new(seed));
             trial.run();
@@ -927,6 +953,12 @@ impl<'a> Timeline<'a> {
             status_trigger_depth: 0,
             prerequisite_refused: HashSet::new(),
             has_periodic: false,
+            population: FightPopulation::solo(),
+            cleave_damage: 0.0,
+            cleave_condition_stack_seconds: 0.0,
+            ally_boon_stack_seconds: 0.0,
+            ally_healing: 0.0,
+            ally_cleanses: 0,
             shroud_entered_once: false,
             protection_multiplier: crate::data::boon_condition_formulas::boons()
                 .protection_multiplier(),
@@ -2065,6 +2097,18 @@ impl<'a> Timeline<'a> {
                     let name = self.skill_name(skill_id);
                     self.trace(TraceKind::HitLanded, &name, format!("{damage:.1}"));
                 }
+                // Fight population (FR-003a): the same strike on every
+                // secondary foe in range, counted.
+                let targets = self.skill_targets(skill_id);
+                if targets > 1 {
+                    let name = self.skill_name(skill_id);
+                    let extra = self.foe_fan_out(targets, &name) - 1;
+                    if extra > 0 {
+                        let cleave = damage * extra as f64;
+                        self.cleave_damage += cleave;
+                        self.record_damage(cleave, protected);
+                    }
+                }
                 self.remove_defense(CoverKind::Stealth);
                 self.gain_resource_on_hit(skill_id);
                 self.gain_conditional_stacks(skill_id);
@@ -2095,6 +2139,7 @@ impl<'a> Timeline<'a> {
                     Some(skill_id),
                     protected,
                 );
+                self.count_condition_cleave(skill_id, *stacks, duration);
             }
             SkillEffect::ApplyBuff {
                 buff,
@@ -2112,12 +2157,23 @@ impl<'a> Timeline<'a> {
                 let duration =
                     (*duration_ms as f64 * self.params.condition_duration_mult).round() as u32;
                 self.apply_outgoing_condition(buff, *stacks, duration, Some(skill_id), protected);
+                self.count_condition_cleave(skill_id, *stacks, duration);
             }
             SkillEffect::ApplyBuff {
                 buff,
                 stacks,
                 duration_ms,
-            } => self.apply_buff(buff, *stacks, *duration_ms, true),
+            } => {
+                self.apply_buff(buff, *stacks, *duration_ms, true);
+                let targets = self.skill_targets(skill_id);
+                if targets > 1 {
+                    let name = self.skill_name(skill_id);
+                    let extra = self.ally_fan_out(targets, &name) - 1;
+                    let seconds =
+                        (*duration_ms as f64 * self.params.boon_duration_mult).round() / 1_000.0;
+                    self.ally_boon_stack_seconds += extra as f64 * *stacks as f64 * seconds;
+                }
+            }
             SkillEffect::ComboField {
                 field_type,
                 duration_ms,
@@ -2136,12 +2192,24 @@ impl<'a> Timeline<'a> {
                     * *hit_count as f64
                     * self.params.healing_mult;
                 self.heal(amount);
+                let targets = self.skill_targets(skill_id);
+                if targets > 1 {
+                    let name = self.skill_name(skill_id);
+                    let extra = self.ally_fan_out(targets, &name) - 1;
+                    self.ally_healing += extra as f64 * amount;
+                }
             }
             SkillEffect::Barrier { amount } => {
                 self.apply_barrier(amount + self.params.healing_power * 0.30);
             }
             SkillEffect::RemovesCondition { conditions_removed } => {
-                self.cleanse(*conditions_removed)
+                self.cleanse(*conditions_removed);
+                let targets = self.skill_targets(skill_id);
+                if targets > 1 {
+                    let name = self.skill_name(skill_id);
+                    let extra = self.ally_fan_out(targets, &name) - 1;
+                    self.ally_cleanses += extra * *conditions_removed;
+                }
             }
             SkillEffect::CrowdControl {
                 kind, duration_ms, ..
@@ -2152,8 +2220,9 @@ impl<'a> Timeline<'a> {
                     self.enemy_disabled_until_ms = new_end;
                     self.control_landed_ms += new_end.saturating_sub(previous_end);
                 }
-                // Fear and Taunt are conditions as well as control (wiki
-                // `Fear`, `Taunt`): status triggers see them (US2).
+                // Wiki `Fear` (read 2026-09-08): "Fear is a condition ... Fear
+                // counts as a control effect"; Taunt likewise. The disable above
+                // stands; status triggers and cleanse counts see the condition (US2).
                 if matches!(kind, super::ControlKind::Fear | super::ControlKind::Taunt) {
                     let name = format!("{kind:?}");
                     self.apply_outgoing_condition(
@@ -2353,10 +2422,17 @@ impl<'a> Timeline<'a> {
         &mut self,
         operation: Option<&crate::data::normalized_effects::StatusOperation>,
         scale: f64,
+        source: &str,
     ) {
         let Some(operation) = operation else {
             return;
         };
+        let targets = operation
+            .target_count
+            .as_ref()
+            .and_then(resolved)
+            .copied()
+            .unwrap_or(1);
         let amount = (resolved(&operation.amount_value)
             .copied()
             .unwrap_or(1.0)
@@ -2373,16 +2449,29 @@ impl<'a> Timeline<'a> {
             .copied()
             .unwrap_or(1_000);
         match (&operation.operation_type, &operation.target_side) {
-            (OperationType::AppliesBoon, TargetSide::Self_ | TargetSide::Ally) => {
+            (OperationType::AppliesBoon, TargetSide::Self_) => {
                 self.apply_buff(&operation.status_kind, amount, duration, true)
+            }
+            (OperationType::AppliesBoon, TargetSide::Ally) => {
+                self.apply_buff(&operation.status_kind, amount, duration, true);
+                let extra = self.ally_fan_out(targets, source) - 1;
+                let seconds = (duration as f64 * self.params.boon_duration_mult).round() / 1_000.0;
+                self.ally_boon_stack_seconds += extra as f64 * amount as f64 * seconds;
             }
             (OperationType::AppliesCondition, TargetSide::Enemy) => {
                 let name = operation.status_kind.clone();
-                self.apply_outgoing_condition(&name, amount, duration, None, false)
+                self.apply_outgoing_condition(&name, amount, duration, None, false);
+                let extra = self.foe_fan_out(targets, source) - 1;
+                self.cleave_condition_stack_seconds +=
+                    extra as f64 * amount as f64 * duration as f64 / 1_000.0;
             }
             (OperationType::RemovesCondition, TargetSide::Self_ | TargetSide::Ally)
             | (OperationType::ConvertsConditionToBoon, TargetSide::Self_ | TargetSide::Ally) => {
-                self.cleanse(amount)
+                self.cleanse(amount);
+                if matches!(operation.target_side, TargetSide::Ally) {
+                    let extra = self.ally_fan_out(targets, source) - 1;
+                    self.ally_cleanses += extra * amount;
+                }
             }
             (OperationType::RemovesBoon | OperationType::CorruptsBoon, TargetSide::Enemy) => {
                 // Both flags, as before; each stripped boon is a firing site.
@@ -2411,6 +2500,54 @@ impl<'a> Timeline<'a> {
 
     fn at(&self, offset_ms: u32) -> u32 {
         self.now_ms.saturating_add(offset_ms)
+    }
+
+    /// How many foes a foe-facing effect with `n` targets reaches on this
+    /// scale (the primary included), traced when more than one.
+    fn foe_fan_out(&mut self, n: u32, source: &str) -> u32 {
+        let applied = n.max(1).min(self.population.foes.max(1));
+        if applied > 1 {
+            let foes = self.population.foes;
+            self.trace(
+                TraceKind::PopulationApplied,
+                source,
+                format!("{applied} of {foes} foes ({n})"),
+            );
+        }
+        applied
+    }
+
+    /// How many people an ally-facing effect with `n` targets reaches (the
+    /// player included), traced when more than one.
+    fn ally_fan_out(&mut self, n: u32, source: &str) -> u32 {
+        let applied = 1 + (n.max(1) - 1).min(self.population.allies);
+        if applied > 1 {
+            self.trace(
+                TraceKind::PopulationApplied,
+                source,
+                format!("{applied} of allies ({n})"),
+            );
+        }
+        applied
+    }
+
+    fn skill_targets(&self, skill_id: u32) -> u32 {
+        self.skills
+            .iter()
+            .find(|s| s.skill_id == skill_id)
+            .map(|s| s.targets)
+            .unwrap_or(1)
+    }
+
+    /// A skill fact's condition on every secondary foe in range, counted.
+    fn count_condition_cleave(&mut self, skill_id: u32, stacks: u32, duration_ms: u32) {
+        let targets = self.skill_targets(skill_id);
+        if targets > 1 {
+            let name = self.skill_name(skill_id);
+            let extra = self.foe_fan_out(targets, &name) - 1;
+            self.cleave_condition_stack_seconds +=
+                extra as f64 * stacks as f64 * duration_ms as f64 / 1_000.0;
+        }
     }
 
     /// The one site every outgoing condition passes through (US2): push it,
@@ -2907,7 +3044,7 @@ impl<'a> Timeline<'a> {
                 | EffectCategory::RemovesCondition
                 | EffectCategory::ConvertsConditionToBoon
                 | EffectCategory::TransfersCondition => {
-                    self.apply_operation(operation.as_ref(), p);
+                    self.apply_operation(operation.as_ref(), p, &name);
                     true
                 }
                 EffectCategory::OutgoingHealingPct if duration_ms > 0 => {
@@ -3254,6 +3391,11 @@ impl<'a> Timeline<'a> {
             unmodeled_sources: coverage.iter().map(CoverageEntry::rendered).collect(),
             coverage,
             trait_fire_counts: self.trait_fire_counts.clone(),
+            cleave_damage: self.cleave_damage,
+            cleave_condition_stack_seconds: self.cleave_condition_stack_seconds,
+            ally_boon_stack_seconds: self.ally_boon_stack_seconds,
+            ally_healing: self.ally_healing,
+            ally_cleanses: self.ally_cleanses,
             trace: self.trace.clone(),
             trace_truncated: self.trace_truncated,
             proc_trials: Vec::new(),
@@ -3532,6 +3674,7 @@ mod tests {
         effects: Vec<SkillEffect>,
     ) -> RotationSkill {
         RotationSkill {
+            targets: 1,
             skill_id,
             name: format!("test-{skill_id}"),
             slot,
@@ -7311,6 +7454,242 @@ mod necro_experiments {
             !report.coverage.iter().any(|e| e.name == "Low Health Trait"),
             "{:?}",
             report.coverage
+        );
+    }
+
+    // ---- Fight population (specs/007-trait-triggers, FR-003a)
+
+    /// `open_with` on a chosen scale.
+    fn open_population(
+        tier: crate::scenario::CombatTier,
+        skills: Option<Vec<RotationSkill>>,
+        opener: &[u32],
+        effects: &[&NormalizedEffect],
+        duration_ms: u32,
+    ) -> WvwCombatReport {
+        let db = fx::db();
+        let build = fx::build();
+        let (ctx, _) = fx::scenario();
+        let p = prepared();
+        let (rules, complete) = engine::wvw_resource_rules(
+            &build,
+            &p.skills,
+            &db,
+            "Necromancer",
+            &ctx,
+            p.params.max_health,
+        );
+        let skills = skills.unwrap_or_else(|| p.skills.clone());
+        let mut timeline = Timeline::new(
+            &skills,
+            &p.params,
+            open_profile(duration_ms, vec![]),
+            still_enemy(),
+            effects,
+            &rules,
+            complete,
+            Vec::new(),
+        );
+        timeline.population = crate::data::fight_population::FightPopulation::for_tier(tier);
+        timeline.opener = opener;
+        timeline.trace_enabled = true;
+        timeline.run();
+        timeline.report()
+    }
+
+    /// An ally-facing Might record, five targets, fired once per fight.
+    fn party_might(target_count: u32) -> NormalizedEffect {
+        let mut record = might_on(TriggerRule::OnHit, "Party Might", 100.0);
+        let op = record.status_operation.as_mut().expect("operation");
+        op.target_side = TargetSide::Ally;
+        op.target_scope = TargetScope::Party;
+        op.target_count = Some(FactualValue::Resolved(target_count));
+        record
+    }
+
+    /// A foe-facing Bleeding record, five targets, fired once per fight.
+    fn cleave_bleed(target_count: u32) -> NormalizedEffect {
+        let mut record = trait_record(
+            50_010,
+            "Cleave Bleed",
+            EffectCategory::AppliesCondition,
+            1.0,
+            TriggerRule::OnHit,
+        );
+        let mut op = operation(
+            OperationType::AppliesCondition,
+            TargetSide::Enemy,
+            "Bleeding",
+            2.0,
+            4_000,
+        );
+        op.target_scope = TargetScope::Area;
+        op.target_count = Some(FactualValue::Resolved(target_count));
+        record.status_operation = Some(op);
+        record.internal_cooldown = Some(FactualValue::Resolved(100.0));
+        record
+    }
+
+    fn boon_seconds(p: &engine::PreparedRotation, duration_ms: u32) -> f64 {
+        (duration_ms as f64 * p.params.boon_duration_mult).round() / 1_000.0
+    }
+
+    /// Havoc: the player plus four allies are credited, within the cap.
+    #[test]
+    fn population_havoc_credits_five_or_cap() {
+        let p = prepared();
+        let record = party_might(5);
+        let report = open_population(
+            crate::scenario::CombatTier::Party,
+            None,
+            &[fx::GRAVEDIGGER],
+            &[&record],
+            2_000,
+        );
+        assert_eq!(
+            events(&report, TraceKind::TraitFired, "Party Might").len(),
+            1
+        );
+        let expected = 4.0 * 1.0 * boon_seconds(&p, 10_000);
+        assert!(
+            (report.ally_boon_stack_seconds - expected).abs() < 1e-9,
+            "four allies × 1 stack × {} s: got {}",
+            boon_seconds(&p, 10_000),
+            report.ally_boon_stack_seconds
+        );
+        assert!(
+            events(&report, TraceKind::PopulationApplied, "Party Might")
+                .iter()
+                .any(|e| e.detail == "5 of allies (5)"),
+            "{:?}",
+            report.trace
+        );
+    }
+
+    /// Roam: only the player and the one foe.
+    #[test]
+    fn population_roam_credits_one() {
+        let might = party_might(5);
+        let bleed = cleave_bleed(5);
+        let p = prepared();
+        let mut skills = p.skills.clone();
+        for skill in &mut skills {
+            skill.targets = 5;
+        }
+        let report = open_population(
+            crate::scenario::CombatTier::Solo,
+            Some(skills),
+            &[fx::GRAVEDIGGER],
+            &[&might, &bleed],
+            2_000,
+        );
+        assert_eq!(report.ally_boon_stack_seconds, 0.0);
+        assert_eq!(report.ally_healing, 0.0);
+        assert_eq!(report.ally_cleanses, 0);
+        assert_eq!(report.cleave_damage, 0.0);
+        assert_eq!(report.cleave_condition_stack_seconds, 0.0);
+        assert!(events(&report, TraceKind::PopulationApplied, "").is_empty());
+    }
+
+    /// Cloud: the record's target count caps the credit, not the squad size.
+    #[test]
+    fn population_cloud_caps_at_record() {
+        let p = prepared();
+        let might = party_might(5);
+        let bleed = cleave_bleed(5);
+        let report = open_population(
+            crate::scenario::CombatTier::Squad,
+            None,
+            &[fx::GRAVEDIGGER],
+            &[&might, &bleed],
+            2_000,
+        );
+        let expected = 4.0 * boon_seconds(&p, 10_000);
+        assert!(
+            (report.ally_boon_stack_seconds - expected).abs() < 1e-9,
+            "four allies, not nine: {}",
+            report.ally_boon_stack_seconds
+        );
+        let expected_bleed = 4.0 * 2.0 * 4.0;
+        assert!(
+            (report.cleave_condition_stack_seconds - expected_bleed).abs() < 1e-9,
+            "four secondary foes × 2 stacks × 4 s: {}",
+            report.cleave_condition_stack_seconds
+        );
+    }
+
+    /// Cleave strikes join the damage totals.
+    #[test]
+    fn population_cleave_damage_joins_totals() {
+        let p = prepared();
+        let mut skills = p.skills.clone();
+        for skill in &mut skills {
+            if skill.skill_id == fx::GRAVEDIGGER {
+                skill.targets = 5;
+            }
+        }
+        let party = open_population(
+            crate::scenario::CombatTier::Party,
+            Some(skills.clone()),
+            &[fx::GRAVEDIGGER],
+            &[],
+            1_000,
+        );
+        let solo = open_population(
+            crate::scenario::CombatTier::Solo,
+            Some(skills),
+            &[fx::GRAVEDIGGER],
+            &[],
+            1_000,
+        );
+        assert!(party.cleave_damage > 0.0, "{:?}", party.trace);
+        assert!(
+            (party.total_damage - solo.total_damage - party.cleave_damage).abs() < 1e-6,
+            "party {} = solo {} + cleave {}",
+            party.total_damage,
+            solo.total_damage,
+            party.cleave_damage
+        );
+        assert!(
+            (party.cleave_damage - 4.0 * solo.total_damage).abs() < 1e-6,
+            "four secondary foes take the same strike"
+        );
+    }
+
+    /// A skill fact's `Number of Targets` reaches the same counting path.
+    #[test]
+    fn population_skill_fact_targets_feed_the_same_path() {
+        let skill: gw2_api::models::Skill = serde_json::from_value(serde_json::json!({
+            "id": 41_000,
+            "name": "Well of Blood",
+            "slot": "Heal",
+            "professions": ["Necromancer"],
+            "facts": [
+                {"type": "Number", "text": "Number of Targets", "value": 5},
+                {"type": "Buff", "status": "Regeneration", "duration": 5, "apply_count": 1},
+                {"type": "Recharge", "value": 30.0}
+            ]
+        }))
+        .expect("skill json");
+        let rotation = crate::rotation::builder::skill_to_rotation(&skill);
+        assert_eq!(rotation.targets, 5);
+        let p = prepared();
+        let mut skills = p.skills.clone();
+        let mut well = rotation;
+        well.weapon_set = 0;
+        skills.push(well);
+        let report = open_population(
+            crate::scenario::CombatTier::Party,
+            Some(skills),
+            &[41_000],
+            &[],
+            2_000,
+        );
+        let expected = 4.0 * boon_seconds(&p, 5_000);
+        assert!(
+            (report.ally_boon_stack_seconds - expected).abs() < 1e-9,
+            "{} vs {expected}",
+            report.ally_boon_stack_seconds
         );
     }
 

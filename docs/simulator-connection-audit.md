@@ -284,6 +284,21 @@ Quoted blocks: `docs/audit/sprint3-failures.md` §§ prereq, scope. Full lib run
 
 ### 9.4 Population
 
+FR-003a closed for the mechanism. `data/formulas/fight_population.json` (Solo 1/0, Party 5/4, Squad 10/9, loaded by `data/fight_population.rs`) reaches the timeline as `WvwTimelineInput.population` from the scenario's tier; every direct constructor stays Solo. Foe-facing effects (strikes, skill-fact conditions, record conditions) reach `min(n, foes)` foes: the primary gets the state, the rest are counted into `cleave_damage` (recorded as damage events, so it is inside `total_damage`, `protected_damage` and the peaks) and `cleave_condition_stack_seconds`. Ally-facing effects (skill-fact boons, heals, cleanses and `target_side: Ally` record operations) reach `1 + min(n − 1, allies)`: the player gets the effect, the rest are counted into `ally_boon_stack_seconds`, `ally_healing`, `ally_cleanses`. `n` is the record's `target_count` or the skill's `Number of Targets` fact (`RotationSkill.targets`, one field instead of a `targets` member on four `SkillEffect` variants: same information, forty fewer literals to touch). Every fan-out above one is traced as `PopulationApplied`. `search_rank`'s Support/Commander/Staller output slot adds `ally_boon_stack_seconds / 1000`; the slot rounds to whole points, so the direction test uses a Havoc-minute value (1 000 stack-seconds). PvE pin and `scoring_regression` unchanged to the last digit.
+
+| kind | test | disabled by (harness entry) | seen failing | passes now |
+|---|---|---|---|---|
+| positive control (Havoc) | `population_havoc_credits_five_or_cap` | `population`: `ally_fan_out` forced to 1 | `four allies × 1 stack × 10 s: got 0` | `4 × 1 × 10 s` of Might on allies, `PopulationApplied 5 of allies (5)` |
+| negative control (Roam) | `population_roam_credits_one` | — | — | every ally and cleave total 0, no trace |
+| cap (Cloud) | `population_cloud_caps_at_record` | `population` run | — | four allies not nine; `4 × 2 × 4 s` of Bleeding on secondary foes |
+| totals (cleave) | `population_cleave_damage_joins_totals` | — | — | `party total = solo total + cleave`, cleave = 4 × the strike |
+| builder (targets fact) | `population_skill_fact_targets_feed_the_same_path` | — | — | `Number of Targets 5` → `targets 5`, Regeneration on four allies |
+| ranking (support) | `support_builds_rank_apart_on_ally_trait` | — | `left > right` failed at 40 stack-seconds (rounded away) | Support, Commander, Staller rank the ally record above |
+| ranking (damage) | `damage_builds_unchanged_by_ally_slot` | — | — | StrikeSpike, CondiRamp, Harasser, Disabler keys identical |
+| PvE / PvP pins | `pve_output_unchanged_by_conditional_tagging`, `pve_trait_fact_consumption_set_unchanged`, `scoring_regression` | — | — | unchanged |
+
+Known approximation: population counting is arithmetic, not simulation. Extra foes and allies carry no state, so a record that reads an ally's conditions (Unholy Martyr's transfer half) stays `NeedsMechanic("ally state")`. Full lib run after the step: 1 189 passed, 16.16 s.
+
 ### 9.5 Necromancer catalogue
 
 ### 9.6 Timing

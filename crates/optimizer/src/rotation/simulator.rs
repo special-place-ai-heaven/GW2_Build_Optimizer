@@ -1378,6 +1378,7 @@ mod tests {
 
     fn auto_attack() -> RotationSkill {
         RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 1,
@@ -1397,6 +1398,7 @@ mod tests {
 
     fn weapon_skill() -> RotationSkill {
         RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 2,
@@ -1423,6 +1425,7 @@ mod tests {
 
     fn buff_skill() -> RotationSkill {
         RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 3,
@@ -1443,6 +1446,7 @@ mod tests {
 
     fn heal_skill() -> RotationSkill {
         RotationSkill {
+            targets: 1,
             skill_id: 40,
             name: "Heal".into(),
             slot: SkillSlot::Heal,
@@ -1459,6 +1463,7 @@ mod tests {
 
     fn stun_skill() -> RotationSkill {
         RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 41,
@@ -1546,6 +1551,7 @@ mod tests {
 
     fn status_skill(id: u32, status: &str, stacks: u32, duration_ms: u32) -> RotationSkill {
         RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: id,
@@ -1624,6 +1630,7 @@ mod tests {
         let mut set1_auto = auto_attack();
         set1_auto.weapon_set = 1;
         let mut set1_bleed = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 60,
@@ -1645,6 +1652,7 @@ mod tests {
         set2_auto.skill_id = 61;
         set2_auto.weapon_set = 2;
         let set2_heal = RotationSkill {
+            targets: 1,
             skill_id: 62,
             name: "Staff Heal".into(),
             slot: SkillSlot::Weapon3,
@@ -1782,6 +1790,7 @@ mod tests {
         // Wiki Might: +30 Condition Damage/stack; already-applied conditions scale.
         fn bleed_only() -> RotationSkill {
             RotationSkill {
+                targets: 1,
                 categories: Vec::new(),
                 slot_name: None,
                 skill_id: 40,
@@ -1836,6 +1845,7 @@ mod tests {
     fn test_dpct_prefers_high_damage_skill() {
         // A high-damage weapon skill should be picked over a low-damage utility
         let high_dmg = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 10,
@@ -1852,6 +1862,7 @@ mod tests {
             weapon_set: 0,
         };
         let low_dmg = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 11,
@@ -1882,6 +1893,7 @@ mod tests {
     fn test_dpct_values_condition_skills() {
         // A condition skill's DPCT should account for total lifetime damage
         let condi_skill = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 20,
@@ -1916,6 +1928,7 @@ mod tests {
     #[test]
     fn test_dpct_values_buff_skills() {
         let buff = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 30,
@@ -1941,6 +1954,7 @@ mod tests {
     fn test_weapon_swap() {
         // Set 1: fast skill, Set 2: different fast skill, plus auto + utility
         let set1_skill = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 100,
@@ -1957,6 +1971,7 @@ mod tests {
             weapon_set: 1,
         };
         let set1_auto = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 101,
@@ -1973,6 +1988,7 @@ mod tests {
             weapon_set: 1,
         };
         let set2_skill = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 200,
@@ -1989,6 +2005,7 @@ mod tests {
             weapon_set: 2,
         };
         let set2_auto = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 201,
@@ -2064,6 +2081,7 @@ mod tests {
 
     fn cleanse_skill(cooldown_ms: u32, conditions: u32) -> RotationSkill {
         RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 9999,
@@ -2143,6 +2161,7 @@ mod tests {
         // A cleanse on an auto-attack (cooldown=0) should not blow up the rate.
         // The rate calculation skips skills with cooldown=0.
         let auto_with_cleanse = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 1,
@@ -2198,6 +2217,7 @@ mod tests {
     #[test]
     fn strip_clears_protection_so_later_hits_are_full() {
         let strip = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 90,
@@ -2235,6 +2255,7 @@ mod tests {
     #[test]
     fn dummy_hp_downs_then_stomps_after_invuln() {
         let burst = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 99,
@@ -2283,6 +2304,7 @@ mod tests {
     #[test]
     fn crowd_control_sets_has_interrupt() {
         let cc = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 7,
@@ -2329,6 +2351,7 @@ mod tests {
         // Wiki Alacrity (2026-08-29): +25% recharge, 10s CD → 8s while Alacrity lasts.
         // 33% (TICK_MS/3) recasts a third time inside 15.5s; 25% does not.
         let skill = RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 9,
@@ -2425,6 +2448,7 @@ mod tests {
 
     fn strike_skill() -> RotationSkill {
         RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 60,
@@ -2444,6 +2468,7 @@ mod tests {
 
     fn bleed_skill(duration_ms: u32) -> RotationSkill {
         RotationSkill {
+            targets: 1,
             categories: Vec::new(),
             slot_name: None,
             skill_id: 61,
@@ -2554,6 +2579,7 @@ mod tests {
     fn reaper_interaction_might_times_strike_modifier() {
         fn strike() -> RotationSkill {
             RotationSkill {
+                targets: 1,
                 categories: Vec::new(),
                 slot_name: None,
                 skill_id: 1,
@@ -2572,6 +2598,7 @@ mod tests {
         }
         fn might(stacks: u32) -> RotationSkill {
             RotationSkill {
+                targets: 1,
                 categories: Vec::new(),
                 slot_name: None,
                 skill_id: 2,

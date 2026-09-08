@@ -134,3 +134,23 @@ restored: byte-identical
 With the arm on: one `TraitFired` on the first shout, `ProcSkippedIcd` on the second inside the 30 s cooldown, nothing on Gravedigger, nothing when the skills carry no `Shout` category.
 
 ## population
+
+### population_havoc_credits_five_or_cap
+
+Before the counting existed the report had no ally totals (the test could not compile); the record landed on the player alone. Disabled again after the edit with `python docs/audit/disable_and_run.py population` (`ally_fan_out` forced to 1), 2026-09-08:
+
+```
+### population
+file: crates/optimizer/src/rotation/wvw_timeline.rs
+disabled: let applied = 1 + (n.max(1) - 1).min(self.population.allies);
+test: population_havoc_credits_five_or_cap
+panicked at crates\optimizer\src\rotation\wvw_timeline.rs:7551:9:
+four allies × 1 stack × 10 s: got 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1193 filtered out; finished in 0.01s
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+restored: byte-identical
+```
+
+With the counting on: a five-target ally boon record in a Party fight credits `4 × stacks × duration` (`PopulationApplied "5 of allies (5)"`); Solo credits nothing beyond the player and the one foe; Squad caps at the record's five (four allies, four secondary foes), not nine; a five-target Gravedigger's cleave is `4 × the primary strike` and `total_damage = solo total + cleave_damage`; a skill fact's `Number of Targets` fills `RotationSkill.targets` and reaches the same path.
