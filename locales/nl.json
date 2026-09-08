@@ -170,6 +170,8 @@
   "settings.ai_provider": "AI-AANBIEDER",
   "settings.opt_defaults": "OPTIMALISATIESTANDAARDEN",
   "settings.default_mode": "Standaard spelmodus:",
+  "settings.default_scale": "Standaardschaal:",
+  "settings.default_role": "Standaardrol:",
   "settings.legend": "LEGENDA GEGEVENSKWALITEIT",
   "settings.verified": "Geverifieerd",
   "settings.verified_note": "-- Alle invoergegevens zijn brononderbouwd.",

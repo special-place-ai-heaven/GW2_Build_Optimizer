@@ -170,6 +170,8 @@
   "settings.ai_provider": "ПРОВАЙДЕР ИИ",
   "settings.opt_defaults": "УМОЛЧАНИЯ ОПТИМИЗАЦИИ",
   "settings.default_mode": "Режим игры по умолчанию:",
+  "settings.default_scale": "Масштаб по умолчанию:",
+  "settings.default_role": "Роль по умолчанию:",
   "settings.legend": "ЛЕГЕНДА КАЧЕСТВА ДАННЫХ",
   "settings.verified": "Проверено",
   "settings.verified_note": "-- Все входные данные подтверждены источниками.",

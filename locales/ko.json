@@ -170,6 +170,8 @@
   "settings.ai_provider": "AI 제공자",
   "settings.opt_defaults": "최적화 기본값",
   "settings.default_mode": "기본 게임 모드:",
+  "settings.default_scale": "기본 규모:",
+  "settings.default_role": "기본 역할:",
   "settings.legend": "데이터 품질 범례",
   "settings.verified": "검증됨",
   "settings.verified_note": "-- 모든 입력 데이터가 출처에 근거합니다.",

@@ -170,6 +170,8 @@
   "settings.ai_provider": "DOSTAWCA SI",
   "settings.opt_defaults": "DOMYŚLNE OPTYMALIZACJI",
   "settings.default_mode": "Domyślny tryb gry:",
+  "settings.default_scale": "Domyślna skala:",
+  "settings.default_role": "Domyślna rola:",
   "settings.legend": "LEGENDA JAKOŚCI DANYCH",
   "settings.verified": "Zweryfikowane",
   "settings.verified_note": "-- Wszystkie dane wejściowe mają źródło.",
