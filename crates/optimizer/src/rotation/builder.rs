@@ -170,6 +170,8 @@ fn skill_to_rotation_for_context(skill: &Skill, ctx: &BalanceContext) -> Rotatio
         next_chain: skill.next_chain,
         is_stunbreak,
         weapon_set: 0, // default; caller can tag with set 1/2 via tag_weapon_set()
+        categories: skill.categories.clone(),
+        slot_name: skill.slot.clone(),
     }
 }
 
@@ -1416,6 +1418,8 @@ mod tests {
             next_chain: None,
             is_stunbreak: false,
             weapon_set: 0,
+            categories: Vec::new(),
+            slot_name: None,
         }
     }
 
@@ -1488,6 +1492,8 @@ mod tests {
             next_chain: None,
             is_stunbreak: false,
             weapon_set: set,
+            categories: Vec::new(),
+            slot_name: None,
         };
         let set1 = vec![weapon(1, 1), weapon(10705, 1)];
         let set2 = vec![weapon(10705, 2), weapon(2, 2)];

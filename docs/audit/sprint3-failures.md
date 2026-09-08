@@ -89,6 +89,48 @@ With the site on: one `TraitFired` at the `ShroudEntered` tick, `AppliesBoon ×1
 
 ## prereq
 
+### necro_chilled_prerequisite_gates_chilling_nova
+
+Before `prerequisite_holds` read the foe's conditions (`2307f2c` plus the Phase 5 tests): the record was refused on every crit with `foe prerequisite not evaluated` and never fired. Disabled again after the edit with `python docs/audit/disable_and_run.py prereq` (the `foe not Chilled` refusal gated off, so the record fires from the first crit at 400 ms), 2026-09-08:
+
+```
+### prereq
+file: crates/optimizer/src/rotation/wvw_timeline.rs
+disabled: if !carried {
+                return Err(format!("foe not {condition}"));
+test: necro_chilled_prerequisite_gates_chilling_nova
+panicked at crates\optimizer\src\rotation\wvw_timeline.rs:6973:9:
+the pre-chill crits are refused with the reason: [TraceEvent { t_ms: 400, kind: HitLanded, source: "Gravedigger", detail: "1120.5" }, TraceEvent { t_ms: 400, kind: ProcFired, source: "Chilling Nova", detail: "AppliesCondition ×0.61" }, TraceEvent { t_ms: 400, kind: TraitFired, source: "Chilling Nova", detail: "AppliesCondition ×0.61" }, TraceEvent { t_ms: 750, kind: HitLanded, source: "Gravedigger", detail: "1120.5" }, TraceEvent { t_ms: 750, kind: ProcFired, source: "Chilling Nova", detail: "
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1185 filtered out; finished in 0.01s
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+restored: byte-identical
+```
+
+With the check on: `ProcSkippedPrerequisite "foe not Chilled"` at 400, 750 and 2 000 ms (Grasping Darkness lands its strike before its chill resolves), `TraitFired AppliesCondition ×0.61` at 2 500 and 2 800 ms from Death Spiral's crits, refused again from 7 100 ms once the chill has expired; the unchilled opener never fires.
+
 ## scope
+
+### necro_shout_scope_fires_on_shouts_only
+
+Before `scope_admits` knew categories, a trait `OnSkillUse` record was refused by the loader as `(on-skill-use)` (Sprint 2 rule: skill-owned only). Disabled again after the edit with `python docs/audit/disable_and_run.py scope` (the `Category` arm forced false), 2026-09-08:
+
+```
+### scope
+file: crates/optimizer/src/rotation/wvw_timeline.rs
+disabled: crate::data::normalized_effects::TriggerScope::Category(category) => skill_id
+test: necro_shout_scope_fires_on_shouts_only
+panicked at crates\optimizer\src\rotation\wvw_timeline.rs:7022:9:
+assertion `left == right` failed: one fire inside the 30 s cooldown: [TraceEvent { t_ms: 1100, kind: HitLanded, source: "Gravedigger", detail: "1163.5" }, TraceEvent { t_ms: 1450, kind: HitLanded, source: "Gravedigger", detail: "1163.5" }, TraceEvent { t_ms: 1450, kind: LifeForceGained, source: "Gravedigger", detail: "8% → 8%" }, TraceEvent { t_ms: 3350, kind: ShroudRefused, source: "Reaper's Shroud", detail: "Reaper's Shroud needs 10% life force, had 8%" }, TraceEvent { t_ms: 3450, kind: HitL
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1185 filtered out; finished in 0.01s
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+restored: byte-identical
+```
+
+With the arm on: one `TraitFired` on the first shout, `ProcSkippedIcd` on the second inside the 30 s cooldown, nothing on Gravedigger, nothing when the skills carry no `Shout` category.
 
 ## population
