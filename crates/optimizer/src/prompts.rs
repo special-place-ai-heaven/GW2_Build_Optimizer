@@ -1119,17 +1119,15 @@ mod tests {
         assert!(ctx.contains("Survivability"));
     }
 
-    // -------------------------------------------------------------------------
     // Inline snapshot tests for prompt builders.
     //
-    // Purpose: surface drift in prompt wording in PR diffs. The expected
-    // strings below ARE the snapshots — when intentionally changing a prompt,
-    // update the corresponding `expected` literal in the same PR.
+    // Surface drift in prompt wording in PR diffs. The expected strings below
+    // ARE the snapshots: when intentionally changing a prompt, update the
+    // corresponding `expected` literal in the same PR.
     //
-    // Determinism: fixtures use empty/None lock constraints to avoid the
-    // nondeterministic HashMap iteration in `BuildLocks::trait_locks`
-    // (a separate follow-up task addresses the source of that flakiness).
-    // -------------------------------------------------------------------------
+    // Fixtures use empty/None lock constraints to avoid the nondeterministic
+    // HashMap iteration in `BuildLocks::trait_locks` (a separate follow-up
+    // addresses that flakiness).
 
     #[test]
     fn snapshot_new_build_prompt_with_tools() {

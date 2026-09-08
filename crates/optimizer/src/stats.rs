@@ -1131,7 +1131,6 @@ mod tests {
         assert_eq!(stats.concentration, 240.0);
     }
 
-    // Helper constructors for test data
     fn default_item() -> Item {
         Item {
             id: 0,

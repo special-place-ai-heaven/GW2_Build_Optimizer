@@ -981,7 +981,6 @@ pub fn render_optimized_specs_panel(
                         let cx = grid_x + col as f32 * col_spacing + circle_radius + 2.0;
                         let cy = grid_y + row as f32 * row_height + row_height / 2.0;
 
-                        // Check if this trait was selected by the optimizer
                         let is_selected = trait_info
                             .map(|t| optimized_trait_selected(trait_names, &t.name))
                             .unwrap_or(false);

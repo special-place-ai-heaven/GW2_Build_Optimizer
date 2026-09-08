@@ -2200,7 +2200,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 .collect();
             println!("prefix contains() matches: {:?}", prefix_matches);
 
-            // ---- Baseline current-build computation (mirrors addon current-build path contracts) ----
+            // Baseline current-build (mirrors addon current-build path contracts)
             let loaded_trait_ids = loaded_build_trait_ids(&db, &loaded_specs);
             let equipment = loaded_equipment(584);
             let (baseline_stats, baseline_derived) = crate::stats::calculate_full_stats(
@@ -2247,7 +2247,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 baseline_mods.total_strike_mult()
             );
 
-            // ---- Candidate generation and top pre-ranking traces ----
+            // Candidate generation and top pre-ranking traces
             let profession = db.profession("Warrior").expect("profession should exist");
             let mut candidates = select_specs_and_traits(
                 profession,
@@ -2283,7 +2283,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 );
             }
 
-            // ---- Ranking traces (combat_score without modifiers + final blend) ----
+            // Ranking traces (combat_score without modifiers + final blend)
             let gear_prefix_id = db
                 .itemstats
                 .values()
@@ -2351,7 +2351,7 @@ pub(crate) mod runtime_diagnostics_tests {
             )
             .expect("rank_and_select should produce best candidate");
 
-            // ---- Final suggestion trace (with capped modifiers, as used by deterministic output) ----
+            // Final suggestion (capped modifiers, same as deterministic output)
             let mut progress = |_p: crate::engine::OptimizeProgress| {};
             let result = build_synergy_result(
                 selected.clone(),

@@ -828,7 +828,6 @@ impl AppConfig {
             .unwrap_or(DEFAULT_OPENROUTER_MODEL)
     }
 
-    /// Get the model ID for the currently active provider.
     pub fn active_model_id(&self) -> &str {
         match self.active_provider {
             LlmProvider::Gemini => self.gemini_model_id(),
@@ -847,7 +846,6 @@ impl AppConfig {
         }
     }
 
-    /// Get the API key for the currently active provider.
     pub fn active_api_key(&self) -> Option<&str> {
         match self.active_provider {
             LlmProvider::Gemini => self.gemini_api_key.as_deref(),

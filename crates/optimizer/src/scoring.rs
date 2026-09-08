@@ -269,9 +269,8 @@ impl OptimizationWeights {
         }
     }
 
-    // --- Presets ---
-    // Now loaded from objective profile data. These methods provide backward
-    // compatibility and quick access without needing a profile reference.
+    // Presets are loaded from objective profile data. These methods provide
+    // backward compatibility and quick access without a profile reference.
 
     pub fn preset_power_dps() -> Self {
         Self {
@@ -1454,8 +1453,6 @@ mod tests {
             );
         }
     }
-
-    // --- Gear Prefix Selection Tests ---
 
     #[test]
     fn test_gear_prefix_power_max() {
