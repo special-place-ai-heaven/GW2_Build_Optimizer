@@ -128,6 +128,11 @@ pub enum EffectCategory {
     DefianceDamage,
     ProcEffect,
     TriggeredEffect,
+    // Sprint 3 (specs/007-trait-triggers)
+    /// Credits a percent of the life force pool (`value` = percent).
+    GainsLifeForce,
+    /// Flat self heal (`value`), plus `healing_power_coefficient` x healing power.
+    Heal,
 }
 
 impl EffectCategory {
@@ -176,6 +181,19 @@ pub enum TriggerRule {
     OnHealthThreshold,
     /// Triggers based on a custom condition (e.g., "while above 90% health").
     Conditional,
+    // Sprint 3 (specs/007-trait-triggers)
+    /// The player's shroud entry skill resolves (never Manifest Sand Shade).
+    OnShroudEnter,
+    /// The shroud ends by skill, opener, drain or damage.
+    OnShroudExit,
+    /// The player puts a condition on a foe (scope `Status` names it).
+    OnConditionApplied,
+    /// A boon lands on the player (scope `Status` names it).
+    OnBoonApplied,
+    /// The player removes or corrupts a boon on a foe (scope `Status` names it).
+    OnBoonStripped,
+    /// Every `internal_cooldown` seconds from the fight's start.
+    Periodic,
 }
 
 /// Health prerequisite of an `OnHealthThreshold` / `Conditional` effect,
@@ -197,6 +215,59 @@ pub enum TriggerScope {
     /// Only weapon skills with a recharge or a resource cost (Relic of the
     /// Thief wording).
     WeaponSkillWithRecharge,
+    // Sprint 3 (specs/007-trait-triggers)
+    /// Skills whose `Skill.categories` contains the name (`{"Category":"Shout"}`).
+    Category(String),
+    /// Skills in the named slot: Heal, Utility, Elite, Profession (`{"Slot":"Elite"}`).
+    Slot(String),
+    /// A boon or condition name for the three status triggers (`{"Status":"Fear"}`).
+    Status(String),
+}
+
+/// What must hold for a Sprint 3 record to fire or stay active. Members are
+/// optional; an empty block is rejected by validation.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Prerequisite {
+    /// The primary foe carries this condition (unexpired).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foe_condition: Option<String>,
+    /// The player is (true) or is not (false) in shroud.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_shroud: Option<bool>,
+    /// The primary foe's health against a threshold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foe_health: Option<HealthThreshold>,
+}
+
+impl Prerequisite {
+    pub fn is_empty(&self) -> bool {
+        self.foe_condition.is_none() && self.in_shroud.is_none() && self.foe_health.is_none()
+    }
+}
+
+/// Multiplier applied to a `GainsLifeForce` / `Heal` value at firing time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ScaleBy {
+    /// Times the number of conditions the same firing removed.
+    ConditionsRemoved,
+}
+
+/// Why a trait is classified instead of executed (a record with `coverage`
+/// carries no payload; the coverage line shows the class).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum CoverageClass {
+    /// The trait changes nothing the simulator measures.
+    PassiveNoEffect,
+    /// The trait needs a mechanic the simulator has no state for (`mechanic`).
+    NeedsMechanic,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CoverageBlock {
+    pub class: CoverageClass,
+    /// Required for `NeedsMechanic`, forbidden otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mechanic: Option<String>,
 }
 
 // Uptime model
@@ -398,6 +469,24 @@ pub struct NormalizedEffect {
     /// Which activating skills count. Absent means `Any`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trigger_scope: Option<TriggerScope>,
+
+    // Sprint 3 (specs/007-trait-triggers): prerequisite, scaling, coverage
+    /// What must hold on the foe or the player for the record to fire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prerequisite: Option<Prerequisite>,
+    /// Multiplier on a `GainsLifeForce` / `Heal` value at firing time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale_by: Option<ScaleBy>,
+    /// `Heal` only: added to `value` as coefficient x healing power.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_factual"
+    )]
+    pub healing_power_coefficient: Option<FactualValue<f64>>,
+    /// Classified, not executed: the trait's reason for the coverage line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<CoverageBlock>,
 }
 
 
@@ -570,6 +659,62 @@ fn validate_effects_file(file: &NormalizedEffectsFile) -> Result<(), NormalizedE
                 effect.effect_id
             )));
         }
+
+        // Sprint 3 (specs/007-trait-triggers)
+        let fail = |what: &str| {
+            Err(NormalizedEffectError::ValidationError(format!(
+                "effect '{}': {what}",
+                effect.effect_id
+            )))
+        };
+        // 10. An empty prerequisite says nothing
+        if effect.prerequisite.as_ref().is_some_and(|p| p.is_empty()) {
+            return fail("prerequisite must name at least one member");
+        }
+        // 11. A trait's on-skill-use needs to say which skills. An absent
+        // scope is legal (three Sprint 1 records) and stays on the coverage
+        // path unexecuted; an explicit `Any` is a mistake.
+        if effect.source_type == SourceType::Trait
+            && effect.trigger_rule == TriggerRule::OnSkillUse
+            && matches!(effect.trigger_scope, Some(TriggerScope::Any))
+        {
+            return fail("Trait OnSkillUse requires a trigger_scope other than Any");
+        }
+        // 12. Periodic needs its period
+        if effect.trigger_rule == TriggerRule::Periodic && effect.internal_cooldown.is_none() {
+            return fail("Periodic trigger_rule requires internal_cooldown");
+        }
+        // 13. A coverage block carries no payload
+        if let Some(cov) = &effect.coverage {
+            if effect.status_operation.is_some()
+                || effect.inner_category.is_some()
+                || effect.prerequisite.is_some()
+                || effect.value.is_resolved()
+            {
+                return fail(
+                    "coverage forbids status_operation, inner_category, prerequisite and a resolved value",
+                );
+            }
+            match (&cov.class, &cov.mechanic) {
+                (CoverageClass::NeedsMechanic, None) => {
+                    return fail("coverage NeedsMechanic requires mechanic")
+                }
+                (CoverageClass::PassiveNoEffect, Some(_)) => {
+                    return fail("coverage mechanic is only for NeedsMechanic")
+                }
+                _ => {}
+            }
+        }
+        // 14. Heal-only and life-force-only fields
+        let payload = effect.inner_category.as_ref().unwrap_or(&effect.category);
+        if effect.healing_power_coefficient.is_some() && *payload != EffectCategory::Heal {
+            return fail("healing_power_coefficient is only for Heal");
+        }
+        if effect.scale_by.is_some()
+            && !matches!(payload, EffectCategory::Heal | EffectCategory::GainsLifeForce)
+        {
+            return fail("scale_by is only for GainsLifeForce or Heal");
+        }
     }
 
     Ok(())
@@ -639,6 +784,10 @@ mod tests {
             health_threshold: None,
             proc_chance: None,
             trigger_scope: None,
+            prerequisite: None,
+            scale_by: None,
+            healing_power_coefficient: None,
+            coverage: None,
         }
     }
 
@@ -677,6 +826,10 @@ mod tests {
             health_threshold: None,
             proc_chance: None,
             trigger_scope: None,
+            prerequisite: None,
+            scale_by: None,
+            healing_power_coefficient: None,
+            coverage: None,
         }
     }
 
@@ -723,11 +876,13 @@ mod tests {
             EffectCategory::DefianceDamage,
             EffectCategory::ProcEffect,
             EffectCategory::TriggeredEffect,
+            EffectCategory::GainsLifeForce,
+            EffectCategory::Heal,
         ];
         assert_eq!(
             variants.len(),
-            22,
-            "must test all 22 EffectCategory variants"
+            24,
+            "must test all 24 EffectCategory variants"
         );
         for v in variants {
             let json = serde_json::to_string(&v).unwrap();
@@ -1144,6 +1299,151 @@ mod tests {
 
     /// Sprint 2 (T043): every record that uses this sprint's fields, or the
     /// coefficient form of a proc, cites a dated wiki read.
+    fn wvw_file(effects: Vec<NormalizedEffect>) -> NormalizedEffectsFile {
+        NormalizedEffectsFile {
+            patch_id: "2026-01-13".to_string(),
+            mode: "WvW".to_string(),
+            effects,
+        }
+    }
+
+    fn rejected(effect: NormalizedEffect, fragment: &str) {
+        let err = validate_effects_file(&wvw_file(vec![effect])).unwrap_err();
+        assert!(
+            err.to_string().contains(fragment),
+            "expected '{fragment}', got: {err}"
+        );
+    }
+
+    /// Sprint 3: every new trigger kind and scope survives a JSON round trip
+    /// in the contract's spelling, and absent fields stay absent.
+    #[test]
+    fn sprint3_trigger_kinds_and_scopes_roundtrip() {
+        for (rule, text) in [
+            (TriggerRule::OnShroudEnter, "\"OnShroudEnter\""),
+            (TriggerRule::OnShroudExit, "\"OnShroudExit\""),
+            (TriggerRule::OnConditionApplied, "\"OnConditionApplied\""),
+            (TriggerRule::OnBoonApplied, "\"OnBoonApplied\""),
+            (TriggerRule::OnBoonStripped, "\"OnBoonStripped\""),
+            (TriggerRule::Periodic, "\"Periodic\""),
+        ] {
+            let mut effect = minimal_effect("kind");
+            effect.trigger_rule = rule.clone();
+            let json = serde_json::to_string(&effect).unwrap();
+            assert!(json.contains(text), "{json}");
+            let parsed: NormalizedEffect = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed.trigger_rule, rule);
+        }
+        for (scope, text) in [
+            (TriggerScope::Category("Shout".into()), "{\"Category\":\"Shout\"}"),
+            (TriggerScope::Slot("Elite".into()), "{\"Slot\":\"Elite\"}"),
+            (TriggerScope::Status("Fear".into()), "{\"Status\":\"Fear\"}"),
+        ] {
+            let json = serde_json::to_string(&scope).unwrap();
+            assert_eq!(json, text);
+            let parsed: TriggerScope = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, scope);
+        }
+        let mut effect = minimal_effect("full");
+        effect.category = EffectCategory::Heal;
+        effect.trigger_rule = TriggerRule::OnCrit;
+        effect.prerequisite = Some(Prerequisite {
+            foe_condition: Some("Chilled".into()),
+            in_shroud: Some(true),
+            foe_health: Some(HealthThreshold {
+                above: false,
+                percent: FactualValue::Resolved(50.0),
+            }),
+        });
+        effect.scale_by = Some(ScaleBy::ConditionsRemoved);
+        effect.healing_power_coefficient = Some(FactualValue::Resolved(0.1));
+        let json = serde_json::to_string(&effect).unwrap();
+        assert!(json.contains("\"foe_condition\":\"Chilled\""), "{json}");
+        assert!(json.contains("\"in_shroud\":true"), "{json}");
+        assert!(json.contains("\"scale_by\":\"ConditionsRemoved\""), "{json}");
+        assert!(json.contains("\"healing_power_coefficient\":0.1"), "{json}");
+        let parsed: NormalizedEffect = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, effect);
+        assert!(validate_effects_file(&wvw_file(vec![effect])).is_ok());
+
+        let plain: NormalizedEffect =
+            serde_json::from_str(&serde_json::to_string(&minimal_effect("plain")).unwrap())
+                .unwrap();
+        assert!(plain.prerequisite.is_none() && plain.coverage.is_none());
+        assert!(plain.scale_by.is_none() && plain.healing_power_coefficient.is_none());
+    }
+
+    /// Sprint 3: one rejected case per validation rule, each naming its error.
+    #[test]
+    fn sprint3_validation_rules_reject_with_their_text() {
+        let mut e = minimal_effect("empty_prereq");
+        e.prerequisite = Some(Prerequisite::default());
+        rejected(e, "prerequisite must name at least one member");
+
+        let mut e = minimal_effect("trait_skill_use");
+        e.trigger_rule = TriggerRule::OnSkillUse;
+        assert!(validate_effects_file(&wvw_file(vec![e.clone()])).is_ok());
+        e.trigger_scope = Some(TriggerScope::Any);
+        rejected(
+            e.clone(),
+            "Trait OnSkillUse requires a trigger_scope other than Any",
+        );
+        e.trigger_scope = Some(TriggerScope::Category("Shout".into()));
+        assert!(validate_effects_file(&wvw_file(vec![e])).is_ok());
+
+        let mut e = minimal_effect("periodic");
+        e.trigger_rule = TriggerRule::Periodic;
+        rejected(e.clone(), "Periodic trigger_rule requires internal_cooldown");
+        e.internal_cooldown = Some(FactualValue::Resolved(3.0));
+        assert!(validate_effects_file(&wvw_file(vec![e])).is_ok());
+
+        let mut cov = minimal_effect("coverage");
+        cov.value = FactualValue::Unknown;
+        cov.coverage = Some(CoverageBlock {
+            class: CoverageClass::NeedsMechanic,
+            mechanic: Some("minions".into()),
+        });
+        assert!(validate_effects_file(&wvw_file(vec![cov.clone()])).is_ok());
+        let mut e = cov.clone();
+        e.value = FactualValue::Resolved(1.0);
+        rejected(e, "coverage forbids status_operation");
+        let mut e = cov.clone();
+        e.inner_category = Some(EffectCategory::Heal);
+        rejected(e, "coverage forbids status_operation");
+        let mut e = cov.clone();
+        e.coverage.as_mut().unwrap().mechanic = None;
+        rejected(e, "coverage NeedsMechanic requires mechanic");
+        let mut e = cov.clone();
+        e.coverage = Some(CoverageBlock {
+            class: CoverageClass::PassiveNoEffect,
+            mechanic: Some("minions".into()),
+        });
+        rejected(e, "coverage mechanic is only for NeedsMechanic");
+
+        let mut e = minimal_effect("hp_coeff");
+        e.healing_power_coefficient = Some(FactualValue::Resolved(0.1));
+        rejected(e, "healing_power_coefficient is only for Heal");
+        let mut e = minimal_effect("scale");
+        e.scale_by = Some(ScaleBy::ConditionsRemoved);
+        rejected(e.clone(), "scale_by is only for GainsLifeForce or Heal");
+        e.category = EffectCategory::TriggeredEffect;
+        e.inner_category = Some(EffectCategory::GainsLifeForce);
+        e.trigger_rule = TriggerRule::OnShroudExit;
+        assert!(validate_effects_file(&wvw_file(vec![e])).is_ok());
+    }
+
+    /// Sprint 3: the fourteen Sprint 2 WvW records load unchanged.
+    #[test]
+    fn sprint2_records_still_load() {
+        let file: NormalizedEffectsFile = serde_json::from_str(WVW_EFFECTS_JSON).unwrap();
+        assert!(file.effects.len() >= 14, "{}", file.effects.len());
+        validate_effects_file(&file).unwrap();
+        assert!(file
+            .effects
+            .iter()
+            .all(|e| e.coverage.is_none() && e.prerequisite.is_none()));
+    }
+
     #[test]
     fn records_this_sprint_carry_read_dates() {
         let data = effects();
