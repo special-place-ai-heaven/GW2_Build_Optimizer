@@ -1888,6 +1888,7 @@ pub(crate) fn wvw_resource_rules(
                     entry_floor: table.entry_floor_pct / 100.0 * pool,
                     drain_per_second: drain,
                     shroud_damage_factor: factor,
+                    shroud_health_exposed: row.is_some_and(|r| !r.protects_health),
                     enters_shroud: true,
                     ..Default::default()
                 });
