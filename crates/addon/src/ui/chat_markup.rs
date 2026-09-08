@@ -16,8 +16,12 @@ pub enum SpanStyle {
     Name,
     Warn,
     Link(String),
-    /// The `→` between rotation parts, accent colour.
+    /// The arrow between rotation parts, drawn as a shape in the accent
+    /// colour: the `→` glyph is not in every atlas (it read as `?` in-game,
+    /// 2026-09-08). The span text stays ASCII for measurement.
     Arrow,
+    /// A list mark, drawn as a filled circle for the same reason.
+    Bullet,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -191,7 +195,7 @@ fn inline(text: &str, names: &dyn Fn(&str) -> bool) -> Vec<Span> {
             }
             flush(&mut plain, &mut out);
             out.push(Span {
-                text: " \u{2192} ".into(),
+                text: " -> ".into(),
                 style: SpanStyle::Arrow,
             });
             i += if c == '-' { 2 } else { 1 };
@@ -305,8 +309,8 @@ pub fn wrap_spans(measure: &dyn Fn(&str) -> f32, blocks: &[Block], max_w: f32) -
             Block::Bullet { depth, spans } => (
                 INDENT * (*depth as f32 + 1.0),
                 Some(Span {
-                    text: "\u{2022} ".into(),
-                    style: SpanStyle::Plain,
+                    text: "* ".into(),
+                    style: SpanStyle::Bullet,
                 }),
                 spans.clone(),
             ),
@@ -323,7 +327,7 @@ pub fn wrap_spans(measure: &dyn Fn(&str) -> f32, blocks: &[Block], max_w: f32) -
                 for (i, part) in parts.iter().enumerate() {
                     if i > 0 {
                         joined.push(Span {
-                            text: " \u{2192} ".into(),
+                            text: " -> ".into(),
                             style: SpanStyle::Arrow,
                         });
                     }
