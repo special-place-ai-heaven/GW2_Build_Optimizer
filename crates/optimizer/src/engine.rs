@@ -1455,6 +1455,9 @@ fn simulate_prepared_with(
                 resource_rules: &resource_rules,
                 resource_model_complete,
                 coverage,
+                population: crate::data::fight_population::FightPopulation::for_tier(
+                    scenario.combat_tier,
+                ),
                 sigil_sets,
                 weapon_swap_cooldown_ms: wvw_weapon_swap_cooldown_ms(profession_name, validated),
                 trace,
@@ -2835,6 +2838,7 @@ mod tests {
         }
         fn rotation_skill(id: u32, weapon_set: u8) -> rotation::RotationSkill {
             rotation::RotationSkill {
+                targets: 1,
                 categories: Vec::new(),
                 slot_name: None,
                 skill_id: id,

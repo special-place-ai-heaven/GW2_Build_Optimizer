@@ -104,7 +104,12 @@ CONTROLS = {
         "            crate::data::normalized_effects::TriggerScope::Category(category) => false && skill_id",
         "necro_shout_scope_fires_on_shouts_only",
     ),
-    "population": (WT, "", "", "population_havoc_credits_five_or_cap"),
+    "population": (
+        WT,
+        "        let applied = 1 + (n.max(1) - 1).min(self.population.allies);",
+        "        let applied = 1 + 0 * (n.max(1) - 1).min(self.population.allies);",
+        "population_havoc_credits_five_or_cap",
+    ),
     "coverage": (
         EN,
         "        if executed_from_facts {\n            continue;\n        }",

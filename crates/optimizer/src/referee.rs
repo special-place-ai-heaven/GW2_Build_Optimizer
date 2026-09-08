@@ -258,7 +258,9 @@ pub fn search_rank(report: &RefereeReport) -> [i64; 9] {
                 CombatKind::CondiRamp => fight.protected_damage,
                 CombatKind::Disabler => fight.control_landed_ms as f64 * 10.0,
                 CombatKind::Support | CombatKind::Commander | CombatKind::Staller => {
-                    fight.sustain_margin.max(0.0)
+                    // Sprint 3 (specs/007-trait-triggers): ally-facing output
+                    // counts for the support kinds; the only rank-key change.
+                    fight.sustain_margin.max(0.0) + fight.ally_boon_stack_seconds / 1_000.0
                 }
             })
             .unwrap_or(0.0)
@@ -1358,6 +1360,11 @@ mod tests {
                 resource_model_complete: true,
                 unmodeled_sources: Vec::new(),
                 coverage: Vec::new(),
+                cleave_damage: 0.0,
+                cleave_condition_stack_seconds: 0.0,
+                ally_boon_stack_seconds: 0.0,
+                ally_healing: 0.0,
+                ally_cleanses: 0,
                 trait_fire_counts: std::collections::BTreeMap::new(),
                 trace: Vec::new(),
                 trace_truncated: false,
@@ -1536,6 +1543,60 @@ mod tests {
         assert!(
             search_rank(&make_rank_report(completed)) > search_rank(&make_rank_report(uncovered))
         );
+    }
+
+    /// Sprint 3 (specs/007-trait-triggers): two support builds identical but
+    /// for one ally-facing boon record rank apart, the record above.
+    #[test]
+    fn support_builds_rank_apart_on_ally_trait() {
+        let with = make_viable_rotation();
+        let mut without = with.clone();
+        let mut with = with;
+        // The slot rounds to whole points: a Havoc minute of Might, Fury and
+        // Protection on four allies is well past 1 000 stack-seconds.
+        with.wvw
+            .as_mut()
+            .expect("WvW report")
+            .ally_boon_stack_seconds = 1_000.0;
+        without
+            .wvw
+            .as_mut()
+            .expect("WvW report")
+            .ally_boon_stack_seconds = 0.0;
+        for kind in [
+            crate::scenario::CombatKind::Support,
+            crate::scenario::CombatKind::Commander,
+            crate::scenario::CombatKind::Staller,
+        ] {
+            let mut a = make_rank_report(with.clone());
+            a.scenario.combat_kind = kind;
+            let mut b = make_rank_report(without.clone());
+            b.scenario.combat_kind = kind;
+            assert!(search_rank(&a) > search_rank(&b), "{kind:?}");
+        }
+    }
+
+    /// The same record leaves two damage builds' order alone.
+    #[test]
+    fn damage_builds_unchanged_by_ally_slot() {
+        let mut with = make_viable_rotation();
+        with.wvw
+            .as_mut()
+            .expect("WvW report")
+            .ally_boon_stack_seconds = 1_000.0;
+        let without = make_viable_rotation();
+        for kind in [
+            crate::scenario::CombatKind::StrikeSpike,
+            crate::scenario::CombatKind::CondiRamp,
+            crate::scenario::CombatKind::Harasser,
+            crate::scenario::CombatKind::Disabler,
+        ] {
+            let mut a = make_rank_report(with.clone());
+            a.scenario.combat_kind = kind;
+            let mut b = make_rank_report(without.clone());
+            b.scenario.combat_kind = kind;
+            assert_eq!(search_rank(&a), search_rank(&b), "{kind:?}");
+        }
     }
 
     #[test]
