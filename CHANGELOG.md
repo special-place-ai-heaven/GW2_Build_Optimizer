@@ -21,6 +21,15 @@ The evening's question was why no free model produced a build any more. The answ
 - Gemini's closing request now carries an output cap, so a model that reasons at length cannot spend minutes on it.
 - `cargo run -p gw2-optimizer --example choya_live -- <provider> <model>` runs the real contract against the configured keys and prints PASS or FAIL with the request count. This is what "the model works" means from now on.
 
+### Reading Choya
+
+- A reply is shown whole. It used to be cut at 600 characters and end in three dots, with the rest thrown away before it reached the transcript.
+- Replies are laid out, not dumped: bullets on their own lines, names the game knows in the accent colour, bold names, italic asides, warning lines, rotations as `A → B → C`, web addresses underlined and clickable. Choya is asked for that shape and for facts over prose.
+- The comparison tabs say whose build each is: a blue Current tab for what is equipped, a green Optimized tab for what Choya or the optimizer made, and a tab in the site's colour named after the site for a published build. Opening a published build or loading a saved one adds a tab; nothing is replaced.
+- The published-build cards stay while you ask follow-up questions; only a new build replaces them.
+- When the model does not answer, the fallback answers what was asked: a scoring question gets the referee's verdict on the plated build, a build request gets the optimizer's build for the specialisation named, anything else gets a plain line with what to do next. A question about a Reaper no longer comes back as an optimizer run for another profession.
+- While Choya works, the bubble names the step and counts the seconds, says "nothing for N s" when nothing is arriving, and expands on click to the model's live reasoning, or its answer as it streams, or the tools it has called. There is no time limit on the wait any more; Stop ends it and keeps what arrived, Retry asks the model to continue from there. The addon log has one line per step with its duration and outcome.
+
 ### What the simulator now simulates in WvW
 
 - On-crit sigils fire. Ranking counts them at the build's critical chance with the cooldown applied to the expected rate; the diagnostic trace also rolls eight fixed seeds and reports how far the expected value sits from a proc that either fires or does not.

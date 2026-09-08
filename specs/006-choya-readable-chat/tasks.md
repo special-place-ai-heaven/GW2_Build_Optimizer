@@ -173,11 +173,11 @@ description: "Task list for Choya readable chat (006)"
 ## Phase 8: Polish & Cross-Cutting Concerns
 
 - [X] T048 Fill the sixteen keys in the other eleven locale files `locales/{de,es,fr,it,ja,ko,nl,pl,pt,ru,zh}.json` (one commit); parity test #21 green
-- [ ] T049 [P] Add a CHANGELOG.md subsection under the unreleased version: whole replies with markup, tinted tabs, persistent cards, fallback by request kind, thinking bubble with Stop and Retry, per-step log lines (no version bump)
-- [ ] T050 [P] Sweep the diff for machine paths, `poslj`, scratchpad, DEBUG, mock and any secret-shaped string; confirm `crates/optimizer/examples/choya_live.rs` has no diff and `crates/optimizer/src/prompts.rs` diff is only the REPLY SHAPE paragraph and the three phrases
-- [ ] T051 Gates: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` (Sprint 2 experiments and `pve_output_unchanged_by_conditional_tagging` still green), `cargo build --release`
-- [ ] T052 Copy `target/release/gw2_build_optimizer.dll` to the `addons_dir` from `dev.cfg`; write the in-game test instructions (quickstart §1–§6, pass/fail with text seen) for the user; no push, no bump, no release
-- [ ] T053 Mark every task `[X]` in `specs/006-choya-readable-chat/tasks.md`; commit "Choya readable chat (006): locales, changelog, gates" with the session footer
+- [X] T049 [P] Add a CHANGELOG.md subsection under the unreleased version: whole replies with markup, tinted tabs, persistent cards, fallback by request kind, thinking bubble with Stop and Retry, per-step log lines (no version bump)
+- [X] T050 [P] Sweep the diff for machine paths, `poslj`, scratchpad, DEBUG, mock and any secret-shaped string; confirm `crates/optimizer/examples/choya_live.rs` has no diff and `crates/optimizer/src/prompts.rs` diff is only the REPLY SHAPE paragraph and the three phrases
+- [X] T051 Gates: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` (Sprint 2 experiments and `pve_output_unchanged_by_conditional_tagging` still green), `cargo build --release`
+- [X] T052 Copy `target/release/gw2_build_optimizer.dll` to the `addons_dir` from `dev.cfg`; write the in-game test instructions (quickstart §1–§6, pass/fail with text seen) for the user; no push, no bump, no release
+- [X] T053 Mark every task `[X]` in `specs/006-choya-readable-chat/tasks.md`; commit "Choya readable chat (006): locales, changelog, gates" with the session footer
 
 ---
 
