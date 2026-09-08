@@ -481,6 +481,7 @@ fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry
                         &mut suggestions,
                         &addon_dir,
                         &balance_ctx,
+                        &scenario,
                     ) {
                         Ok(()) => {}
                         Err(e) => {
@@ -658,6 +659,7 @@ fn enrich_with_llm(
     suggestions: &mut [crate::ui::comparison::BuildSuggestion],
     addon_dir: &std::path::Path,
     balance_ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
 ) -> Result<(), String> {
     let client = gw2_optimizer::llm::create_client(config, addon_dir).map_err(|e| e.to_string())?;
 
@@ -690,6 +692,7 @@ fn enrich_with_llm(
         current_build_summary: build_summary_owned.as_deref(),
         weights: weights.clone(),
         balance_ctx,
+        scenario: scenario.clone(),
     };
 
     let response = client

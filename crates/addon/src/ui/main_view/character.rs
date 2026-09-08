@@ -132,26 +132,41 @@ pub(super) fn load_characters(state: &mut AddonState) {
     }
 }
 
+/// The tab to show after tabs arrive: the player's pick if it still exists,
+/// else the in-game active tab, else nothing.
+fn keep_selection(current: Option<usize>, len: usize, active: usize) -> Option<usize> {
+    if len == 0 {
+        None
+    } else {
+        Some(current.filter(|i| *i < len).unwrap_or(active))
+    }
+}
+
 /// Apply fetched tabs to state: auto-select active tabs, generate chat code, resolve build.
 fn apply_character_tabs(
     state: &mut AddonState,
     build_tabs: Vec<gw2_api::models::BuildTab>,
     equipment_tabs: Vec<gw2_api::models::EquipmentTab>,
 ) {
+    // A selection the player already made survives a refresh: the API's
+    // background pass used to land seconds after they picked a tab and
+    // snap both combos back to the in-game active one (RITUALIST -> HEAL,
+    // in-game 2026-09-08). Only a fresh character starts on the active tab.
+    let keep = keep_selection;
     let bt_idx = build_tabs.iter().position(|t| t.is_active).unwrap_or(0);
     let et_idx = equipment_tabs.iter().position(|t| t.is_active).unwrap_or(0);
     state.main.build_tabs = build_tabs;
     state.main.equipment_tabs = equipment_tabs;
-    state.main.selected_build_tab = if state.main.build_tabs.is_empty() {
-        None
-    } else {
-        Some(bt_idx)
-    };
-    state.main.selected_equipment_tab = if state.main.equipment_tabs.is_empty() {
-        None
-    } else {
-        Some(et_idx)
-    };
+    state.main.selected_build_tab = keep(
+        state.main.selected_build_tab,
+        state.main.build_tabs.len(),
+        bt_idx,
+    );
+    state.main.selected_equipment_tab = keep(
+        state.main.selected_equipment_tab,
+        state.main.equipment_tabs.len(),
+        et_idx,
+    );
     update_build_chat_code_inner(state);
     resolve_selected_build_inner(state);
 }
@@ -630,6 +645,15 @@ mod tests {
     use gw2_api::models::{Build, PetSelection, Profession, SkillSelection};
     use gw2_optimizer::gamedb::GameDb;
     use std::collections::HashMap;
+
+    #[test]
+    fn a_refresh_keeps_the_players_tab_pick() {
+        use super::keep_selection;
+        assert_eq!(keep_selection(Some(1), 4, 0), Some(1));
+        assert_eq!(keep_selection(None, 4, 0), Some(0));
+        assert_eq!(keep_selection(Some(7), 4, 2), Some(2));
+        assert_eq!(keep_selection(Some(1), 0, 0), None);
+    }
 
     #[test]
     fn weapon_type_id_accepts_item_api_spellings() {

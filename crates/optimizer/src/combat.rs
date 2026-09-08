@@ -49,6 +49,22 @@ pub struct DamageModifiers {
     pub crit_chance_pct: Vec<f64>,
     /// Bonus strings / facts that had a `%` but matched no known category.
     pub unparsed: Vec<String>,
+    /// Strike clauses gated on a health threshold that were flattened into
+    /// `strike_pct` (Scholar's "+5% while above 90% health"). The WvW
+    /// timeline divides them back out when it executes the source's
+    /// threshold record; every other path keeps the flattened value
+    /// (specs/005-wvw-proc-sites, R4).
+    pub conditional_strike: Vec<ConditionalClause>,
+}
+
+/// One flattened, health-gated strike clause and where it came from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConditionalClause {
+    pub source_id: u32,
+    /// Fraction, e.g. 0.05.
+    pub value: f64,
+    pub above: bool,
+    pub percent: f64,
 }
 
 impl DamageModifiers {
@@ -757,7 +773,22 @@ pub fn extract_damage_modifiers(
         if let Some(rune) = items_cache.get(&id) {
             if let Some(ref details) = rune.details {
                 for bonus_str in &details.bonuses {
+                    let before = mods.strike_pct.len();
                     parse_rune_modifier(&mut mods, bonus_str);
+                    // Health-gated strike clauses stay flattened here (the
+                    // stat sheet and the PvE/PvP simulators read them as
+                    // before) and are tagged so the WvW timeline can apply
+                    // them per strike instead.
+                    if text_lower_has_90hp(bonus_str) {
+                        for value in mods.strike_pct[before..].iter().copied() {
+                            mods.conditional_strike.push(ConditionalClause {
+                                source_id: id,
+                                value,
+                                above: true,
+                                percent: 90.0,
+                            });
+                        }
+                    }
                 }
             }
         }

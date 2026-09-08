@@ -1,12 +1,15 @@
 //! Bubble chat: player on the right, animated Choya on the left.
 
+use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use nexus::imgui::{ChildWindow, InputTextFlags, StyleColor, StyleVar, Ui};
 use serde::{Deserialize, Serialize};
 
 use crate::chat_links::ChatChip;
-use crate::ui::{color_u32, icons, theme};
+use crate::ui::chat_markup::{self, Line, SpanStyle};
+use crate::ui::{color_u32, fonts, icons, theme};
 use gw2_core::i18n::{t, tf};
 
 /// State for the talk-tab transcript.
@@ -14,6 +17,9 @@ use gw2_core::i18n::{t, tf};
 pub struct ChatBarState {
     pub input: String,
     pub history: Vec<ChatMessage>,
+    /// Lowercased names the game data knows, for the accent pass in bubbles.
+    /// Filled once the game database is loaded (`chat_markup::name_index`).
+    pub names: Option<Arc<HashSet<String>>>,
     pub waiting: bool,
     pub copied_code: Option<String>,
     pub copied_frames: u32,
@@ -42,6 +48,12 @@ pub struct ChatMessage {
     /// failed earns the community cards.
     #[serde(default)]
     pub build_failed: bool,
+    /// Partial output kept after Stop or a failure; shows the Retry button.
+    #[serde(default)]
+    pub stopped: bool,
+    /// The player message to re-send on Retry.
+    #[serde(default)]
+    pub retry_of: Option<String>,
 }
 
 pub enum ChatAction {
@@ -49,6 +61,29 @@ pub enum ChatAction {
     OpenBuild,
     /// A published build offered beside ours was chosen, by index.
     OpenPick(usize),
+    /// The thinking bubble was clicked: expand or collapse it.
+    ToggleLive,
+    /// Stop the request in flight, keeping what arrived.
+    Stop,
+    /// Ask the model to continue the reply at this index.
+    Retry(usize),
+}
+
+/// What the thinking bubble shows this frame, snapshotted by the caller from
+/// the live output so the bubble never holds that lock while drawing.
+#[derive(Debug, Clone, Default)]
+pub struct LiveView {
+    /// `{step} · mm:ss`
+    pub line: String,
+    /// "nothing for N s", when stalled.
+    pub stall: Option<String>,
+    /// One extra line (a retry that starts over).
+    pub note: String,
+    pub expanded: bool,
+    /// Caption over the body: Thinking / Answer so far / Tools called.
+    pub caption: String,
+    /// The newest lines of the mode's text.
+    pub body: Vec<String>,
 }
 
 /// One community build, as much of it as a card beside the reply can show.
@@ -96,15 +131,21 @@ pub fn queue_user_message(state: &mut ChatBarState, msg: &str) -> Option<String>
     state.history.push(ChatMessage {
         from_user: true,
         text: msg.to_string(),
-        chips: Vec::new(),
-        open_result: false,
-        build_failed: false,
+        ..Default::default()
     });
     trim_history(&mut state.history);
     state.input.clear();
     state.scroll_to_end = true;
     state.dirty = true;
     Some(msg.to_string())
+}
+
+/// The reply the published cards sit under: the newest one that plated a
+/// build or tried to. Follow-up questions do not move it (specs/006 US3).
+pub fn cards_anchor(history: &[ChatMessage]) -> Option<usize> {
+    history
+        .iter()
+        .rposition(|m| !m.from_user && (m.open_result || m.build_failed))
 }
 
 /// Last `n` turns for the LLM brief. Oldest first.
@@ -121,46 +162,36 @@ pub fn recent_transcript(history: &[ChatMessage], n: usize) -> String {
         .join("\n")
 }
 
-fn wrap_text(ui: &Ui, text: &str, max_w: f32) -> (Vec<String>, f32, f32) {
-    let mut lines = Vec::new();
-    let mut max_line_w = 0.0f32;
+/// Parse and wrap a reply to the bubble width. Runs every frame per visible
+/// bubble, as the plain word-wrap did before it.
+// ponytail: no layout cache; add one keyed by (text hash, width) if a long
+// transcript ever shows up in a frame profile.
+fn wrap_bubble(ui: &Ui, text: &str, max_w: f32, names: &HashSet<String>) -> (Vec<Line>, f32, f32) {
+    let known = |n: &str| names.contains(&n.to_lowercase());
+    let blocks = chat_markup::parse(text, &known);
+    let scale = theme::ui_scale();
+    let measure = |s: &str| ui.calc_text_size(s)[0];
+    let lines = chat_markup::wrap_spans(&measure, &blocks, max_w / scale);
     let line_h = ui.calc_text_size("Ag")[1];
-    for para in text.split('\n') {
-        if para.is_empty() {
-            lines.push(String::new());
-            continue;
-        }
-        let mut cur = String::new();
-        for word in para.split_whitespace() {
-            let trial = if cur.is_empty() {
-                word.to_string()
-            } else {
-                format!("{cur} {word}")
-            };
-            if !cur.is_empty() && ui.calc_text_size(&trial)[0] > max_w {
-                max_line_w = max_line_w.max(ui.calc_text_size(&cur)[0]);
-                lines.push(std::mem::take(&mut cur));
-                cur = word.to_string();
-            } else {
-                cur = trial;
-            }
-        }
-        if !cur.is_empty() {
-            max_line_w = max_line_w.max(ui.calc_text_size(&cur)[0]);
-            lines.push(cur);
-        }
-    }
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-    let h = (lines.len() as f32) * line_h;
-    (lines, max_line_w.min(max_w), h.max(line_h))
+    let text_w = lines
+        .iter()
+        .map(|l| l.width * scale)
+        .fold(0.0f32, f32::max)
+        .min(max_w);
+    let text_h = (lines.len() as f32 * line_h).max(line_h);
+    (lines, text_w, text_h)
 }
 
-fn bubble_size(ui: &Ui, text: &str, avail: f32, from_user: bool) -> (Vec<String>, f32, f32) {
+fn bubble_size(
+    ui: &Ui,
+    text: &str,
+    avail: f32,
+    from_user: bool,
+    names: &HashSet<String>,
+) -> (Vec<Line>, f32, f32) {
     let copy_slot = if from_user { COPY + COPY_GAP } else { 0.0 };
     let max_text = ((avail - AVATAR - AVATAR_GAP - copy_slot - 24.0) * 0.78).max(72.0);
-    let (lines, text_w, text_h) = wrap_text(ui, text, max_text);
+    let (lines, text_w, text_h) = wrap_bubble(ui, text, max_text, names);
     let bw = (text_w + BUBBLE_PAD * 2.0).clamp(48.0, max_text + BUBBLE_PAD * 2.0);
     let bh = (text_h + BUBBLE_PAD * 2.0).max(AVATAR * 0.65);
     (lines, bw, bh)
@@ -207,14 +238,94 @@ fn draw_copy_glyph(ui: &Ui, p: [f32; 2], size: f32, copied: bool) {
     dl.add_rect(front, front_br, col).rounding(2.0).build();
 }
 
-fn draw_bubble_text(ui: &Ui, p: [f32; 2], lines: &[String]) {
-    let dl = ui.get_window_draw_list();
+/// Draw wrapped spans: plain in cream, bold drawn twice a pixel apart, italic
+/// in the family's italic face (else muted), names and arrows in the accent,
+/// warnings in `WARN`, links underlined and clickable.
+fn draw_bubble_text(ui: &Ui, p: [f32; 2], lines: &[Line], msg_i: usize) {
+    let th = theme::pal();
     let line_h = ui.calc_text_size("Ag")[1];
-    let mut ty = p[1] + BUBBLE_PAD;
-    for line in lines {
-        dl.add_text([p[0] + BUBBLE_PAD, ty], color_u32(theme::pal().cream), line);
-        ty += line_h;
+    let scale = theme::ui_scale();
+    let bold_off = scale.round().max(1.0);
+    let has_italic = fonts::has_italic();
+    // Link hit boxes are laid after the draw list is released: imgui-rs
+    // allows one live draw list per window.
+    let mut links: Vec<([f32; 2], f32, String)> = Vec::new();
+    {
+        let dl = ui.get_window_draw_list();
+        for (li, line) in lines.iter().enumerate() {
+            let ty = p[1] + BUBBLE_PAD + li as f32 * line_h;
+            for placed in &line.spans {
+                let pos = [p[0] + BUBBLE_PAD + placed.x * scale, ty];
+                let text = placed.span.text.as_str();
+                let col = match &placed.span.style {
+                    SpanStyle::Plain | SpanStyle::Bold | SpanStyle::Bullet => th.cream,
+                    SpanStyle::Italic if has_italic => th.cream,
+                    SpanStyle::Italic => th.muted,
+                    SpanStyle::Name | SpanStyle::Arrow | SpanStyle::Link(_) => th.gold,
+                    SpanStyle::Warn => theme::WARN,
+                };
+                let col = color_u32(col);
+                match &placed.span.style {
+                    SpanStyle::Bold => {
+                        dl.add_text(pos, col, text);
+                        dl.add_text([pos[0] + bold_off, pos[1]], col, text);
+                    }
+                    SpanStyle::Italic => {
+                        let _italic = fonts::push_italic();
+                        dl.add_text(pos, col, text);
+                    }
+                    // Shapes, not glyphs: `→` and `•` are missing from some
+                    // atlases and drew as `?` (in-game 2026-09-08).
+                    SpanStyle::Arrow => {
+                        let w = ui.calc_text_size(text)[0];
+                        let y = ty + line_h * 0.5;
+                        let (x0, x1) = (pos[0] + 3.0 * scale, pos[0] + w - 3.0 * scale);
+                        let h = (line_h * 0.18).max(2.0);
+                        dl.add_line([x0, y], [x1 - h, y], th.gold)
+                            .thickness(1.5 * scale)
+                            .build();
+                        dl.add_triangle(
+                            [x1 - h * 1.6, y - h],
+                            [x1, y],
+                            [x1 - h * 1.6, y + h],
+                            th.gold,
+                        )
+                        .filled(true)
+                        .build();
+                    }
+                    SpanStyle::Bullet => {
+                        let w = ui.calc_text_size(text)[0];
+                        dl.add_circle(
+                            [pos[0] + w * 0.35, ty + line_h * 0.55],
+                            (line_h * 0.13).max(2.0),
+                            th.cream,
+                        )
+                        .filled(true)
+                        .build();
+                    }
+                    SpanStyle::Link(url) => {
+                        dl.add_text(pos, col, text);
+                        let w = ui.calc_text_size(text)[0];
+                        let uy = ty + line_h - 1.0;
+                        dl.add_line([pos[0], uy], [pos[0] + w, uy], th.gold).build();
+                        links.push((pos, w, url.clone()));
+                    }
+                    _ => dl.add_text(pos, col, text),
+                }
+            }
+        }
     }
+    let after = ui.cursor_screen_pos();
+    for (k, (pos, w, url)) in links.iter().enumerate() {
+        ui.set_cursor_screen_pos(*pos);
+        if ui.invisible_button(format!("##lnk{msg_i}_{k}"), [*w, line_h]) {
+            let _ = crate::feedback::shell::open_url(url);
+        }
+        if ui.is_item_hovered() {
+            ui.tooltip_text(url);
+        }
+    }
+    ui.set_cursor_screen_pos(after);
 }
 
 /// Transcript fills leftover height; composer stays pinned. `user_icon` is the
@@ -222,7 +333,7 @@ fn draw_bubble_text(ui: &Ui, p: [f32; 2], lines: &[String]) {
 pub fn render_chat_bar(
     ui: &Ui,
     state: &mut ChatBarState,
-    cooking: Option<&str>,
+    live: Option<&LiveView>,
     user_icon: Option<&str>,
     user_letter: char,
     picks: &[PickCard],
@@ -250,13 +361,15 @@ pub fn render_chat_bar(
                 theme::wrapped(ui, theme::pal().muted, &t("chat.placeholder_new"));
                 return;
             }
+            let names = state.names.clone().unwrap_or_default();
+            let anchor = cards_anchor(&state.history);
             let n = state.history.len();
             for i in 0..n {
                 let from_user = state.history[i].from_user;
                 let text = state.history[i].text.clone();
                 let open_result = state.history[i].open_result;
                 let build_failed = state.history[i].build_failed;
-                let (lines, bw, bh) = bubble_size(ui, &text, avail, from_user);
+                let (lines, bw, bh) = bubble_size(ui, &text, avail, from_user, &names);
                 let origin = ui.cursor_screen_pos();
                 let bubble_h = bh.max(AVATAR);
                 ui.dummy([avail, bubble_h]);
@@ -303,7 +416,7 @@ pub fn render_chat_bar(
                     );
                 }
                 draw_bubble_rect(ui, [bub_x, bub_y], bw, bh, from_user);
-                draw_bubble_text(ui, [bub_x, bub_y], &lines);
+                draw_bubble_text(ui, [bub_x, bub_y], &lines, i);
 
                 ui.set_cursor_screen_pos([bub_x, bub_y + bh + 4.0]);
                 if !state.history[i].chips.is_empty() {
@@ -317,15 +430,15 @@ pub fn render_chat_bar(
                     }
                     // Beside our own card, not under it: they are the same
                     // kind of thing — a build you can open — and reading them
-                    // as a row says so. Only on the newest reply, so an old
-                    // conversation does not sprout cards against builds that
-                    // have long since been replaced.
-                    if i + 1 == state.history.len() && !picks.is_empty() {
+                    // as a row says so. Only under the newest plate, so an
+                    // old conversation does not sprout cards against builds
+                    // that have long since been replaced.
+                    if anchor == Some(i) && !picks.is_empty() {
                         if let Some(n) = render_pick_cards(ui, picks, i, false) {
                             action = Some(ChatAction::OpenPick(n));
                         }
                     }
-                } else if build_failed && i + 1 == state.history.len() && !picks.is_empty() {
+                } else if build_failed && anchor == Some(i) && !picks.is_empty() {
                     // The dead end. Choya tried and produced nothing usable,
                     // so the answer is not an apology on its own — it is the
                     // apology and somewhere to go next. These are the builds
@@ -337,18 +450,51 @@ pub fn render_chat_bar(
                         action = Some(ChatAction::OpenPick(n));
                     }
                 }
+                // A stopped or fallback reply can be continued.
+                if !from_user && state.history[i].retry_of.is_some() && !state.waiting {
+                    let cy = ui.cursor_screen_pos()[1] + 4.0;
+                    ui.set_cursor_screen_pos([bub_x, cy]);
+                    if theme::pill(ui, &t("chat.retry"), false, &format!("##retry{i}")) {
+                        action = Some(ChatAction::Retry(i));
+                    }
+                }
                 let end_y = ui.cursor_screen_pos()[1].max(origin[1] + bubble_h) + ROW_GAP;
                 ui.set_cursor_screen_pos([origin[0], end_y]);
             }
             if state.waiting {
-                let line = cooking
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| t("choya.thinking"));
-                let (lines, bw, bh) = bubble_size(ui, &line, avail, false);
-                let row_h = bh.max(AVATAR) + ROW_GAP;
+                // The thinking bubble (specs/006 US5): step and seconds,
+                // the stall line, and on click the model's live output.
+                let text = match live {
+                    Some(v) => {
+                        let mut t = v.line.clone();
+                        if let Some(stall) = &v.stall {
+                            t.push('\n');
+                            t.push_str(stall);
+                        }
+                        if !v.note.is_empty() {
+                            t.push('\n');
+                            t.push_str(&v.note);
+                        }
+                        if v.expanded {
+                            t.push_str("\n\n");
+                            t.push_str(&v.caption);
+                            for line in &v.body {
+                                t.push('\n');
+                                t.push_str(line);
+                            }
+                        }
+                        t
+                    }
+                    None => t("choya.thinking"),
+                };
+                let (lines, bw, bh) = bubble_size(ui, &text, avail, false, &names);
+                let stop = t("chat.stop");
+                let pill_h = ui.calc_text_size(&stop)[1] + 6.0;
+                let row_h = bh.max(AVATAR) + 6.0 + pill_h + ROW_GAP;
                 let origin = ui.cursor_screen_pos();
-                ui.invisible_button("##talk_thinking", [avail, row_h]);
+                if ui.invisible_button("##talk_thinking", [avail, row_h]) {
+                    action = Some(ChatAction::ToggleLive);
+                }
                 let av_x = origin[0];
                 theme::draw_choya_thinking_row(
                     ui,
@@ -357,7 +503,12 @@ pub fn render_chat_bar(
                 );
                 let bub_x = origin[0] + AVATAR + AVATAR_GAP;
                 draw_bubble_rect(ui, [bub_x, origin[1]], bw, bh, false);
-                draw_bubble_text(ui, [bub_x, origin[1]], &lines);
+                draw_bubble_text(ui, [bub_x, origin[1]], &lines, usize::MAX);
+                ui.set_cursor_screen_pos([bub_x, origin[1] + bh + 6.0]);
+                if theme::pill(ui, &stop, false, "##chat_stop") {
+                    action = Some(ChatAction::Stop);
+                }
+                ui.set_cursor_screen_pos([origin[0], origin[1] + row_h]);
             }
             if state.scroll_to_end {
                 ui.set_scroll_here_y();
@@ -713,20 +864,15 @@ pub fn add_plated_response(
     open_result: bool,
 ) {
     state.waiting = false;
+    // Whole reply, whatever its length (specs/006 FR-001): the bubble wraps
+    // and the transcript scrolls. `CHAT_HISTORY_CAP` bounds the count only.
     let text = fold_punctuation(&text);
-    // Cap for the bubble, not the suggestion panel. Char-safe (no UTF-8 panic).
-    let display = if text.chars().count() > 600 {
-        let truncated: String = text.chars().take(600).collect();
-        format!("{}...", truncated)
-    } else {
-        text
-    };
     state.history.push(ChatMessage {
         from_user: false,
-        text: display,
+        text,
         chips,
         open_result,
-        build_failed: false,
+        ..Default::default()
     });
     trim_history(&mut state.history);
     state.scroll_to_end = true;
@@ -821,8 +967,7 @@ mod tests {
                 from_user: i % 2 == 0,
                 text: format!("m{i}"),
                 chips: Vec::new(),
-                open_result: false,
-                build_failed: false,
+                ..Default::default()
             });
         }
         let t = recent_transcript(&history, 3);
@@ -833,16 +978,40 @@ mod tests {
     }
 
     #[test]
-    fn add_ai_response_caps_utf8_without_panic() {
+    fn cards_anchor_is_newest_open_result_message() {
+        let msg = |from_user: bool, open_result: bool, build_failed: bool| ChatMessage {
+            from_user,
+            open_result,
+            build_failed,
+            ..Default::default()
+        };
+        let history = vec![
+            msg(true, false, false),
+            msg(false, true, false),
+            msg(true, false, false),
+            msg(false, false, false),
+        ];
+        assert_eq!(cards_anchor(&history), Some(1));
+        let history = vec![msg(false, true, false), msg(false, true, false)];
+        assert_eq!(cards_anchor(&history), Some(1));
+        let history = vec![msg(false, false, true), msg(false, false, false)];
+        assert_eq!(cards_anchor(&history), Some(0));
+        assert_eq!(cards_anchor(&[msg(false, false, false)]), None);
+        assert_eq!(cards_anchor(&[]), None);
+    }
+
+    #[test]
+    fn plated_response_keeps_whole_text() {
         let mut state = ChatBarState {
             waiting: true,
             ..Default::default()
         };
-        let long: String = "é".repeat(700);
-        add_ai_response(&mut state, long);
+        let long: String = "é".repeat(3000);
+        add_ai_response(&mut state, long.clone());
         assert!(!state.waiting);
         assert_eq!(state.history.len(), 1);
-        assert!(state.history[0].text.chars().count() <= 604);
+        assert_eq!(state.history[0].text, long);
+        assert!(!state.history[0].text.ends_with("..."));
         assert!(state.history[0].chips.is_empty());
         assert!(state.scroll_to_end);
     }
@@ -875,8 +1044,7 @@ mod tests {
             from_user: true,
             text: "[&AgEEYQAA]".into(),
             chips: Vec::new(),
-            open_result: false,
-            build_failed: false,
+            ..Default::default()
         });
         attach_order_chips(
             &mut state,
@@ -910,8 +1078,7 @@ mod tests {
                 label: "Scholar".into(),
                 code: encode_item(24836),
             }],
-            open_result: false,
-            build_failed: false,
+            ..Default::default()
         }];
         save_history(&dir, &history);
         let loaded = load_history(&dir);
@@ -940,6 +1107,8 @@ mod tests {
         let hist: Vec<ChatMessage> =
             serde_json::from_str(r#"[{"from_user":true,"text":"hi","chips":[]}]"#).unwrap();
         assert!(!hist[0].open_result);
+        assert!(!hist[0].stopped);
+        assert!(hist[0].retry_of.is_none());
         assert_eq!(hist[0].text, "hi");
     }
 }

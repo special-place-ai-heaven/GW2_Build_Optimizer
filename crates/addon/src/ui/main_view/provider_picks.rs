@@ -19,12 +19,10 @@ use crate::ui::theme;
 /// every benchmark row on disk, so it runs when the proposal changes and not
 /// otherwise.
 pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
-    let Some(suggestion) = state
-        .main
-        .comparison
-        .suggestions
-        .get(state.main.comparison.selected_suggestion)
-    else {
+    // The cards belong to the plate, not to whichever tab is selected:
+    // opening a published build or asking a question must not re-key them
+    // (specs/006 US3, in-game 2026-09-08).
+    let Some(suggestion) = plate_suggestion(&state.main.comparison.suggestions) else {
         return;
     };
     // The plate's own profession, read from its specializations, so a
@@ -71,13 +69,7 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
         relic: suggestion.relic.clone(),
         role,
     };
-    let key = format!(
-        "{}|{}|{}|{}",
-        shape.profession,
-        shape.mode,
-        shape.role,
-        shape.specs.join(",")
-    );
+    let key = picks_key(&shape.profession, &shape.mode, &shape.role, &shape.specs);
     if key == state.main.provider_picks_key {
         return;
     }
@@ -100,6 +92,15 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
             .find(|spec| spec.elite && spec.name.eq_ignore_ascii_case(name))
             .map(|spec| spec.name.clone())
     });
+    // The picks changed with the plate: the old published tabs go, the new
+    // picks come in as tabs beside the plate, which stays selected.
+    state
+        .main
+        .comparison
+        .suggestions
+        .retain(|s| s.source_url.is_empty());
+    state.main.comparison.selected_suggestion =
+        state.main.comparison.suggestions.len().saturating_sub(1);
     state.main.provider_picks = gw2_optimizer::benchmark::closest_per_source(&builds, &shape, &db)
         .into_iter()
         .map(|(build, _)| build.clone())
@@ -114,6 +115,22 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
             })
         })
         .collect();
+    for i in 0..state.main.provider_picks.len() {
+        adopt_pick_tab(state, i);
+    }
+}
+
+/// The plate the cards belong to: the newest build this addon cooked itself
+/// (empty `source_url`), whatever tab the player has selected.
+pub(crate) fn plate_suggestion(
+    suggestions: &[crate::ui::comparison::BuildSuggestion],
+) -> Option<&crate::ui::comparison::BuildSuggestion> {
+    suggestions.iter().rev().find(|s| s.source_url.is_empty())
+}
+
+/// What the cards were matched against; a change here re-runs the match.
+pub(crate) fn picks_key(profession: &str, mode: &str, role: &str, specs: &[String]) -> String {
+    format!("{profession}|{mode}|{role}|{}", specs.join(","))
 }
 
 /// "Additional suggestions you might like" — the closest published build from
@@ -275,12 +292,25 @@ pub(in crate::ui::main_view) fn take_sync_invite(ui: &Ui, state: &AddonState) ->
 /// somebody published this for this job, here it is next to what Choya
 /// cooked, compare them.
 pub(in crate::ui::main_view) fn adopt_provider_pick(state: &mut AddonState, index: usize) {
-    let Some(build) = state.main.provider_picks.get(index).cloned() else {
+    let Some(at) = adopt_pick_tab(state, index) else {
         return;
     };
-    let Some(db) = state.main.game_db.clone() else {
-        return;
-    };
+    state.main.comparison.selected_suggestion = at;
+    state.main.comparison.show_optimized = true;
+    // Same landing as Choya's own plate: the tab where a build is actually
+    // shown. Opening a build and leaving the player on the page they opened
+    // it from is a click that appears to do nothing.
+    state.main.active_tab =
+        crate::ui::main_view::optimization::result_alert_tab(state.main.current_build.is_some());
+}
+
+/// Put a published pick on the strip as its own tab without selecting it
+/// or leaving the current tab. Every card the chat shows gets a tab this
+/// way as soon as it is matched (in-game 2026-09-08: a tab only appeared
+/// after its card was clicked). Returns the tab's index.
+fn adopt_pick_tab(state: &mut AddonState, index: usize) -> Option<usize> {
+    let build = state.main.provider_picks.get(index).cloned()?;
+    let db = state.main.game_db.clone()?;
     let published = &build.published;
 
     let specializations: Vec<(String, Vec<String>)> = published
@@ -332,10 +362,11 @@ pub(in crate::ui::main_view) fn adopt_provider_pick(state: &mut AddonState, inde
         .filter_map(|id| db.items.get(id).map(|item| item.name.clone()))
         .collect();
 
+    // The tab prefixes the site's name itself (`comparison::tab_label`).
     let label = if build.spec_name.is_empty() {
-        format!("{} \u{00b7} {}", build.profession, build.source)
+        build.profession.clone()
     } else {
-        format!("{} \u{00b7} {}", build.spec_name, build.source)
+        build.spec_name.clone()
     };
     let weapons = published_weapons(&build);
     let mut summary = build.role.clone();
@@ -394,24 +425,53 @@ pub(in crate::ui::main_view) fn adopt_provider_pick(state: &mut AddonState, inde
         Some(&validated),
     );
 
-    // Opening the same card twice is one build, not two. Select the tab that
+    // The same card twice is one build, not two: replace the tab that
     // already holds it instead of stacking another beside it.
-    if let Some(at) = state
-        .main
-        .comparison
-        .suggestions
+    let strip = &mut state.main.comparison.suggestions;
+    match strip
         .iter()
         .position(|s| !s.source_url.is_empty() && s.source_url == suggestion.source_url)
     {
-        state.main.comparison.suggestions[at] = suggestion;
-        state.main.comparison.selected_suggestion = at;
-    } else {
-        state.main.comparison.suggestions.push(suggestion);
-        state.main.comparison.selected_suggestion = state.main.comparison.suggestions.len() - 1;
+        Some(at) => {
+            strip[at] = suggestion;
+            Some(at)
+        }
+        None => {
+            strip.push(suggestion);
+            Some(strip.len() - 1)
+        }
     }
-    // Same landing as Choya's own plate: the tab where a build is actually
-    // shown. Opening a build and leaving the player on the page they opened
-    // it from is a click that appears to do nothing.
-    state.main.active_tab =
-        crate::ui::main_view::optimization::result_alert_tab(state.main.current_build.is_some());
+}
+
+#[cfg(test)]
+mod plate_tests {
+    use super::*;
+    use crate::ui::comparison::BuildSuggestion;
+
+    fn build(label: &str, url: &str, specs: &[&str]) -> BuildSuggestion {
+        BuildSuggestion {
+            label: label.into(),
+            source_url: url.into(),
+            specializations: specs.iter().map(|s| (s.to_string(), vec![])).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn picks_key_from_newest_plate() {
+        let strip = vec![
+            build("A", "", &["Reaper"]),
+            build("B", "https://guildjen.com/b", &["Harbinger"]),
+        ];
+        let plate = plate_suggestion(&strip).unwrap();
+        assert_eq!(plate.label, "A", "a published tab is never the plate");
+        let key_a = picks_key("Necromancer", "WvW", "Roam", &["Reaper".into()]);
+        let mut strip = strip;
+        strip.push(build("C", "", &["Scourge"]));
+        assert_eq!(plate_suggestion(&strip).unwrap().label, "C");
+        let key_c = picks_key("Necromancer", "WvW", "Roam", &["Scourge".into()]);
+        assert_ne!(key_a, key_c);
+        assert!(plate_suggestion(&[build("B", "https://x", &[])]).is_none());
+        assert!(plate_suggestion(&[]).is_none());
+    }
 }

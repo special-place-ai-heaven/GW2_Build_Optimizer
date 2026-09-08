@@ -180,6 +180,27 @@ pub enum TriggerRule {
     Conditional,
 }
 
+/// Health prerequisite of an `OnHealthThreshold` / `Conditional` effect,
+/// read against the regular health pool (not life force).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HealthThreshold {
+    /// `true`: active while health is above `percent`; `false`: below.
+    pub above: bool,
+    /// Threshold as a percentage of maximum health, in (0, 100].
+    pub percent: FactualValue<f64>,
+}
+
+/// Which activating skills count for an `OnHit` / `OnSkillUse` effect.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub enum TriggerScope {
+    /// Any landed hit or used skill.
+    #[default]
+    Any,
+    /// Only weapon skills with a recharge or a resource cost (Relic of the
+    /// Thief wording).
+    WeaponSkillWithRecharge,
+}
+
 // ─── Uptime model ───
 
 /// How the uptime value was determined.
@@ -363,6 +384,22 @@ pub struct NormalizedEffect {
     /// For `TriggeredEffect` category: the inner effect category that is triggered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inner_category: Option<EffectCategory>,
+
+    // Sprint 2 (specs/005-wvw-proc-sites): prerequisites and scope
+    /// Health prerequisite. Required for `OnHealthThreshold`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_threshold: Option<HealthThreshold>,
+    /// Chance in (0, 1] that an `OnCrit` / `OnHit` trigger fires. Absent
+    /// means certain.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_factual"
+    )]
+    pub proc_chance: Option<FactualValue<f64>>,
+    /// Which activating skills count. Absent means `Any`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_scope: Option<TriggerScope>,
 }
 
 // ─── File wrapper ───
@@ -521,6 +558,24 @@ fn validate_effects_file(file: &NormalizedEffectsFile) -> Result<(), NormalizedE
                 effect.effect_id
             )));
         }
+
+        // 8. OnHealthThreshold must say which threshold
+        if effect.trigger_rule == TriggerRule::OnHealthThreshold
+            && effect.health_threshold.is_none()
+        {
+            return Err(NormalizedEffectError::ValidationError(format!(
+                "effect '{}': OnHealthThreshold trigger_rule requires health_threshold",
+                effect.effect_id
+            )));
+        }
+
+        // 9. A stacking effect needs a duration to expire by
+        if effect.max_stacks.is_some() && effect.effect_duration.is_none() {
+            return Err(NormalizedEffectError::ValidationError(format!(
+                "effect '{}': max_stacks requires effect_duration",
+                effect.effect_id
+            )));
+        }
     }
 
     Ok(())
@@ -588,6 +643,9 @@ mod tests {
             max_stacks: None,
             status_operation: None,
             inner_category: None,
+            health_threshold: None,
+            proc_chance: None,
+            trigger_scope: None,
         }
     }
 
@@ -623,6 +681,9 @@ mod tests {
                 source_duration_multiplier: Some(FactualValue::Resolved(1.0)),
             }),
             inner_category: None,
+            health_threshold: None,
+            proc_chance: None,
+            trigger_scope: None,
         }
     }
 
@@ -939,6 +1000,81 @@ mod tests {
     // ─── 8. Validation: TriggeredEffect without inner_category → error ───
 
     #[test]
+    fn test_validation_health_threshold_required_for_on_health_threshold() {
+        let mut effect = minimal_effect("threshold_missing");
+        effect.trigger_rule = TriggerRule::OnHealthThreshold;
+        let file = NormalizedEffectsFile {
+            patch_id: "2026-01-13".to_string(),
+            mode: "WvW".to_string(),
+            effects: vec![effect.clone()],
+        };
+        let err = validate_effects_file(&file).unwrap_err();
+        assert!(
+            err.to_string().contains("requires health_threshold"),
+            "expected threshold error, got: {err}"
+        );
+        effect.health_threshold = Some(HealthThreshold {
+            above: true,
+            percent: FactualValue::Resolved(90.0),
+        });
+        let file = NormalizedEffectsFile {
+            patch_id: "2026-01-13".to_string(),
+            mode: "WvW".to_string(),
+            effects: vec![effect],
+        };
+        assert!(validate_effects_file(&file).is_ok());
+    }
+
+    #[test]
+    fn test_validation_max_stacks_requires_duration() {
+        let mut effect = minimal_effect("stacks_no_duration");
+        effect.max_stacks = Some(FactualValue::Resolved(5));
+        let file = NormalizedEffectsFile {
+            patch_id: "2026-01-13".to_string(),
+            mode: "WvW".to_string(),
+            effects: vec![effect.clone()],
+        };
+        let err = validate_effects_file(&file).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("max_stacks requires effect_duration"),
+            "expected stacks/duration error, got: {err}"
+        );
+        effect.effect_duration = Some(FactualValue::Resolved(6.0));
+        let file = NormalizedEffectsFile {
+            patch_id: "2026-01-13".to_string(),
+            mode: "WvW".to_string(),
+            effects: vec![effect],
+        };
+        assert!(validate_effects_file(&file).is_ok());
+    }
+
+    #[test]
+    fn test_sprint2_fields_roundtrip_and_default_absent() {
+        let mut effect = full_effect();
+        effect.trigger_rule = TriggerRule::OnHealthThreshold;
+        effect.health_threshold = Some(HealthThreshold {
+            above: true,
+            percent: FactualValue::Resolved(90.0),
+        });
+        effect.proc_chance = Some(FactualValue::Resolved(0.5));
+        effect.trigger_scope = Some(TriggerScope::WeaponSkillWithRecharge);
+        let json = serde_json::to_string(&effect).unwrap();
+        assert!(json.contains("\"health_threshold\""));
+        assert!(json.contains("\"proc_chance\":0.5"));
+        assert!(json.contains("\"WeaponSkillWithRecharge\""));
+        let parsed: NormalizedEffect = serde_json::from_str(&json).unwrap();
+        assert_eq!(effect, parsed);
+
+        let plain = serde_json::to_string(&minimal_effect("plain")).unwrap();
+        assert!(!plain.contains("health_threshold"));
+        let parsed: NormalizedEffect = serde_json::from_str(&plain).unwrap();
+        assert!(parsed.health_threshold.is_none());
+        assert!(parsed.proc_chance.is_none());
+        assert!(parsed.trigger_scope.is_none());
+    }
+
+    #[test]
     fn test_validation_triggered_effect_requires_inner_category() {
         let mut effect = minimal_effect("bad_triggered");
         effect.category = EffectCategory::TriggeredEffect;
@@ -1012,6 +1148,34 @@ mod tests {
     }
 
     // ─── 10. Loader: baseline files parse successfully ───
+
+    /// Sprint 2 (T043): every record that uses this sprint's fields, or the
+    /// coefficient form of a proc, cites a dated wiki read.
+    #[test]
+    fn records_this_sprint_carry_read_dates() {
+        let data = effects();
+        for mode in ["PvE", "PvP", "WvW"] {
+            for effect in data.effects_for_mode(mode) {
+                let sprint2 = effect.health_threshold.is_some()
+                    || effect.proc_chance.is_some()
+                    || effect.trigger_scope.is_some()
+                    || (effect.category == EffectCategory::ProcEffect
+                        && effect.value.is_resolved()
+                        && matches!(effect.value, FactualValue::Resolved(v) if v <= 2.0));
+                if sprint2 {
+                    assert!(
+                        effect
+                            .source
+                            .as_deref()
+                            .is_some_and(|s| s.contains("(read 20")),
+                        "{mode} {} has no dated source: {:?}",
+                        effect.effect_id,
+                        effect.source
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_embedded_effects_load_successfully() {

@@ -562,6 +562,12 @@ pub struct AppConfig {
     /// Default game mode for new optimizations.
     #[serde(default)]
     pub default_game_mode: Option<String>,
+    /// Default scale (`Solo` / `Party` / `Squad`) applied at startup.
+    #[serde(default)]
+    pub default_combat_tier: Option<String>,
+    /// Default role (a `RoleObjective` name) applied at startup.
+    #[serde(default)]
+    pub default_role: Option<String>,
 
     // ─── Cache & Data ───
     /// Auto-refresh game data cache on startup.
@@ -624,6 +630,8 @@ impl Default for AppConfig {
             window_w: None,
             window_h: None,
             default_game_mode: None,
+            default_combat_tier: None,
+            default_role: None,
             auto_refresh_cache: false,
             ui_language: "auto".into(),
             ui_font: "auto".into(),

@@ -94,11 +94,17 @@ impl crate::llm::tool_loop::TurnDriver for GeminiClient {
         let content = self.send_request(&GenerateRequest {
             contents: conv.clone(),
             tools,
-            generation_config: matches!(mode, crate::llm::tool_loop::TurnMode::Closing).then(
-                || GenerationConfig {
-                    max_output_tokens: crate::llm::openai_compat::CLOSING_MAX_TOKENS,
-                },
-            ),
+            generation_config: {
+                let closing = matches!(mode, crate::llm::tool_loop::TurnMode::Closing);
+                let thinks = model_thinks(&self.model);
+                (closing || thinks).then(|| GenerationConfig {
+                    max_output_tokens: closing
+                        .then_some(crate::llm::openai_compat::CLOSING_MAX_TOKENS),
+                    thinking_config: thinks.then_some(ThinkingConfig {
+                        include_thoughts: true,
+                    }),
+                })
+            },
         })?;
         let text = content.parts.iter().find_map(|p| p.text.clone());
         let calls = content
@@ -513,8 +519,25 @@ struct GenerateRequest {
 
 #[derive(Serialize)]
 struct GenerationConfig {
-    #[serde(rename = "maxOutputTokens")]
-    max_output_tokens: u32,
+    #[serde(rename = "maxOutputTokens", skip_serializing_if = "Option::is_none")]
+    max_output_tokens: Option<u32>,
+    /// `includeThoughts` returns thought summaries in the stream for the
+    /// thinking bubble. Sent only to the thinking families (2.5 and 3);
+    /// older models reject the field.
+    #[serde(rename = "thinkingConfig", skip_serializing_if = "Option::is_none")]
+    thinking_config: Option<ThinkingConfig>,
+}
+
+#[derive(Serialize)]
+struct ThinkingConfig {
+    #[serde(rename = "includeThoughts")]
+    include_thoughts: bool,
+}
+
+/// Whether a Gemini model id names a thinking family.
+fn model_thinks(model: &str) -> bool {
+    let m = model.to_ascii_lowercase();
+    m.contains("gemini-2.5") || m.contains("gemini-3")
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -683,9 +706,15 @@ fn read_gemini_stream<R: std::io::Read>(reader: R) -> Result<Content, GeminiErro
         }
         for part in content.parts {
             if let Some(t) = part.text {
-                text.push_str(&t);
+                if part.thought == Some(true) {
+                    crate::llm::live::reasoning(&t);
+                } else {
+                    crate::llm::live::content(&t);
+                    text.push_str(&t);
+                }
             }
             if let Some(call) = part.function_call {
+                crate::llm::live::tool_call(&call.name);
                 parts.push(Part {
                     text: None,
                     function_call: Some(call),
@@ -2111,7 +2140,8 @@ mod closing_cap_tests {
             contents: vec![],
             tools: None,
             generation_config: Some(GenerationConfig {
-                max_output_tokens: crate::llm::openai_compat::CLOSING_MAX_TOKENS,
+                max_output_tokens: Some(crate::llm::openai_compat::CLOSING_MAX_TOKENS),
+                thinking_config: None,
             }),
         };
         let json = serde_json::to_string(&closing).unwrap();

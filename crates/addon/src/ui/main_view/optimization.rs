@@ -6,6 +6,23 @@ use gw2_optimizer::balance::BalanceContext;
 /// Convert a SynergyResult from the new pipeline into a BuildSuggestion for display.
 // Display adapter; db, profession, scenario, role, and result are distinct
 // inputs threaded straight through — a params struct adds no clarity here.
+/// The coverage detail of the referee's `wvw_timeline.effects` reason: the
+/// names after `Not simulated: `, ready for the `quality.coverage_line`
+/// locale key. The referee is the one source; every projection reads it.
+pub(super) fn coverage_note_from(
+    reasons: &[gw2_optimizer::data::DataQualityReason],
+) -> Option<String> {
+    reasons
+        .iter()
+        .find(|r| r.field == gw2_optimizer::data::quality::COVERAGE_FIELD)
+        .map(|r| {
+            r.explanation
+                .strip_prefix(gw2_optimizer::data::quality::COVERAGE_PREFIX)
+                .unwrap_or(&r.explanation)
+                .to_string()
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn synergy_result_to_suggestion(
     result: &gw2_optimizer::engine::SynergyResult,
@@ -280,6 +297,7 @@ pub(super) fn synergy_result_to_suggestion(
             .iter()
             .map(|r| r.to_string())
             .collect(),
+        coverage_note: coverage_note_from(&result.quality_reasons),
     };
     if suggestion.chat_code.is_none() {
         suggestion.chat_code = suggestion_to_chat_code(&suggestion, db);
@@ -486,6 +504,7 @@ pub(super) fn candidate_to_suggestion(
         benchmark_delta: None,
         data_quality: leftover_plate_quality(true),
         quality_reasons: vec!["legacy leftover kit has no weapons or skills".into()],
+        coverage_note: None,
     };
     suggestion.chat_code = suggestion_to_chat_code(&suggestion, db);
     suggestion
@@ -2562,5 +2581,28 @@ mod tests {
             plated.power,
             land.1.power
         );
+    }
+    #[test]
+    fn coverage_note_is_set_from_wvw_effects_reason() {
+        use gw2_optimizer::data::quality::coverage_reason;
+        use gw2_optimizer::data::DataQualityReason;
+        let reason = coverage_reason(
+            "Necromancer",
+            &gw2_core::types::GameMode::WvW,
+            &["Superior Sigil of Fire (on-crit)".to_string()],
+        )
+        .expect("one unmodeled name is a reason");
+        let other = DataQualityReason {
+            field: "validated_build.warning".into(),
+            entity: "Necromancer".into(),
+            modes: vec!["WvW".into()],
+            explanation: "Spite column 2 filled".into(),
+        };
+        assert_eq!(
+            super::coverage_note_from(&[other.clone(), reason]).as_deref(),
+            Some("Superior Sigil of Fire (on-crit)")
+        );
+        assert_eq!(super::coverage_note_from(&[other]), None);
+        assert_eq!(super::coverage_note_from(&[]), None);
     }
 }

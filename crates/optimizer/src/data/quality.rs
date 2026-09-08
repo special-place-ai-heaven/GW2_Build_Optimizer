@@ -64,6 +64,99 @@ impl fmt::Display for DataQualityReason {
     }
 }
 
+/// Field of the coverage reason: the WvW timeline's unmodeled sources.
+pub const COVERAGE_FIELD: &str = "wvw_timeline.effects";
+/// English prefix of the coverage explanation; the addon renders the same
+/// line through the `quality.coverage_line` locale key with the detail.
+pub const COVERAGE_PREFIX: &str = "Not simulated: ";
+const COVERAGE_NAMED: usize = 3;
+
+/// `a, b, c and N others` for up to three named sources; `None` when nothing
+/// is unmodeled. The names are game item names and are not translated.
+pub fn coverage_detail(unmodeled: &[String]) -> Option<String> {
+    if unmodeled.is_empty() {
+        return None;
+    }
+    let named = unmodeled
+        .iter()
+        .take(COVERAGE_NAMED)
+        .cloned()
+        .collect::<Vec<_>>();
+    let rest = unmodeled.len().saturating_sub(COVERAGE_NAMED);
+    Some(match rest {
+        0 => named.join(", "),
+        1 => format!("{} and 1 other", named.join(", ")),
+        n => format!("{} and {n} others", named.join(", ")),
+    })
+}
+
+/// The one coverage reason both the referee and the Optimize packaging
+/// attach: `Not simulated: …` on `wvw_timeline.effects`. `None` when every
+/// equipped source with a record was executed — which is not a claim that
+/// every mechanic is modeled.
+pub fn coverage_reason(
+    profession: &str,
+    mode: &gw2_core::types::GameMode,
+    unmodeled: &[String],
+) -> Option<DataQualityReason> {
+    let detail = coverage_detail(unmodeled)?;
+    Some(DataQualityReason {
+        field: COVERAGE_FIELD.into(),
+        entity: profession.into(),
+        modes: vec![mode.label().to_string()],
+        explanation: format!("{COVERAGE_PREFIX}{detail}"),
+    })
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    fn names(n: usize) -> Vec<String> {
+        [
+            "Superior Sigil of Fire (on-crit)",
+            "Reaper Shroud 4 (dark field)",
+            "Relic of the Thief (no record)",
+            "Superior Rune of the Scholar (no record)",
+            "Soul Spiral (partial combo)",
+        ]
+        .iter()
+        .take(n)
+        .map(|s| s.to_string())
+        .collect()
+    }
+
+    #[test]
+    fn coverage_line_renders_zero_one_three_and_five_names() {
+        assert_eq!(coverage_detail(&names(0)), None);
+        assert_eq!(
+            coverage_detail(&names(1)).as_deref(),
+            Some("Superior Sigil of Fire (on-crit)")
+        );
+        assert_eq!(
+            coverage_detail(&names(3)).as_deref(),
+            Some("Superior Sigil of Fire (on-crit), Reaper Shroud 4 (dark field), Relic of the Thief (no record)")
+        );
+        assert_eq!(
+            coverage_detail(&names(4)).as_deref(),
+            Some("Superior Sigil of Fire (on-crit), Reaper Shroud 4 (dark field), Relic of the Thief (no record) and 1 other")
+        );
+        assert_eq!(
+            coverage_detail(&names(5)).as_deref(),
+            Some("Superior Sigil of Fire (on-crit), Reaper Shroud 4 (dark field), Relic of the Thief (no record) and 2 others")
+        );
+        let reason = coverage_reason("Necromancer", &gw2_core::types::GameMode::WvW, &names(1))
+            .expect("one name is a reason");
+        assert_eq!(reason.field, COVERAGE_FIELD);
+        assert_eq!(reason.modes, vec!["WvW".to_string()]);
+        assert_eq!(
+            reason.explanation,
+            "Not simulated: Superior Sigil of Fire (on-crit)"
+        );
+        assert!(coverage_reason("Necromancer", &gw2_core::types::GameMode::WvW, &[]).is_none());
+    }
+}
+
 /// A value that is either resolved (known) or explicitly unknown.
 /// Unknown values propagate through arithmetic: any operation involving
 /// Unknown produces Unknown.

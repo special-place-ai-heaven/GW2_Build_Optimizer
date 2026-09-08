@@ -135,10 +135,20 @@ pub(crate) fn apply_chunk(
         }
         let Some(delta) = choice.delta else { continue };
         if let Some(text) = delta.content {
+            super::live::content(&text);
             acc.content.push_str(&text);
         }
-        acc.reasoning_details
-            .extend(delta.reasoning_details.unwrap_or_default());
+        let reasoning = delta.reasoning_details.unwrap_or_default();
+        for block in &reasoning {
+            if let Some(text) = block
+                .get("text")
+                .or_else(|| block.get("summary"))
+                .and_then(Value::as_str)
+            {
+                super::live::reasoning(text);
+            }
+        }
+        acc.reasoning_details.extend(reasoning);
         for call in delta.tool_calls.unwrap_or_default() {
             // Bound the index *before* it can size an allocation.
             if call.index > MAX_TOOL_CALL_INDEX {
@@ -155,6 +165,7 @@ pub(crate) fn apply_chunk(
             }
             if let Some(function) = call.function {
                 if let Some(name) = function.name {
+                    super::live::tool_call(&name);
                     slot.name.push_str(&name);
                 }
                 if let Some(args) = function.arguments {

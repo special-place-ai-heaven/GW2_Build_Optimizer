@@ -1,7 +1,7 @@
 use super::optimization::{
     apply_gemini_response, apply_radar_prefix, attach_chat_stats, chat_display_text,
-    fill_holes_from_loadout, format_provider_issue, gemini_from_validated, humanize_tool_names,
-    keep_equipped_weapons, keep_loadout_pets, kitchen_brief, result_alert_tab,
+    coverage_note_from, fill_holes_from_loadout, format_provider_issue, gemini_from_validated,
+    humanize_tool_names, keep_equipped_weapons, keep_loadout_pets, kitchen_brief, result_alert_tab,
     simulate_suggestion_rotation, suggestion_to_chat_code, summarize_resolved_build,
     summarize_suggestion, validated_build_to_chat_code,
 };
@@ -38,6 +38,122 @@ fn clone_game_db_for_worker(db: &Option<Arc<GameDb>>) -> Option<Arc<GameDb>> {
 /// Send a chat order to the chef (active LLM) for a plated build.
 /// Uses function calling so the chef has the full pantry and every station.
 pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
+    send_chat_message_with(state, message, None);
+}
+
+/// Stop the request in flight, keeping whatever arrived as the reply
+/// (specs/006 US5). The transport notices between SSE lines; the epoch
+/// retires its result either way.
+pub(super) fn stop_chat(state: &mut AddonState) {
+    if !state.main.chat.waiting {
+        return;
+    }
+    state.cancel_and_renew();
+    state.main.chat_epoch = state.main.chat_epoch.wrapping_add(1);
+    state.main.chat.waiting = false;
+    state.main.optimize_stage.clear();
+    let (partial, step, secs) = state
+        .main
+        .chat_live
+        .lock()
+        .map(|live| {
+            (
+                live.content.trim().to_string(),
+                live.step,
+                live.elapsed_in_step(std::time::Instant::now()),
+            )
+        })
+        .unwrap_or_default();
+    let asked = state
+        .main
+        .chat
+        .history
+        .iter()
+        .rev()
+        .find(|m| m.from_user)
+        .map(|m| m.text.clone());
+    let text = if partial.is_empty() {
+        t("chat.stopped")
+    } else {
+        format!("{partial}\n\n_{}_", t("chat.stopped"))
+    };
+    crate::ui::chat_bar::add_ai_response(&mut state.main.chat, text);
+    if let Some(last) = state.main.chat.history.last_mut() {
+        last.stopped = true;
+        last.retry_of = asked;
+    }
+    log_step(&step_name(step), "stopped", secs as f32);
+}
+
+/// Ask the model to continue the reply at `index` from where it stopped.
+pub(super) fn retry_chat(state: &mut AddonState, index: usize) {
+    if state.main.chat.waiting {
+        return;
+    }
+    let Some(reply) = state.main.chat.history.get(index) else {
+        return;
+    };
+    let Some(asked) = reply.retry_of.clone() else {
+        return;
+    };
+    let partial = if reply.stopped {
+        reply
+            .text
+            .rsplit_once("\n\n_")
+            .map(|(head, _)| head.to_string())
+            .unwrap_or_else(|| reply.text.clone())
+    } else {
+        String::new()
+    };
+    let note = continuation_brief(&partial);
+    if note.is_none() {
+        if let Ok(mut live) = state.main.chat_live.lock() {
+            live.note = t("chat.retrying_over");
+        }
+    }
+    if let Some(msg) = crate::ui::chat_bar::queue_user_message(&mut state.main.chat, &asked) {
+        send_chat_message_with(state, msg, note);
+    }
+}
+
+/// The note that turns a re-send into a continuation. `None` with nothing
+/// to continue from.
+fn continuation_brief(partial: &str) -> Option<String> {
+    let partial = partial.trim();
+    (!partial.is_empty()).then(|| {
+        format!(
+            "Continuation. You were answering this and stopped after:\n{partial}\nContinue from there. Do not repeat what is above."
+        )
+    })
+}
+
+fn step_name(step: Option<gw2_optimizer::llm::live::Step>) -> String {
+    use gw2_optimizer::llm::live::Step;
+    match step {
+        None => "request".into(),
+        Some(Step::Handshake) => "handshake".into(),
+        Some(Step::Reference) => "reference".into(),
+        Some(Step::Lookup(n)) => format!("lookup {n}"),
+        Some(Step::Scoring) => "scoring".into(),
+        Some(Step::Writing) => "writing".into(),
+        Some(Step::Fallback) => "fallback".into(),
+    }
+}
+
+/// `Choya {step}: {outcome} in {secs}s`, one per step (specs/006 FR-007).
+fn log_line(step: &str, outcome: &str, secs: f32) -> String {
+    format!("Choya {step}: {outcome} in {secs:.1}s")
+}
+
+fn log_step(step: &str, outcome: &str, secs: f32) {
+    nexus::log::log(
+        nexus::log::LogLevel::Info,
+        "GW2BuildOpt",
+        log_line(step, outcome, secs),
+    );
+}
+
+fn send_chat_message_with(state: &mut AddonState, message: String, continuation: Option<String>) {
     let (display, inbound_chips, _chef_order) =
         crate::chat_links::annotate_order(&message, state.main.game_db.as_deref());
     crate::ui::chat_bar::attach_order_chips(
@@ -105,12 +221,46 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         return;
     }
 
+    // What the fallback answers with if the model does not (specs/006 US4).
+    // The model itself still gets the message unchanged.
+    let plate_for_verdict: Option<(gw2_optimizer::prompts::GeminiBuildResponse, String)> =
+        crate::ui::main_view::provider_picks::plate_suggestion(&state.main.comparison.suggestions)
+            .map(|s| {
+                let plate_profession = state
+                    .main
+                    .game_db
+                    .as_deref()
+                    .and_then(|db| {
+                        gw2_optimizer::validation::infer_profession_from_spec_names(
+                            db,
+                            s.specializations.iter().map(|(n, _)| n.as_str()),
+                        )
+                    })
+                    .unwrap_or_else(|| profession.clone());
+                (plate_from_suggestion(s), plate_profession)
+            });
+    let kind = classify(
+        &message,
+        plate_for_verdict.is_some(),
+        state
+            .main
+            .game_db
+            .as_deref()
+            .and_then(|db| wished_elite_spec(db, &message)),
+    );
+
     state.main.chat_epoch = state.main.chat_epoch.wrapping_add(1);
     let epoch = state.main.chat_epoch;
     state.main.chat.waiting = true;
     state.main.provider_issue = None;
     state.main.chat_wait_started = Some(std::time::Instant::now());
     state.main.optimize_stage = t("choya.thinking");
+    let chat_live = state.main.chat_live.clone();
+    if let Ok(mut live) = chat_live.lock() {
+        let note = std::mem::take(&mut live.note);
+        live.reset();
+        live.note = note;
+    }
 
     let config = state.config.clone();
     let character = if switched_profession {
@@ -171,6 +321,10 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         kitchen.push_str("\nRecent chat:\n");
         kitchen.push_str(&transcript);
     }
+    if let Some(note) = continuation {
+        kitchen.push('\n');
+        kitchen.push_str(&note);
+    }
     let message = display;
     let addon_dir = state.addon_dir.clone();
     let db_clone = clone_game_db_for_worker(&state.main.game_db);
@@ -212,6 +366,9 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     let chat_balance_ctx = BalanceContext::new(state.main.game_mode.clone());
 
     let spawned = state.spawn_worker("chat-message", move |token| {
+        // Live output for the thinking bubble, thread-local like the cancel
+        // predicate so another worker's request cannot write into it.
+        let _live = gw2_optimizer::llm::live::LiveScope::new(crate::state::ChatLiveSink(chat_live));
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             if token.is_cancelled() {
                 crate::state::with_state(|s| {
@@ -227,6 +384,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
             // build looks identical to a greeting from the outside, and only
             // one of the two should be answered with other people's builds.
             let plate_refused = std::cell::Cell::new(false);
+            // The referee report of the served plate, kept so the suggestion
+            // carries the referee's quality and coverage line instead of a
+            // default `Verified` (CONN-00-05).
+            let plate_report: std::cell::RefCell<Option<gw2_optimizer::referee::RefereeReport>> =
+                std::cell::RefCell::new(None);
             // The optimizer's own build for this request, kept outside the
             // closure so a model failure can still serve it.
             let fallback_reference: std::cell::RefCell<Option<String>> =
@@ -238,6 +400,30 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                 std::cell::RefCell::new(gw2_optimizer::llm::profile::Store::load(&addon_dir));
             let round_secs: std::cell::RefCell<Vec<f32>> = std::cell::RefCell::new(Vec::new());
             let repair_used = std::cell::Cell::new(false);
+            // The scenario every referee call in this request judges against,
+            // the fallback verdict included.
+            let scenario = gw2_optimizer::scenario::ScenarioSpec {
+                game_mode: chat_balance_ctx.game_mode.clone(),
+                combat_tier,
+                combat_kind: selected_role
+                    .map(|r| r.combat_kind_for_weights(&weights))
+                    .unwrap_or_else(|| {
+                        if weights.condition > weights.power {
+                            gw2_optimizer::scenario::CombatKind::CondiRamp
+                        } else {
+                            gw2_optimizer::scenario::CombatKind::StrikeSpike
+                        }
+                    }),
+                target_profile: gw2_optimizer::scenario::TargetProfile::Single,
+                optimization_target: gw2_optimizer::scenario::OptimizationTarget {
+                    label: game_mode_label.clone(),
+                },
+                patch_id: Some(chat_balance_ctx.patch_id.clone()),
+                objective_profile_id: selected_role.map(|r| {
+                    r.profile_id_for(&chat_balance_ctx.game_mode, combat_tier)
+                        .to_string()
+                }),
+            };
             let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
                 let client = gw2_optimizer::llm::create_client(&config, &addon_dir)
                     .map_err(|e| e.to_string())?;
@@ -246,19 +432,21 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     return Err("Cancelled".into());
                 }
 
+                gw2_optimizer::llm::live::step(gw2_optimizer::llm::live::Step::Handshake);
+                let handshake_started = std::time::Instant::now();
                 let (profile, probed) = profiles.borrow_mut().ensure(
                     client.as_ref(),
                     &model_id,
                     gw2_optimizer::llm::profile::now_secs(),
                 );
-                nexus::log::log(
-                    nexus::log::LogLevel::Info,
-                    "GW2BuildOpt",
-                    format!(
-                        "Choya handshake{}: {}",
+                log_step(
+                    "handshake",
+                    &format!(
+                        "ok{}: {}",
                         if probed { " (probed now)" } else { "" },
                         profile.summary()
                     ),
+                    handshake_started.elapsed().as_secs_f32(),
                 );
                 if let Some(e) = profiles.borrow().last_probe_error.as_deref() {
                     nexus::log::log(
@@ -272,28 +460,6 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                 }
 
                 if let Some(ref db) = db_clone {
-                    let scenario = gw2_optimizer::scenario::ScenarioSpec {
-                        game_mode: chat_balance_ctx.game_mode.clone(),
-                        combat_tier,
-                        combat_kind: selected_role
-                            .map(|r| r.combat_kind_for_weights(&weights))
-                            .unwrap_or_else(|| {
-                                if weights.condition > weights.power {
-                                    gw2_optimizer::scenario::CombatKind::CondiRamp
-                                } else {
-                                    gw2_optimizer::scenario::CombatKind::StrikeSpike
-                                }
-                            }),
-                        target_profile: gw2_optimizer::scenario::TargetProfile::Single,
-                        optimization_target: gw2_optimizer::scenario::OptimizationTarget {
-                            label: game_mode_label.clone(),
-                        },
-                        patch_id: Some(chat_balance_ctx.patch_id.clone()),
-                        objective_profile_id: selected_role.map(|r| {
-                            r.profile_id_for(&chat_balance_ctx.game_mode, combat_tier)
-                                .to_string()
-                        }),
-                    };
                     // A worked answer for this exact scenario, handed to the
                     // model in Context.
                     //
@@ -307,6 +473,8 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     // 28ms, while the plate the referee refused that evening
                     // sat at 44% and could not repeat. The floor is free;
                     // withholding it is not.
+                    gw2_optimizer::llm::live::step(gw2_optimizer::llm::live::Step::Reference);
+                    let reference_started = std::time::Instant::now();
                     let reference = reference_build(
                         db,
                         &profession,
@@ -314,6 +482,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         &chat_balance_ctx,
                         &chat_locks,
                         &scenario,
+                    );
+                    log_step(
+                        "reference",
+                        if reference.is_some() { "ok" } else { "none" },
+                        reference_started.elapsed().as_secs_f32(),
                     );
                     // Whether the model was handed a worked answer, and what
                     // that answer scored, is the first thing worth knowing when
@@ -400,7 +573,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         current_build_summary: Some(kitchen.as_str()),
                         weights: weights.clone(),
                         balance_ctx: &chat_balance_ctx,
+                        scenario: scenario.clone(),
                     };
+                    // Full-build referee evaluations this request may spend
+                    // (CONN-00-11: the referee has no cancellation probe).
+                    let full_build_evaluations = std::cell::Cell::new(0u32);
                     // What the plate has to beat. Ranked once: the player's
                     // gear does not change while Choya is thinking.
                     let baseline = rank_current_build(
@@ -484,6 +661,16 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                         if stale {
                                             return serde_json::json!({"error": "cancelled"});
                                         }
+                                        if let Some(refusal) =
+                                            full_build_budget(name, args, &full_build_evaluations)
+                                        {
+                                            return refusal;
+                                        }
+                                        if name == "score_build" {
+                                            gw2_optimizer::llm::live::step(
+                                                gw2_optimizer::llm::live::Step::Scoring,
+                                            );
+                                        }
                                         gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
                                     },
                                     // Same budget the Optimize advisor gets.
@@ -512,19 +699,19 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                         if !tool_names.is_empty() {
                                             round_secs.borrow_mut().push(round.as_secs_f32());
                                         }
-                                        nexus::log::log(
-                                            nexus::log::LogLevel::Info,
-                                            "GW2BuildOpt",
-                                            format!(
-                                                "Choya round {turn}/{max_turns} took {:.1}s: {}",
+                                        if tool_names.is_empty() {
+                                            log_step(
+                                                &format!("lookup {turn}/{max_turns}"),
+                                                "done; writing the answer",
                                                 round.as_secs_f32(),
-                                                if tool_names.is_empty() {
-                                                    "writing the build".to_string()
-                                                } else {
-                                                    tool_names.join(", ")
-                                                }
-                                            ),
-                                        );
+                                            );
+                                        } else {
+                                            log_step(
+                                                &format!("lookup {turn}/{max_turns}"),
+                                                &format!("tools: {}", tool_names.join(", ")),
+                                                round.as_secs_f32(),
+                                            );
+                                        }
                                         let tools_str = humanize_tool_names(tool_names);
                                         crate::state::with_state(|s| {
                                             if s.main.chat_epoch != epoch {
@@ -714,7 +901,17 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             // Served, with whatever the non-blocking gates
                             // had to say written on it. A caveat the player
                             // can read beats a gate that silently vetoes.
-                            Ok(concerns) => {
+                            Ok((mut concerns, report)) => {
+                                // What the referee did not simulate is a
+                                // concern the player reads, same as a gate.
+                                if let Some(detail) = coverage_note_from(&report.quality_reasons)
+                                {
+                                    concerns.push(tf(
+                                        "quality.coverage_line",
+                                        &[("detail", &detail)],
+                                    ));
+                                }
+                                *plate_report.borrow_mut() = Some(report);
                                 if !concerns.is_empty() {
                                     let note =
                                         tf("fmt.plate_concern", &[("concern", &concerns.join("; "))]);
@@ -794,6 +991,22 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     Err("Game data not loaded".into())
                 }
             })();
+            let last_step = crate::state::with_state(|s| {
+                s.main
+                    .chat_live
+                    .lock()
+                    .map(|l| (l.step, l.elapsed_in_step(std::time::Instant::now())))
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+            match &result {
+                Ok(_) => log_step(&step_name(last_step.0), "ok", last_step.1 as f32),
+                Err(e) => log_step(
+                    &step_name(last_step.0),
+                    &format!("no answer ({e})"),
+                    last_step.1 as f32,
+                ),
+            }
             // The run refines the handshake: how long a round really took
             // here, whether the plate needed repairing, whether it failed.
             profiles.borrow_mut().record_run(
@@ -956,6 +1169,17 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     let balance_ctx = BalanceContext::new(live_mode.clone());
                                     simulate_suggestion_rotation(&mut suggestion, db, &balance_ctx);
                                 }
+                                if let Some(report) = plate_report.borrow().as_ref() {
+                                    suggestion.data_quality = report.quality.clone();
+                                    for reason in &report.quality_reasons {
+                                        let text = reason.to_string();
+                                        if !suggestion.quality_reasons.iter().any(|r| r == &text) {
+                                            suggestion.quality_reasons.push(text);
+                                        }
+                                    }
+                                    suggestion.coverage_note =
+                                        coverage_note_from(&report.quality_reasons);
+                                }
                                 let chips = match (live_db.as_ref(), validated.as_ref()) {
                                     (Some(db), Some(v)) => crate::chat_links::chips_from_plate(
                                         db,
@@ -1000,33 +1224,79 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 "GW2BuildOpt",
                                 format!("Choya request failed: {e}"),
                             );
-                            crate::state::with_state(|s| {
-                                if s.main.chat_epoch != epoch {
-                                    return;
+                            let Some(msg) = crate::state::with_state(|s| {
+                                (s.main.chat_epoch == epoch).then(|| {
+                                    format_provider_issue(
+                                        &e,
+                                        s.config.active_provider.short_label(),
+                                        s.config.active_model_id(),
+                                    )
+                                })
+                            })
+                            .flatten() else {
+                                return;
+                            };
+                            // The fallback answers the question asked, not a
+                            // different one (specs/006 US4). The referee runs
+                            // here, outside the state lock.
+                            gw2_optimizer::llm::live::step(gw2_optimizer::llm::live::Step::Fallback);
+                            let fallback_started = std::time::Instant::now();
+                            let body = match &kind {
+                                RequestKind::AboutPlate => {
+                                    let verdict = plate_for_verdict.as_ref().zip(db_clone.as_ref()).and_then(
+                                        |((plate, plate_profession), db)| {
+                                            let v = gw2_optimizer::validation::validate_gemini_build(
+                                                plate,
+                                                db,
+                                                plate_profession,
+                                            );
+                                            v.errors.is_empty().then(|| {
+                                                verdict_reply(&gw2_optimizer::referee::evaluate_validated_build(
+                                                    &v,
+                                                    db,
+                                                    plate_profession,
+                                                    &weights,
+                                                    &chat_balance_ctx,
+                                                    &scenario,
+                                                ))
+                                            })
+                                        },
+                                    );
+                                    match verdict {
+                                        Some(v) => format!("{msg}\n\n{v}"),
+                                        None => format!("{msg}\n\n{}", t("choya.fallback_no_plate")),
+                                    }
                                 }
-                                let msg = format_provider_issue(
-                                    &e,
-                                    s.config.active_provider.short_label(),
-                                    s.config.active_model_id(),
-                                );
-                                s.main.provider_issue = Some(msg.clone());
                                 // The run must end in a build. The optimizer's
                                 // own answer for this request has been in hand
                                 // since before the first round; a model that
                                 // ran out of clock does not take it with it.
-                                match fallback_reference.borrow().as_deref() {
+                                RequestKind::Build { .. } => match fallback_reference.borrow().as_deref() {
                                     Some(build) => {
-                                        crate::ui::chat_bar::add_ai_response(
-                                            &mut s.main.chat,
-                                            format!(
-                                                "{msg}\n\n{}\n{build}",
-                                                t("choya.fallback_reference")
-                                            ),
-                                        );
+                                        format!("{msg}\n\n{}\n{build}", t("choya.fallback_reference"))
                                     }
-                                    None => {
-                                        crate::ui::chat_bar::add_ai_response(&mut s.main.chat, msg);
-                                    }
+                                    None => msg.clone(),
+                                },
+                                RequestKind::Chat => format!("{msg}\n\n{}", t("choya.fallback_chat")),
+                            };
+                            let is_build = matches!(kind, RequestKind::Build { .. });
+                            log_step(
+                                "fallback",
+                                &format!("{kind:?}"),
+                                fallback_started.elapsed().as_secs_f32(),
+                            );
+                            crate::state::with_state(|s| {
+                                if s.main.chat_epoch != epoch {
+                                    return;
+                                }
+                                s.main.provider_issue = Some(msg);
+                                if is_build {
+                                    crate::ui::chat_bar::add_failed_build_response(&mut s.main.chat, body);
+                                } else {
+                                    crate::ui::chat_bar::add_ai_response(&mut s.main.chat, body);
+                                }
+                                if let Some(last) = s.main.chat.history.last_mut() {
+                                    last.retry_of = Some(message.clone());
                                 }
                             });
                         }
@@ -1269,6 +1539,28 @@ fn gate_vetoes(
 
 // Every argument is one input the referee needs and none has a sensible
 // default; bundling them into a struct would move the same list one line up.
+/// Full-build `score_build` calls one chat request may make. The referee
+/// runs a gate simulation plus a 60 s flow simulation with no cancellation
+/// probe (CONN-00-11), so the count is the bound.
+pub(super) const FULL_BUILD_EVALUATIONS_PER_REQUEST: u32 = 3;
+
+/// `Some(refusal)` when this call is a full-build `score_build` past the
+/// budget; otherwise counts it (full-build only) and lets it through.
+pub(super) fn full_build_budget(
+    name: &str,
+    args: &serde_json::Value,
+    used: &std::cell::Cell<u32>,
+) -> Option<serde_json::Value> {
+    if name != "score_build" || !args.get("build").is_some_and(|b| b.is_object()) {
+        return None;
+    }
+    if used.get() >= FULL_BUILD_EVALUATIONS_PER_REQUEST {
+        return Some(serde_json::json!({ "error": "evaluation budget spent" }));
+    }
+    used.set(used.get() + 1);
+    None
+}
+
 #[allow(clippy::too_many_arguments)]
 fn plate_shortfall(
     plate: &gw2_optimizer::validation::ValidatedBuild,
@@ -1279,7 +1571,7 @@ fn plate_shortfall(
     ctx: &BalanceContext,
     scenario: &gw2_optimizer::scenario::ScenarioSpec,
     unreachable: &[gw2_optimizer::referee::ViabilityGate],
-) -> Result<Vec<String>, String> {
+) -> Result<(Vec<String>, gw2_optimizer::referee::RefereeReport), String> {
     let report = gw2_optimizer::referee::evaluate_validated_build(
         plate,
         db,
@@ -1331,13 +1623,13 @@ fn plate_shortfall(
     // No baseline is not a pass mark, it is an unarmed gate: viability alone
     // still had to hold above.
     let Some(baseline) = baseline else {
-        return Ok(concerns);
+        return Ok((concerns, report));
     };
     if super::optimize_flow::beats_baseline(
         &gw2_optimizer::referee::search_rank(&report),
         &gw2_optimizer::referee::search_rank(baseline),
     ) {
-        return Ok(concerns);
+        return Ok((concerns, report));
     }
     Err(format!(
         "that build does not beat what the player is already wearing \
@@ -1370,6 +1662,102 @@ pub(super) fn wants_a_build(message: &str) -> bool {
     ]
     .iter()
     .any(|k| lower.contains(k))
+}
+
+/// What the fallback answers with when the model does not (specs/006 US4).
+/// Drives the fallback only; the model still receives every message unchanged.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum RequestKind {
+    Build { elite: Option<String> },
+    AboutPlate,
+    Chat,
+}
+
+/// `wished` is the elite specialization named in the message, if any.
+/// Ambiguous messages count as questions, so the cards stay.
+pub(super) fn classify(message: &str, has_plate: bool, wished: Option<String>) -> RequestKind {
+    let lower = message.to_lowercase();
+    let about_plate = [
+        "score",
+        "gate",
+        "simulat",
+        "why",
+        "explain",
+        "rate ",
+        "rate it",
+        "rating",
+        "compare",
+        "what was not",
+        "verdict",
+        "viable",
+    ]
+    .iter()
+    .any(|k| lower.contains(k));
+    if has_plate && about_plate {
+        RequestKind::AboutPlate
+    } else if wants_a_build(message) {
+        RequestKind::Build { elite: wished }
+    } else {
+        RequestKind::Chat
+    }
+}
+
+/// The plate as the validator reads it, from what the strip holds.
+fn plate_from_suggestion(
+    s: &crate::ui::comparison::BuildSuggestion,
+) -> gw2_optimizer::prompts::GeminiBuildResponse {
+    gw2_optimizer::prompts::GeminiBuildResponse {
+        specializations: s.specializations.clone(),
+        weapons: s.weapons.clone(),
+        skills: s.skills.clone(),
+        rune: s.rune.clone(),
+        sigils: s.sigils.clone(),
+        relic: s.relic.clone(),
+        stat_prefix: s.stat_prefix.clone(),
+        ..Default::default()
+    }
+}
+
+/// The referee's verdict on the plated build, as the bubble draws it.
+fn verdict_reply(report: &gw2_optimizer::referee::RefereeReport) -> String {
+    let gates: Vec<(String, bool, String)> = report
+        .viability
+        .gates
+        .iter()
+        .map(|g| (format!("{:?}", g.gate), g.passed, g.note.clone()))
+        .collect();
+    verdict_lines(
+        report.viability.is_viable,
+        report.user_intent_score,
+        &gates,
+        coverage_note_from(&report.quality_reasons).as_deref(),
+    )
+}
+
+fn verdict_lines(
+    viable: bool,
+    score: f64,
+    gates: &[(String, bool, String)],
+    coverage: Option<&str>,
+) -> String {
+    let mut out = t("choya.fallback_verdict");
+    out.push_str(&format!(
+        "\n- **Viable**: {}\n- **Score**: {score:.0}\n- **Gates**:",
+        if viable { "yes" } else { "no" }
+    ));
+    for (gate, passed, note) in gates {
+        out.push_str(&format!(
+            "\n  - **{gate}**: {} - {note}",
+            if *passed { "pass" } else { "fail" }
+        ));
+    }
+    if let Some(detail) = coverage {
+        out.push_str(&format!(
+            "\n! {}",
+            tf("quality.coverage_line", &[("detail", detail)])
+        ));
+    }
+    out
 }
 
 /// Whether the message is about the player's own equipped build rather than
@@ -1466,8 +1854,100 @@ pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -
 #[cfg(test)]
 mod tests {
     use super::{
-        asks_about_own_build, gate_vetoes, plate_is_servable, wants_a_build, wished_elite_spec,
+        asks_about_own_build, classify, continuation_brief, gate_vetoes, log_line,
+        plate_is_servable, verdict_lines, wants_a_build, wished_elite_spec, RequestKind,
     };
+
+    #[test]
+    fn continuation_brief_with_partial() {
+        let note = continuation_brief("- Take **Gravedigger**\n- then").unwrap();
+        assert!(note.starts_with("Continuation."));
+        assert!(note.contains("- Take **Gravedigger**"));
+        assert!(note.ends_with("Do not repeat what is above."));
+    }
+
+    #[test]
+    fn continuation_brief_without_partial_is_none() {
+        assert_eq!(continuation_brief(""), None);
+        assert_eq!(continuation_brief("   \n"), None);
+    }
+
+    #[test]
+    fn log_line_format() {
+        assert_eq!(
+            log_line("lookup 2", "tools: search_upgrades", 37.46),
+            "Choya lookup 2: tools: search_upgrades in 37.5s"
+        );
+        assert_eq!(
+            log_line("writing", "stopped", 63.0),
+            "Choya writing: stopped in 63.0s"
+        );
+    }
+
+    #[test]
+    fn classify_scoring_question_with_plate() {
+        let q = "Score that exact build and tell me the gates and what was not simulated.";
+        assert_eq!(classify(q, true, None), RequestKind::AboutPlate);
+        assert_eq!(
+            classify("why is it viable?", true, None),
+            RequestKind::AboutPlate
+        );
+    }
+
+    #[test]
+    fn classify_same_without_plate_is_a_build_or_chat() {
+        let q = "Score that exact build and tell me the gates and what was not simulated.";
+        assert!(matches!(
+            classify(q, false, None),
+            RequestKind::Build { .. }
+        ));
+        assert_eq!(classify("why though?", false, None), RequestKind::Chat);
+    }
+
+    #[test]
+    fn classify_build_with_elite() {
+        assert_eq!(
+            classify("make me a reaper build", false, Some("Reaper".into())),
+            RequestKind::Build {
+                elite: Some("Reaper".into())
+            }
+        );
+        assert_eq!(
+            classify("make me a reaper build", true, Some("Reaper".into())),
+            RequestKind::Build {
+                elite: Some("Reaper".into())
+            }
+        );
+    }
+
+    #[test]
+    fn classify_ambiguous_is_chat() {
+        assert_eq!(classify("hello there", true, None), RequestKind::Chat);
+        assert_eq!(classify("thanks!", false, None), RequestKind::Chat);
+    }
+
+    #[test]
+    fn verdict_bullets_shape() {
+        let gates = vec![
+            (
+                "StunbreakCount".to_string(),
+                true,
+                "2 stunbreaks".to_string(),
+            ),
+            ("CleanseRate".to_string(), false, "0/s".to_string()),
+        ];
+        let out = verdict_lines(false, 61.4, &gates, Some("Sigil of Fire"));
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines[1].starts_with("- **Viable**: no"));
+        assert!(lines[2].starts_with("- **Score**: 61"));
+        assert_eq!(lines[3], "- **Gates**:");
+        assert!(lines[4].contains("StunbreakCount") && lines[4].contains("pass"));
+        assert!(lines[5].contains("CleanseRate") && lines[5].contains("fail"));
+        assert!(lines[6].starts_with("! "));
+        assert!(lines[6].contains("Sigil of Fire"));
+        let none = verdict_lines(true, 80.0, &[], None);
+        assert!(!none.contains("! "));
+    }
 
     #[test]
     fn improving_nothing_is_told_from_asking_for_something() {
@@ -1688,5 +2168,22 @@ mod arc_gamedb_tests {
         // allocation rather than, say, a `&'static` alias of some kind.
         drop(worker_db);
         assert_eq!(Arc::strong_count(&db), 2);
+    }
+    #[test]
+    fn full_build_budget_allows_three_then_refuses() {
+        let used = std::cell::Cell::new(0u32);
+        let full = serde_json::json!({ "build": { "rune": "x" } });
+        let prefix = serde_json::json!({ "gear_prefix": "Marauder" });
+        use super::{full_build_budget, FULL_BUILD_EVALUATIONS_PER_REQUEST};
+        for _ in 0..FULL_BUILD_EVALUATIONS_PER_REQUEST {
+            assert!(full_build_budget("score_build", &full, &used).is_none());
+        }
+        assert_eq!(used.get(), FULL_BUILD_EVALUATIONS_PER_REQUEST);
+        let refused = full_build_budget("score_build", &full, &used).expect("fourth is refused");
+        assert_eq!(refused["error"], "evaluation budget spent");
+        // Prefix-only calls and other tools are never counted or refused.
+        assert!(full_build_budget("score_build", &prefix, &used).is_none());
+        assert!(full_build_budget("get_skill_info", &full, &used).is_none());
+        assert_eq!(used.get(), FULL_BUILD_EVALUATIONS_PER_REQUEST);
     }
 }

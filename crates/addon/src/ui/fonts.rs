@@ -156,6 +156,59 @@ pub fn init(pref: &str, ui_language: &str) {
     let Some(id) = resolve_font_id(pref, ui_language) else {
         return;
     };
+    init_id(&id);
+}
+
+/// The italic face beside the chosen family, when the font folder has one
+/// (`segoeui.ttf` → `segoeuii.ttf`, `arial.ttf` → `ariali.ttf`, `georgia.ttf`
+/// → `georgiai.ttf`). Bundled and script faces have none; the bubble falls
+/// back to the muted colour for asides.
+pub fn italic_font_id(pref: &str, ui_language: &str) -> Option<String> {
+    let id = resolve_font_id(pref, ui_language)?;
+    let file = id.strip_prefix(ID_FILE_PREFIX)?;
+    let ext = Path::new(file).extension()?.to_string_lossy().to_string();
+    let italic = format!("{}i.{ext}", stem_of(file));
+    find_font_file(&italic).map(|_| format!("{ID_FILE_PREFIX}{italic}"))
+}
+
+/// Italic face id requested for the chat bubble, once `init_italic` found one.
+static ITALIC: Mutex<Option<String>> = Mutex::new(None);
+
+/// Request the italic face beside the chosen family, if the folder has one.
+pub fn init_italic(pref: &str, ui_language: &str) {
+    let Some(id) = italic_font_id(pref, ui_language) else {
+        return;
+    };
+    init_id(&id);
+    if let Ok(mut slot) = ITALIC.lock() {
+        *slot = Some(id);
+    }
+}
+
+/// True once the italic face is loaded and usable this frame.
+pub fn has_italic() -> bool {
+    ITALIC
+        .lock()
+        .ok()
+        .and_then(|s| s.clone())
+        .is_some_and(|id| !slot_ptr(&id).is_null())
+}
+
+/// Push the italic face for one span. `None` when there is none, in which
+/// case the caller draws in the muted colour instead.
+pub fn push_italic() -> Option<FontGuard> {
+    let id = ITALIC.lock().ok().and_then(|s| s.clone())?;
+    let ptr = slot_ptr(&id);
+    if ptr.is_null() {
+        return None;
+    }
+    // Safety: `ptr` came from Nexus' font callback (null during atlas rebuild).
+    unsafe { sys::igPushFont(ptr) };
+    Some(FontGuard)
+}
+
+fn init_id(id: &str) {
+    let id = id.to_string();
     if !slot_ptr(&id).is_null() || !first_request(&id) {
         return;
     }
