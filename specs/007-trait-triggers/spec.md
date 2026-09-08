@@ -12,6 +12,14 @@
 
 A build is its trait choices, and the simulator today executes only the arithmetic half of a trait: its stat lines, its permanent percent modifiers, and the changes it makes to a skill's own numbers. The conditional half, "when you enter shroud", "while in shroud", "on a critical hit against a chilled foe", "when you use a skill of this kind", "when you leave shroud", never changes a simulated event, because the trigger kinds those traits need do not exist and the trait records were never written. Two builds that differ only in such a trait score the same. The coverage line names the trait as "(no record)" and the build is marked Provisional, which is honest, but it means nothing the optimizer calls optimized has been judged on the thing that makes it a build.
 
+## Clarifications
+
+### Session 2026-09-08
+
+- Q: Where do the per-profession test builds come from for the eight professions after Necromancer? → A: Both: one published WvW build per profession from the synced sites for the ranking checks, and a small hand-authored opener per profession that reaches every trigger kind the profession's traits use.
+- Q: When do the increments reach the player, and who accepts them? → A: Acceptance is automated, not in-game: this sprint changes no screen, and every record is arithmetic against a named wiki page. A profession ships (release and DLL) when its automated gates pass; the player is not asked to test.
+- Q: How does the simulation count trait effects that land on allies or enemies? → A: It simulates all of them: every corrupting and damaging effect on the enemies present, every boon and healing effect on the allies present and on the player, within the mode and scale's target caps. An optimized build is the build with the highest potential ceiling, and that ceiling is not measurable if any target-facing effect is left out.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A shroud trait fires when shroud is entered, held, or left (Priority: P1)
@@ -91,6 +99,7 @@ As a player reading the coverage line, I want it to name only sources whose mech
 - A trait whose prerequisite is a condition the fixture never applies: never fires, recorded as "prerequisite never met" in the trace, not as "no record".
 - A trait with both a stat line and a trigger: the stat line stays in the stat block and the trigger fires; nothing is counted twice.
 - A record whose wiki page has split numbers per mode: the mode's number is used; a mode without a number leaves that mode's execution as "unread", never a guess.
+- An ally-facing boon with a five-target cap in a Cloud fight: five allies receive it, the player among them; a foe-facing corrupt with the WvW cap strikes that many foes and no more.
 - A Scourge with no shade out: shade skills still count as shroud-skill-1 for traits that say so, as the wiki states.
 
 ## Requirements *(mandatory)*
@@ -100,6 +109,7 @@ As a player reading the coverage line, I want it to name only sources whose mech
 - **FR-001**: The effect record format MUST support triggers for entering shroud, leaving shroud, and being in shroud, and the WvW timeline MUST fire records of each kind at the matching instant or over the matching interval.
 - **FR-002**: The record format MUST support a prerequisite on the foe (a named condition present at the moment of the trigger) and the timeline MUST evaluate it per trigger.
 - **FR-003**: Trait-owned skill-use triggers MUST fire on the skill kinds the record names, with their cooldown, and on no other skill.
+- **FR-003a**: Trait effects MUST be applied to every target they are meant for: damage, conditions and corrupts to the foes present, boons and healing to the allies present and to the player, bounded only by the mode and scale's target caps. The number of foes and allies present follows the selected scale (Roam, Havoc, Cloud; Open World, Group, Squad); no target-facing effect is skipped or reduced to the player's own share.
 - **FR-004**: Life force gains stated as periodic or as ending-shroud gains MUST be applied by the resource model.
 - **FR-005**: Every trait of every profession MUST be in exactly one state: executed from facts, executed from a record, or classified with a reason from a fixed set; the audit MUST list the state of each.
 - **FR-006**: Every record MUST carry its wiki source and read date, and its numbers MUST match the page for its mode; no fixture value is ever copied into the data.
@@ -107,6 +117,8 @@ As a player reading the coverage line, I want it to name only sources whose mech
 - **FR-008**: A build with no skipped mechanic MUST be marked Verified; any skipped mechanic keeps it Provisional.
 - **FR-009**: PvE and PvP results MUST be unchanged by this sprint, pinned by the existing guard.
 - **FR-010**: Every behaviour change MUST be introduced against a failing experiment or unit test that passes afterwards, in the seen-failing discipline of Sprint 2.
+- **FR-010a**: Every record MUST be covered by an automated check that reads its numbers against the wiki page and mode it names; a profession's increment MUST NOT be released with a record that has no such check.
+- **FR-012**: Each profession's increment MUST carry two test builds: one published WvW build from the synced sites, scored as the site wrote it, for the ranking checks; and one hand-authored opener that reaches every trigger kind the profession's traits use, for trigger coverage. Fixture values are never copied into the data.
 - **FR-011**: The catalogue covers all nine professions, every core and elite line. Necromancer goes first because its fixture, shroud model and trigger work already exist; each further profession lands as its own reviewable increment with a fixture-grade test build, so the triggers ship before the catalogue is complete and the coverage line stays truthful at every step.
 
 ### Key Entities
@@ -115,6 +127,7 @@ As a player reading the coverage line, I want it to name only sources whose mech
 - **Prerequisite**: a condition on the foe that must hold at the trigger instant.
 - **Trait record**: a dated statement of what a trait does when it triggers, in the mode it applies to.
 - **Coverage state**: for each equipped source, one of executed from facts, executed from a record, or skipped with a reason.
+- **Fight population**: the foes and allies present for the selected scale, each a target for the effects meant for them, capped per effect by the mode's target cap.
 - **Reason class**: the fixed set of explanations a skipped source may carry.
 
 ## Success Criteria *(mandatory)*
@@ -132,7 +145,7 @@ As a player reading the coverage line, I want it to name only sources whose mech
 ## Assumptions
 
 - The Sprint 2 firing mechanism, trace, fixture and seen-failing controls are the base; no scoring constant, gate or threshold moves.
-- The player tests in-game; nothing is pushed or released until then.
+- Acceptance is automated for this sprint: a profession's increment is released when its record checks, seen-failing experiments, ranking-direction tests and the PvE/PvP pins pass. No in-game test is asked of the player; the in-game gate applies only to sprints that change what is on screen.
 - PvE and PvP execution of records (CONN-01-03) and the enemy cooldown model (CONN-00-08) stay later sprints.
 - Profession order after Necromancer follows the player's characters, then the remaining professions.
 - Records are written from the wiki; where the wiki flags a number as awaiting verification, the record says so.
