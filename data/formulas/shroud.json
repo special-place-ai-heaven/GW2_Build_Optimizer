@@ -1,5 +1,5 @@
 {
-  "source": "https://wiki.guildwars2.com/wiki/Life_force, https://wiki.guildwars2.com/wiki/Death_Shroud, https://wiki.guildwars2.com/wiki/Reaper%27s_Shroud (read 2026-09-08)",
+  "source": "https://wiki.guildwars2.com/wiki/Life_force, https://wiki.guildwars2.com/wiki/Death_Shroud, https://wiki.guildwars2.com/wiki/Reaper%27s_Shroud, https://wiki.guildwars2.com/wiki/Harbinger_Shroud, https://wiki.guildwars2.com/wiki/Ritualist%27s_Shroud (read 2026-09-08). Harbinger Shroud does not protect the health pool (protects_health false) and stacks Blight, which is not modeled. Ritualist's Shroud drain carries a wiki verification request. Scourge has no shroud: Manifest Sand Shade is F1 with no flip skill, so no row.",
   "life_force_pool_pct_of_health": 69.0,
   "entry_floor_pct": 10.0,
   "recharge_on_exit_s": 10.0,
@@ -16,13 +16,14 @@
     },
     "62567": {
       "name": "Harbinger Shroud",
-      "drain_pct_per_s": null,
-      "damage_reduction_pct": null
+      "drain_pct_per_s": { "pve": 5.0, "wvw": 5.0, "pvp": 5.0 },
+      "damage_reduction_pct": { "pve": 0.0, "wvw": 0.0, "pvp": 0.0 },
+      "protects_health": false
     },
     "77238": {
       "name": "Ritualist's Shroud",
-      "drain_pct_per_s": null,
-      "damage_reduction_pct": null
+      "drain_pct_per_s": { "pve": 3.0, "wvw": 5.0, "pvp": 5.0 },
+      "damage_reduction_pct": { "pve": 33.0, "wvw": 50.0, "pvp": 50.0 }
     }
   }
 }

@@ -39,6 +39,16 @@ pub struct ShroudRow {
     pub name: String,
     pub drain_pct_per_s: Option<PerMode>,
     pub damage_reduction_pct: Option<PerMode>,
+    /// Whether the life force pool stands in for health while in this
+    /// shroud (Death, Reaper's, Ritualist's). Harbinger Shroud leaves the
+    /// health pool exposed and lets healing through (wiki `Harbinger
+    /// Shroud`, Mechanics).
+    #[serde(default = "default_true")]
+    pub protects_health: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -111,10 +121,45 @@ mod tests {
                 .for_mode(GameMode::WvW),
             3.0
         );
-        for id in [62567, 77238] {
-            let row = t.row(id).expect("row exists");
-            assert!(row.drain_pct_per_s.is_none() && row.damage_reduction_pct.is_none());
-        }
+        // Harbinger: 5 %/s, no reduction, health exposed (wiki, read
+        // 2026-09-08). Ritualist's: 3/5/5 with a verification request,
+        // 33/50/50 reduction from the API facts.
+        let harbinger = t.row(62567).expect("Harbinger Shroud");
+        assert!(!harbinger.protects_health);
+        assert_eq!(
+            harbinger
+                .drain_pct_per_s
+                .as_ref()
+                .unwrap()
+                .for_mode(GameMode::WvW),
+            5.0
+        );
+        assert_eq!(
+            harbinger
+                .damage_reduction_pct
+                .as_ref()
+                .unwrap()
+                .for_mode(GameMode::WvW),
+            0.0
+        );
+        let ritualist = t.row(77238).expect("Ritualist's Shroud");
+        assert!(ritualist.protects_health && reaper.protects_health && death.protects_health);
+        assert_eq!(
+            ritualist
+                .drain_pct_per_s
+                .as_ref()
+                .unwrap()
+                .for_mode(GameMode::PvE),
+            3.0
+        );
+        assert_eq!(
+            ritualist
+                .damage_reduction_pct
+                .as_ref()
+                .unwrap()
+                .for_mode(GameMode::WvW),
+            50.0
+        );
         assert!(t.row(1).is_none());
         assert_eq!(t.entry_floor_pct, 10.0);
         assert!((t.pool_for(20_000.0) - 13_800.0).abs() < 1e-9);

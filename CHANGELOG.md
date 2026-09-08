@@ -2,6 +2,12 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## Unreleased
+
+### What the simulator simulates in WvW
+
+- Harbinger Shroud and Ritualist's Shroud have their numbers now (wiki, read 2026-09-08): Harbinger drains 5 % a second, reduces nothing, leaves health exposed and lets healing land; Ritualist's drains 3 % in PvE and 5 % in WvW and PvP behind the same 33 % / 50 % reduction as Death Shroud. Blight is not modeled. Scourge has no shroud and never did in the simulation: Manifest Sand Shade is the F1, and shade skills run at all times; their life force costs are not in the API facts and are not modeled.
+
 ## 1.14.2 - 2026-09-08
 
 Choya can be read, and the builds it puts beside its own can be told apart.
