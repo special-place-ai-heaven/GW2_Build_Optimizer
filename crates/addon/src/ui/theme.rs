@@ -692,9 +692,9 @@ pub fn tab_tint_in(p: &Palette, kind: [f32; 4]) -> TabTint {
     ];
     let f = lerp3(idle, k, 0.35);
     TabTint {
-        fill: [f[0], f[1], f[2], 0.85],
+        fill: [f[0], f[1], f[2], 0.40],
         rim: [k[0], k[1], k[2], 0.75],
-        selected_fill: [k[0], k[1], k[2], 0.85],
+        selected_fill: [k[0], k[1], k[2], 1.0],
         text: p.cream,
         selected_text: p.gold_button_text,
     }
@@ -735,10 +735,26 @@ pub fn tinted_pill(ui: &Ui, label: &str, selected: bool, id: &str, kind: [f32; 4
             .filled(true)
             .rounding(h * 0.45)
             .build();
-        dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], tint.rim)
+        // The selected tab is unmistakable: solid brand fill, a bright rim,
+        // bold label and a bar underneath. Idle tabs are a faint wash of
+        // their colour (in-game 2026-09-08: the two looked alike).
+        let rim = if selected { pal().cream } else { tint.rim };
+        dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], rim)
             .rounding(h * 0.45)
+            .thickness(if selected { 2.0 } else { 1.0 })
             .build();
         dl.add_text([p[0] + pad_x, p[1] + pad_y], color_u32(text), label);
+        if selected {
+            dl.add_text([p[0] + pad_x + 1.0, p[1] + pad_y], color_u32(text), label);
+            dl.add_rect(
+                [p[0] + 4.0, p[1] + h + 2.0],
+                [p[0] + w - 4.0, p[1] + h + 5.0],
+                tint.selected_fill,
+            )
+            .filled(true)
+            .rounding(1.5)
+            .build();
+        }
     }
     clicked
 }
