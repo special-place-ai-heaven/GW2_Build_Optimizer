@@ -207,25 +207,31 @@ Body three.
 
         let first_heading = EMBEDDED
             .lines()
-            .find_map(|l| l.strip_prefix("## "))
-            .expect("CHANGELOG.md has a `## ` heading");
+            .find_map(|l| {
+                l.strip_prefix("## ")
+                    .filter(|heading| heading.contains(" - "))
+            })
+            .expect("CHANGELOG.md has a dated `## ` heading");
         let (version, date) = first_heading.split_once(" - ").expect("heading has ` - `");
-        assert_eq!(entries[0].version, version.trim());
-        assert_eq!(entries[0].date, date.trim());
+        let dated_entry = entries
+            .iter()
+            .find(|entry| entry.version == version.trim())
+            .expect("dated changelog heading has a parsed entry");
+        assert_eq!(dated_entry.date, date.trim());
 
-        let parts: Vec<&str> = entries[0].version.split('.').collect();
+        let parts: Vec<&str> = dated_entry.version.split('.').collect();
         assert_eq!(
             parts.len(),
             3,
             "version {} is not semver",
-            entries[0].version
+            dated_entry.version
         );
         assert!(
             parts
                 .iter()
                 .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())),
             "version {} is not semver",
-            entries[0].version
+            dated_entry.version
         );
 
         for e in &entries {
