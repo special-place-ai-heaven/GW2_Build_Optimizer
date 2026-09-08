@@ -690,6 +690,38 @@ pub fn opener_with_swap() -> Vec<u32> {
     vec![GRAVEDIGGER, GHASTLY_CLAWS]
 }
 
+/// Sprint 3 (specs/007-trait-triggers, T050): a chill before the crits, a
+/// shout, a corrupt (boon strip) and the full shroud enter, so the
+/// Necromancer catalogue's on-crit-while-chilled, shout-scoped,
+/// boon-stripped and shroud-entry records all have a firing site in one
+/// press order.
+pub fn opener_catalogue() -> Vec<u32> {
+    vec![
+        GRASPING_DARKNESS,
+        GRAVEDIGGER,
+        YOU_ARE_ALL_WEAKLINGS,
+        WELL_OF_DARKNESS,
+        DEATH_SPIRAL,
+        WELL_OF_SUFFERING,
+        REAPER_SHROUD,
+        SHROUD_1,
+        SHROUD_4,
+    ]
+}
+
+/// Sprint 3: enter shroud and leave it by the exit skill, for the exit
+/// records (the bar itself does not carry the flip skill; tests append it).
+pub fn opener_shroud_exit() -> Vec<u32> {
+    vec![
+        GRAVEDIGGER,
+        DEATH_SPIRAL,
+        WELL_OF_SUFFERING,
+        REAPER_SHROUD,
+        SHROUD_1,
+        EXIT_SHROUD,
+    ]
+}
+
 /// Press order for the pinned experiments. Since Sprint 2 the generators
 /// come first: life force starts at zero and shroud needs 10 % of the pool
 /// (Gravedigger 8 % + Death Spiral 6 % + Well 5 %), so the shroud entry

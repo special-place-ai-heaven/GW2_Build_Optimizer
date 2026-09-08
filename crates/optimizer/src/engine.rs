@@ -1421,8 +1421,13 @@ fn simulate_prepared_with(
         rotation::simulator::simulate_with(rotation_skills, duration_ms, params, enemy);
 
     if let Some(scenario) = scenario.filter(|scenario| scenario.game_mode == GameMode::WvW) {
-        let executed_traits: std::collections::HashSet<u32> =
+        // Executed from facts (US4): a percent modifier the damage parser
+        // consumed, or an attribute fact the stat sheet consumed
+        // (`stats::calculate_trait_stats_for_mode` reads every
+        // AttributeAdjust / BuffConversion fact of every equipped trait).
+        let mut executed_traits: std::collections::HashSet<u32> =
             prepared.consumed_trait_ids.iter().copied().collect();
+        executed_traits.extend(stat_consumed_trait_ids(validated, db));
         let (active_effects, coverage, sigil_sets) = active_normalized_effects(
             validated,
             rotation_skills,
@@ -1812,6 +1817,31 @@ pub(crate) fn active_normalized_effects<'e>(
     coverage.sort_by(|a, b| a.name.cmp(&b.name));
     coverage.dedup_by(|a, b| a.name == b.name);
     (active, coverage, sigil_sets)
+}
+
+/// Equipped traits whose facts the stat sheet consumes: any AttributeAdjust
+/// or BuffConversion fact, base or traited (US4, specs/007-trait-triggers).
+fn stat_consumed_trait_ids(
+    validated: &ValidatedBuild,
+    db: &GameDb,
+) -> std::collections::HashSet<u32> {
+    use gw2_api::models::Fact;
+    let is_stat = |fact: &Fact| {
+        matches!(
+            fact,
+            Fact::AttributeAdjust { .. } | Fact::BuffConversion { .. }
+        )
+    };
+    validated
+        .specializations
+        .iter()
+        .flat_map(|spec| spec.all_trait_ids.iter().copied())
+        .filter(|id| {
+            db.traits.get(id).is_some_and(|t| {
+                t.facts.iter().any(is_stat) || t.traited_facts.iter().any(|tf| is_stat(&tf.fact))
+            })
+        })
+        .collect()
 }
 
 fn source_type_tag(source_type: &crate::data::normalized_effects::SourceType) -> u8 {
