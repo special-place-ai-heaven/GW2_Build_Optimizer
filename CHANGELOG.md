@@ -2,6 +2,31 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.2 - 2026-09-08
+
+Choya can be read, and the builds it puts beside its own can be told apart.
+
+### Reading Choya
+
+- A reply is shown whole. It used to be cut at 600 characters and end in three dots, with the rest thrown away before it reached the transcript.
+- Replies are laid out, not dumped: bullets on their own lines, names the game knows in the accent colour, bold names, italic asides, warning lines, rotations as `A → B → C`, web addresses underlined and clickable. Choya is asked for that shape and for facts over prose.
+- The comparison tabs say whose build each is: a blue Current tab for what is equipped, a green Optimized tab for what Choya or the optimizer made, and a tab in the site's colour named after the site for a published build. Opening a published build or loading a saved one adds a tab; nothing is replaced.
+- The published-build cards stay while you ask follow-up questions; only a new build replaces them.
+- When the model does not answer, the fallback answers what was asked: a scoring question gets the referee's verdict on the plated build, a build request gets the optimizer's build for the specialisation named, anything else gets a plain line with what to do next. A question about a Reaper no longer comes back as an optimizer run for another profession.
+- While Choya works, the bubble names the step and counts the seconds, says "nothing for N s" when nothing is arriving, and expands on click to the model's live reasoning, or its answer as it streams, or the tools it has called. There is no time limit on the wait any more; Stop ends it and keeps what arrived, Retry asks the model to continue from there. The addon log has one line per step with its duration and outcome.
+
+### Builds side by side
+
+- The Improve and New Build panes share one strip of tabs: Current (blue), Choya's pick (green), and one tab in the site's own colour for every published build the chat offered, present as soon as the cards are, not only after a click. The selected tab is solid with a bright rim and a bar beneath it; the header row keeps one order so switching tabs moves nothing.
+- Site colours are the sites' own: GuildJen pink, Hardstuck red, Snowcrows ice cyan, each adapted in brightness to the active theme.
+- Loading a saved build adds a tab instead of replacing the strip.
+
+### Fixes
+
+- The build and equipment tabs you picked for a character no longer snap back to the in-game active tab when the API refresh lands or the character list is opened.
+- Settings has default Scale and Role beside the default Game Mode; they apply at startup.
+- Rotation arrows and list marks are drawn as shapes, so they render in every font instead of as a question mark.
+
 ## 1.14.1 - 2026-09-07
 
 The evening's question was why no free model produced a build any more. The answer is written down, with the numbers, in `docs/llm-requirements.md`, and this release fixes the parts that were ours.
@@ -20,15 +45,6 @@ The evening's question was why no free model produced a build any more. The answ
 - A free endpoint that takes minutes on one lookup no longer takes the whole run with it: a lookup on a free model is abandoned after 90 seconds and Choya plates from what it has. One in-game run had sat 179 seconds on a single lookup and then timed out writing the build.
 - Gemini's closing request now carries an output cap, so a model that reasons at length cannot spend minutes on it.
 - `cargo run -p gw2-optimizer --example choya_live -- <provider> <model>` runs the real contract against the configured keys and prints PASS or FAIL with the request count. This is what "the model works" means from now on.
-
-### Reading Choya
-
-- A reply is shown whole. It used to be cut at 600 characters and end in three dots, with the rest thrown away before it reached the transcript.
-- Replies are laid out, not dumped: bullets on their own lines, names the game knows in the accent colour, bold names, italic asides, warning lines, rotations as `A → B → C`, web addresses underlined and clickable. Choya is asked for that shape and for facts over prose.
-- The comparison tabs say whose build each is: a blue Current tab for what is equipped, a green Optimized tab for what Choya or the optimizer made, and a tab in the site's colour named after the site for a published build. Opening a published build or loading a saved one adds a tab; nothing is replaced.
-- The published-build cards stay while you ask follow-up questions; only a new build replaces them.
-- When the model does not answer, the fallback answers what was asked: a scoring question gets the referee's verdict on the plated build, a build request gets the optimizer's build for the specialisation named, anything else gets a plain line with what to do next. A question about a Reaper no longer comes back as an optimizer run for another profession.
-- While Choya works, the bubble names the step and counts the seconds, says "nothing for N s" when nothing is arriving, and expands on click to the model's live reasoning, or its answer as it streams, or the tools it has called. There is no time limit on the wait any more; Stop ends it and keeps what arrived, Retry asks the model to continue from there. The addon log has one line per step with its duration and outcome.
 
 ### What the simulator now simulates in WvW
 
