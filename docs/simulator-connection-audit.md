@@ -301,6 +301,97 @@ Known approximation: population counting is arithmetic, not simulation. Extra fo
 
 ### 9.5 Necromancer catalogue
 
+US3 for the Necromancer, increment 1. The cache holds 108 Necromancer traits (9 lines x 12; the plan's 111 was the
+999 / 9 estimate). All 108 wiki pages were read on 2026-09-08 through the wiki API (wikitext, kept only in the
+session scratchpad); every record carries its page URL and read date. `data/normalized_effects/2026-01-13/wvw.json`
+gained 135 Necromancer entries for 104 traits: 59 executable records
+(OnShroudEnter 13, OnSkillUse 10, OnConditionApplied 10, OnHit 7, Conditional 6, OnShroudExit 3, OnCrit 3, OnBoonStripped 3, Periodic 2, OnBoonApplied 2), 3 records with an unresolved WvW number (Soul Barbs' competitive duration, Spiteful
+Spirit's strike coefficient: the pages state neither), and 73 coverage blocks (spirits 11, carapace 7, blight 6, shades 6, life siphon 5, barrier 4, ally state 3, recharge 3, trait skill 3, downed 2, incoming damage reduction 2, life force scaling 2, minions 2, weapon-scoped duration 2, PassiveNoEffect 1, condition damage heal 1, crit chance per stack 1, damage-scaled heal 1, disable trigger 1, dodge 1, elixir 1, fear damage 1, incoming condition duration 1, incoming healing 1, kill 1, life force threshold 1, marks 1, percent heal 1, revive 1). Fell Beacon
+and Spiteful Talisman need no entry: every fact of theirs is a percent the parser consumes. Path of Corruption
+and Plague Sending keep their Sprint 1 records.
+
+Mechanisms the catalogue needed on top of 9.2-9.4: a timed strike bonus a proc switches on
+(`ConditionalKind::Timed`: Dread, Soul Barbs), a conditional that holds while a foe prerequisite does
+(`ConditionalKind::Prerequisite`: Cold Shoulder, Close to Death, Wicked Corruption), a per-stack bonus on a
+foe condition (`ConditionalKind::PerFoeStack` and `EffectCategory::CritChancePct`: Decimate Defenses), the
+`Slot("Shroud_N")` scope for "shroud skill N" records, area heals counting allies, a periodic record that re-checks
+its prerequisite at its own interval, refusal traces as state changes, and an executed-from-facts set that also
+covers attribute facts the stat sheet consumes. One scheduler change: an affordable shroud entry now outranks
+weapon damage in `pick_skill` (the improviser used to leave a Reaper out of shroud for the whole production fight,
+which is why the cached build's entry records had no firing site); no `reaper_*` pin moved.
+
+Trait coverage audit (`trait_coverage_audit_lists_every_trait`, `docs/audit/trait-coverage.md`, cache build
+205780), the Necromancer row (Traits | facts | record | facts+record | PassiveNoEffect | NeedsMechanic | NoRecord |
+UnresolvedValue):
+
+```
+| Necromancer | 108 | 2 | 25 | 19 | 1 | 59 | 0 | 2 |
+```
+
+972 traits have rows (every trait a specialization line lists); 27 cached traits sit on no line.
+
+SC-001 (`reaper_cached_build_traits_are_simulated`, cached Reaper build, `#[ignore]`): **not met, 3 of 9**. The
+run:
+
+```
+1863 Bitter Chill: record
+829 Spiteful Fortitude: facts+record
+919 Dread: record
+1922 Shrouded Removal: record — on the line: needs: carapace
+860 Dark Defense: record — on the line: needs: carapace
+1940 Corrupter's Fervor: NeedsMechanic: carapace — on the line: needs: carapace
+2020 Chilling Nova: record
+2031 Decimate Defenses: facts+record
+1932 Blighter's Boon: facts+record
+viable true quality Provisional; fired: {"Awaken the Pain": 1, "Bitter Chill": 3, "Blighter's Boon": 44, "Chilling Nova": 2, "Dread": 3, "Shivers of Dread": 1, "Shrouded Removal": 2, "Siphoned Power": 12, "Spiteful Fortitude": 12}
+thread 'referee::tests::reaper_cached_build_traits_are_simulated' (1748644) panicked at crates\optimizer\src\referee.rs:1980:9:
+3 of the nine traits are on the coverage line: [CoverageEntry { name: "Armored Shroud", class: NeedsMechanic("carapace"), detail: None }, CoverageEntry { name: "Beyond the Veil", class: NeedsMechanic("carapace"), detail: None }, CoverageEntry { name: "Cold Shoulder", class: NeedsMechanic("incoming damage reduction"), detail: None }, CoverageEntry { name: "Corrupter's Fervor", class: NeedsMechanic("carapace"), detail: None }, CoverageEntry { name: "Dark Defense", class: NeedsMechanic("carapace"), detail: None }, CoverageEntry { name: "Death Shroud", class: NoRecord, detail: None }, CoverageEntry { name: "Shroud Knight", class: PassiveNoEffect, detail: None }, CoverageEntry { name: "Shrouded Removal", class: NeedsMechanic("carapace"), detail: None }, CoverageEntry { name: "Soul Comprehension", class: NeedsMechanic("kill"), detail: None }]
+test referee::tests::reaper_cached_build_traits_are_simulated ... FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1198 filtered out; finished in 1.04s
+```
+
+All three entries share one missing mechanic, Death's Carapace (a stacking toughness effect; the timeline's incoming
+strikes are absolute numbers, so toughness has no lever yet). Two of the three (Shrouded Removal, Dark Defense)
+execute their other half (cleanse on entry and every 3 s; Protection on the heal skill) and sit on the line for the
+carapace half only, as the contract says they must. The test keeps the spec's `<= 2` assertion and fails until
+carapace lands.
+
+SC-003 (`necro_published_ranks_by_its_triggers`, GuildJen Power Spite Reaper, `#[ignore]`, Party tier):
+
+```
+published: [1, 7, 216808, 301123, 360641, 0, 0, 0, 0] Provisional
+Decimate Defenses instead of Chilling Victory: [1, 7, 216891, 301238, 362388, 0, 0, 0, 0]
+Deathly Chill instead of Blighter's Boon: [1, 7, 216808, 301123, 360641, 0, 0, 0, 0]
+test referee::tests::necro_published_ranks_by_its_triggers ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1198 filtered out; finished in 1.04s
+```
+
+The trigger trait changes the rank key; the direction is the simulation's: Chilling Victory's Might feeds
+Blighter's Boon and moves the shroud cycle, and the swap lands 0.04 % above on the damage slots. Deathly Chill for
+Blighter's Boon leaves the key unchanged on this build (no chill in its kit). The test asserts the key moves.
+
+Wiki-number check (`records_match_their_wiki_pages`, `#[ignore]`, wikitext through the wiki API): 145 ok,
+4 mismatches:
+
+```
+MISMATCH sigil:44944:0 Superior Sigil of Bursting: 6 not on page
+MISMATCH trait:1693:0 Path of Corruption: 10 not on page
+MISMATCH trait:2021:0 Reaper's Onslaught: 20 not on page
+MISMATCH trait:829:0 Spiteful Fortitude: 50 not on page
+```
+
+Two are Sprint 2 records (Sigil of Bursting, Path of Corruption) left for that sprint's follow-up; Reaper's
+Onslaught carries 300 ferocity in shroud as +20 % critical damage (15 ferocity per point, the page states the
+ferocity), and Spiteful Fortitude's 50 % threshold is the tooltip's, not on the page. The rendered page hides the
+competitive numbers behind mode tabs, so the check reads wikitext (found on the first run: 50 mismatches, every
+one a competitive split).
+
+Known approximations: non-damaging conditions the records remove on the player pop any condition (`cleanse` is
+count-based); Speed of Shadows' three removals are three single cleanses; Life from Death heals the player and
+counts four allies at the record's coefficient; Unholy Sanctuary's 1 %-of-health heal, Eternal Life's threshold and
+every carapace, blight, shade, spirit and minion mechanic are coverage classes, not simulation. Full lib run after
+the step: 1 190 passed, 16.27 s.
+
 ### 9.6 Timing
 
 Sprint 2 baseline re-measured 2026-09-08 at `79e731d` before any Sprint 3 code: `cargo test -p gw2-optimizer --lib` reports `finished in` 19.08 s, 17.01 s, 16.65 s (1 157 tests, 5 ignored). SC-006 cap for Sprint 3: within 10 % of the median 17.01 s, i.e. under 18.7 s harness time on a warm run.

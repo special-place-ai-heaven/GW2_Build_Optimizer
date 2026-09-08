@@ -79,7 +79,6 @@ pub fn try_load_normalized_effects() -> Result<(), Vec<DataLoadError>> {
     )
 }
 
-
 #[derive(Debug, Error)]
 pub enum NormalizedEffectError {
     #[error("JSON parse error: {0}")]
@@ -87,7 +86,6 @@ pub enum NormalizedEffectError {
     #[error("validation error: {0}")]
     ValidationError(String),
 }
-
 
 /// The type of game entity that produces this effect.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -133,6 +131,9 @@ pub enum EffectCategory {
     GainsLifeForce,
     /// Flat self heal (`value`), plus `healing_power_coefficient` x healing power.
     Heal,
+    /// Critical chance in percentage points (Decimate Defenses: per stack
+    /// of the foe's vulnerability).
+    CritChancePct,
 }
 
 impl EffectCategory {
@@ -489,7 +490,6 @@ pub struct NormalizedEffect {
     pub coverage: Option<CoverageBlock>,
 }
 
-
 /// A single normalized effects file for one game mode in a specific patch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NormalizedEffectsFile {
@@ -497,7 +497,6 @@ pub struct NormalizedEffectsFile {
     pub mode: String,
     pub effects: Vec<NormalizedEffect>,
 }
-
 
 /// Container for all loaded normalized effects, keyed by (patch_id, mode).
 #[derive(Debug)]
@@ -572,7 +571,6 @@ impl NormalizedEffectsData {
         self.files.values().map(|f| f.effects.len()).sum()
     }
 }
-
 
 /// Parse and validate a single normalized effects file from JSON text.
 pub fn load_effects_file(json: &str) -> Result<NormalizedEffectsFile, NormalizedEffectError> {
@@ -652,8 +650,15 @@ fn validate_effects_file(file: &NormalizedEffectsFile) -> Result<(), NormalizedE
             )));
         }
 
-        // 9. A stacking effect needs a duration to expire by
-        if effect.max_stacks.is_some() && effect.effect_duration.is_none() {
+        // 9. A stacking effect needs a duration to expire by, unless the
+        // stacks are the foe's own condition stacks (Sprint 3: a Conditional
+        // with a foe_condition prerequisite scales per stack of it).
+        let per_foe_stack = effect.trigger_rule == TriggerRule::Conditional
+            && effect
+                .prerequisite
+                .as_ref()
+                .is_some_and(|p| p.foe_condition.is_some());
+        if effect.max_stacks.is_some() && effect.effect_duration.is_none() && !per_foe_stack {
             return Err(NormalizedEffectError::ValidationError(format!(
                 "effect '{}': max_stacks requires effect_duration",
                 effect.effect_id
@@ -711,7 +716,10 @@ fn validate_effects_file(file: &NormalizedEffectsFile) -> Result<(), NormalizedE
             return fail("healing_power_coefficient is only for Heal");
         }
         if effect.scale_by.is_some()
-            && !matches!(payload, EffectCategory::Heal | EffectCategory::GainsLifeForce)
+            && !matches!(
+                payload,
+                EffectCategory::Heal | EffectCategory::GainsLifeForce
+            )
         {
             return fail("scale_by is only for GainsLifeForce or Heal");
         }
@@ -758,7 +766,6 @@ pub(crate) mod tests_alias_helpers {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     fn minimal_effect(effect_id: &str) -> NormalizedEffect {
         NormalizedEffect {
@@ -878,11 +885,12 @@ mod tests {
             EffectCategory::TriggeredEffect,
             EffectCategory::GainsLifeForce,
             EffectCategory::Heal,
+            EffectCategory::CritChancePct,
         ];
         assert_eq!(
             variants.len(),
-            24,
-            "must test all 24 EffectCategory variants"
+            25,
+            "must test all 25 EffectCategory variants"
         );
         for v in variants {
             let json = serde_json::to_string(&v).unwrap();
@@ -1335,7 +1343,10 @@ mod tests {
             assert_eq!(parsed.trigger_rule, rule);
         }
         for (scope, text) in [
-            (TriggerScope::Category("Shout".into()), "{\"Category\":\"Shout\"}"),
+            (
+                TriggerScope::Category("Shout".into()),
+                "{\"Category\":\"Shout\"}",
+            ),
             (TriggerScope::Slot("Elite".into()), "{\"Slot\":\"Elite\"}"),
             (TriggerScope::Status("Fear".into()), "{\"Status\":\"Fear\"}"),
         ] {
@@ -1360,7 +1371,10 @@ mod tests {
         let json = serde_json::to_string(&effect).unwrap();
         assert!(json.contains("\"foe_condition\":\"Chilled\""), "{json}");
         assert!(json.contains("\"in_shroud\":true"), "{json}");
-        assert!(json.contains("\"scale_by\":\"ConditionsRemoved\""), "{json}");
+        assert!(
+            json.contains("\"scale_by\":\"ConditionsRemoved\""),
+            "{json}"
+        );
         assert!(json.contains("\"healing_power_coefficient\":0.1"), "{json}");
         let parsed: NormalizedEffect = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, effect);
@@ -1393,7 +1407,10 @@ mod tests {
 
         let mut e = minimal_effect("periodic");
         e.trigger_rule = TriggerRule::Periodic;
-        rejected(e.clone(), "Periodic trigger_rule requires internal_cooldown");
+        rejected(
+            e.clone(),
+            "Periodic trigger_rule requires internal_cooldown",
+        );
         e.internal_cooldown = Some(FactualValue::Resolved(3.0));
         assert!(validate_effects_file(&wvw_file(vec![e])).is_ok());
 
@@ -1436,10 +1453,30 @@ mod tests {
     #[test]
     fn sprint2_records_still_load() {
         let file: NormalizedEffectsFile = serde_json::from_str(WVW_EFFECTS_JSON).unwrap();
-        assert!(file.effects.len() >= 14, "{}", file.effects.len());
         validate_effects_file(&file).unwrap();
-        assert!(file
+        const SPRINT2_IDS: [&str; 14] = [
+            "trait:1338:0",
+            "rune:24836:0",
+            "rune:24836:1",
+            "sigil:24615:0",
+            "sigil:44944:0",
+            "trait:1711:0",
+            "trait:1069:0",
+            "sigil:24548:0",
+            "trait:681:0",
+            "trait:1693:0",
+            "skill:9120:0",
+            "trait:2013:0",
+            "trait:553:0",
+            "relic:100916:0",
+        ];
+        let sprint2: Vec<&NormalizedEffect> = file
             .effects
+            .iter()
+            .filter(|e| SPRINT2_IDS.contains(&e.effect_id.as_str()))
+            .collect();
+        assert_eq!(sprint2.len(), 14, "the Sprint 2 regression set");
+        assert!(sprint2
             .iter()
             .all(|e| e.coverage.is_none() && e.prerequisite.is_none()));
     }
@@ -1455,7 +1492,27 @@ mod tests {
                     || (effect.category == EffectCategory::ProcEffect
                         && effect.value.is_resolved()
                         && matches!(effect.value, FactualValue::Resolved(v) if v <= 2.0));
-                if sprint2 {
+                // Sprint 3 (specs/007-trait-triggers): a prerequisite, a
+                // coverage block, a scale, a healing coefficient, a new
+                // trigger kind or a new category all need a dated source.
+                let sprint3 = effect.prerequisite.is_some()
+                    || effect.coverage.is_some()
+                    || effect.scale_by.is_some()
+                    || effect.healing_power_coefficient.is_some()
+                    || matches!(
+                        effect.trigger_rule,
+                        TriggerRule::OnShroudEnter
+                            | TriggerRule::OnShroudExit
+                            | TriggerRule::OnConditionApplied
+                            | TriggerRule::OnBoonApplied
+                            | TriggerRule::OnBoonStripped
+                            | TriggerRule::Periodic
+                    )
+                    || matches!(
+                        effect.inner_category.as_ref().unwrap_or(&effect.category),
+                        EffectCategory::GainsLifeForce | EffectCategory::Heal
+                    );
+                if sprint2 || sprint3 {
                     assert!(
                         effect
                             .source
