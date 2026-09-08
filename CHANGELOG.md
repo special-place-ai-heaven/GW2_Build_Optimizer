@@ -2,6 +2,10 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.5 - 2026-09-09
+
+- Armor and trinket rows of an optimized build show an icon again. A plate names its gear by stat prefix and slot with no item id, so those rows had nothing to look up; they now take the icon of a cached exotic (else ascended) piece of that slot, armour weight and prefix, the way weapon rows already fell back to the weapon type.
+
 ## 1.14.4 - 2026-09-08
 
 Sprint 3 convergence: Death's Carapace, the Scourge's shroud skills and a clean wiki check.

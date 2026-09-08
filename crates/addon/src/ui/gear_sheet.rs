@@ -295,6 +295,15 @@ fn render_resolved_sheet(
             let name = piece.map(|p| p.name.as_str()).unwrap_or("");
             let url = db.and_then(|d| piece.and_then(|p| icons::item_url(d, p.id)));
             let suggested = sug_prefix(slot);
+            let shown = if prefix.is_empty() {
+                suggested.as_str()
+            } else {
+                prefix
+            };
+            let fallback = db
+                .filter(|_| url.is_none())
+                .and_then(|d| icons::gear_slot_url(d, &build.profession, slot, shown));
+            let url = url.or(fallback.as_deref());
             let changed = suggestion.is_some()
                 && (prefix != suggested && !suggested.is_empty() || rune_name != sug_rune);
             let other = suggestion.map(|_| format!("{} {}", sug_prefix(slot), slot_label(slot)));
@@ -323,6 +332,15 @@ fn render_resolved_sheet(
             let name = piece.map(|p| p.name.as_str()).unwrap_or("");
             let url = db.and_then(|d| piece.and_then(|p| icons::item_url(d, p.id)));
             let suggested = sug_prefix(slot);
+            let shown = if prefix.is_empty() {
+                suggested.as_str()
+            } else {
+                prefix
+            };
+            let fallback = db
+                .filter(|_| url.is_none())
+                .and_then(|d| icons::gear_slot_url(d, &build.profession, slot, shown));
+            let url = url.or(fallback.as_deref());
             let changed = suggestion.is_some() && prefix != suggested && !suggested.is_empty();
             let other = suggestion.map(|_| format!("{} {}", sug_prefix(slot), slot_label(slot)));
             let mut buf = [GearSlot::Helm];
@@ -459,10 +477,14 @@ fn render_suggestion_sheet(
                 )
             });
             let mut buf = [GearSlot::Helm];
+            let url = db.and_then(|d| cur.and_then(|p| icons::item_url(d, p.id)));
+            let fallback = db
+                .filter(|_| url.is_none())
+                .and_then(|d| icons::gear_slot_url(d, &current.profession, slot, suggested));
             row(
                 ui,
                 db,
-                db.and_then(|d| cur.and_then(|p| icons::item_url(d, p.id))),
+                url.or(fallback.as_deref()),
                 suggested,
                 slot_label(slot),
                 cur.map(|p| p.name.as_str()).unwrap_or(""),
@@ -487,10 +509,14 @@ fn render_suggestion_sheet(
             let suggested = sug_prefix_for_piece(sug, slot);
             let other = cur.map(|p| format!("{} {}", p.stat_prefix, slot_label(slot)));
             let mut buf = [GearSlot::Helm];
+            let url = db.and_then(|d| cur.and_then(|p| icons::item_url(d, p.id)));
+            let fallback = db
+                .filter(|_| url.is_none())
+                .and_then(|d| icons::gear_slot_url(d, &current.profession, slot, suggested));
             row(
                 ui,
                 db,
-                db.and_then(|d| cur.and_then(|p| icons::item_url(d, p.id))),
+                url.or(fallback.as_deref()),
                 suggested,
                 slot_label(slot),
                 cur.map(|p| p.name.as_str()).unwrap_or(""),
