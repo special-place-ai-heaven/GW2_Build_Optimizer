@@ -5760,6 +5760,49 @@ mod reaper_experiments {
         );
     }
 
+    // ── Polish (T056): determinism and the trace cap ────────────────────────
+
+    /// SC-004: ten evaluations of the fixture, trials included, are identical.
+    #[test]
+    fn reaper_results_repeat_identically() {
+        let first = traced(&fx::build(), None);
+        for _ in 0..9 {
+            let again = traced(&fx::build(), None);
+            assert_eq!(again.total_damage, first.total_damage);
+            assert_eq!(again.healing, first.healing);
+            assert_eq!(again.unmodeled_sources, first.unmodeled_sources);
+            assert_eq!(again.shroud_refusals, first.shroud_refusals);
+            assert_eq!(again.trace, first.trace);
+            assert_eq!(again.proc_trials, first.proc_trials);
+        }
+        assert!(
+            first
+                .proc_trials
+                .iter()
+                .any(|t| t.source == "Superior Sigil of Fire"),
+            "the trials ran: {:?}",
+            first.proc_trials
+        );
+    }
+
+    /// The fixture opener with every Sprint 2 event kind on stays under the
+    /// 512-event cap.
+    #[test]
+    fn reaper_trace_fits_under_cap() {
+        let report = traced_open(&fx::build(), &fx::opener(), 20_000);
+        assert!(
+            !report.trace_truncated,
+            "{} events, cap {TRACE_CAP}",
+            report.trace.len()
+        );
+        let production = traced(&fx::build(), None);
+        assert!(
+            !production.trace_truncated,
+            "{} events on the production profile, cap {TRACE_CAP}",
+            production.trace.len()
+        );
+    }
+
     // ── Diagnostics (T022) ──────────────────────────────────────────────────
 
     #[test]

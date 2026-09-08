@@ -154,3 +154,77 @@ Budget (SC-003): `cargo test -p gw2-optimizer --lib` after all experiments: 1129
 - No calibrated constant, gate, threshold or formula changed. The `Provisional` classification fires in exactly the cases it did before (any non-empty list), because the list is the old count with names.
 - Bound added for CONN-00-11: three full-build `score_build` evaluations per chat request (`chat_flow.rs::full_build_budget`); threading `is_cancelled` into `simulate_prepared` stays a follow-up.
 - In-game check (quickstart): not run this sprint — the release condition (free models answer and a player produced a build with Choya on the latency DLL) has not been confirmed, so the commits stay local.
+
+## 8. Sprint 2 — WvW proc firing sites (`specs/005-wvw-proc-sites`)
+
+Baseline for this section: branch `005-wvw-proc-sites` off `6e4820c`; commits `ce7b32c` (foundation + US1), `e531a75` (US2), `ee4b62f` (US3), `ebae1c1` (US4), `8fd944b` (US5), `7f85e08` (US6). Every control below was seen failing before its mechanism existed and again under `python docs/audit/disable_and_run.py <entry>`; the quoted blocks are in `docs/audit/sprint2-failures.md`.
+
+### Findings closed or moved
+
+| ID | Status | What changed |
+|---|---|---|
+| CONN-00-06 | closed (WvW) | `TriggerRule::OnCrit` has a firing site in `apply_skill_effect` at the crit chance the damage line prices in. Ranking uses expected value with a probability mass that starts the cooldown (R1); the trace runs eight seeded Bernoulli trials and reports mean/min/max per source (`WvwCombatReport.proc_trials`). |
+| CONN-00-07 | closed | `active_normalized_effects` selects records for both weapon sets and returns each sigil's set; `ProcSpec.weapon_set` and `held_set_for` fire a sigil only for hits cast on its set; cooldowns persist across swaps; a set-2 sigil with a record leaves the coverage line. |
+| CONN-01-01 | closed (WvW) | `OnHealthThreshold` and stacking `OnHit` strike records become `ConditionalSpec`s evaluated per strike and per tick; the parser keeps flattening health-gated rune clauses everywhere and tags them (`DamageModifiers.conditional_strike`), and only the WvW branch divides an executed clause out of `strike_mult` (`wvw_params_without_executed_conditionals`). PvE/PvP output is byte-identical (`pve_output_unchanged_by_conditional_tagging`). |
+| CONN-01-02 | closed (WvW, dark arm) | `resolve_combo` dark arm: whirl = leeching bolt (198 + 0.03 power, 170 + 0.05 healing power; one bolt per activation, the page states no count), leap = Dark Aura 5 s, blast = area Dark Aura 3 s (incoming condition damage −20 %), projectile = life stealing left named unread. |
+| CONN-00-01 | closed for life force | `ResourceKind::LifeForce` (69 % of health), rules from `Life Force` / `Life Force Per Hit` facts and `data/formulas/shroud.json` (10 % entry floor, per-mode drain and reduction), the shroud bar prepared from the core entry skill's `transform_skills`, `SHROUD_SET` as the held set in shroud. |
+| CONN-00-09 | closed | `resource_model_complete` is derived: rules non-empty and every skill that names a resource (initiative, cost, a shroud entry, a life force fact) has one. Pinned for nine professions (`resource_model_completeness_matches_previous_list`): Thief, Revenant, Warrior, Mesmer, Necromancer complete; Guardian, Elementalist, Engineer, Ranger not. |
+| CONN-01-05 | re-recorded | With the fixture's shroud bar moved to the shroud set (a fixture change), the PvE simulator no longer holds Infusing Terror in the 2 s window and a strike lands: gate-sim DPS is no longer zero. The PvE guard was re-pinned once for the same change. |
+| CONN-01-03 | open | PvE and PvP still execute no records; the adaptive scheduler ignores `SHROUD_SET` skills (as it never prepared them before). |
+| CONN-01-06 | open | "(no record)" still lists executed weapon skills; the fixture's production coverage line is 40 names, all "(no record)", none of them a sigil, rune or relic any more. |
+
+### Experiments added
+
+| kind | test | disabled by (harness entry) | seen failing | passes now |
+|---|---|---|---|---|
+| positive control (on-crit) | `reaper_oncrit_positive_control_fires_from_crits` | `oncrit`: the OnCrit call gated off | `the on-crit sigil fires from the opener's critical hits; trace: [ProcUnmodeled "Superior Sigil of Fire (on-crit)" "no firing site" …]` | `ProcFired` for the sigil, absent from the coverage line, more total damage than without it |
+| negative control (zero crit) | `reaper_oncrit_zero_precision_never_fires` | guard | passes before and after | no `ProcFired`, total damage equal to the bare build within 1e-9 |
+| timing (cooldown) | `reaper_oncrit_icd_bounds_rate` | `oncrit` | `one fire inside one 5 s cooldown window … left: 0 right: 1` | exactly one fire, later hits `ProcSkippedIcd` |
+| trials bracket expected value | `reaper_oncrit_trials_bracket_expected_value` | `oncrit` | `trials exist for the sigil: []` | mean within one proc of the expected count; production fixture: `ProcTrial { mean: 1.0, min: 1, max: 1 }` |
+| positive/negative (swap) | `reaper_swap_loads_set_two_sigils` | `swap`: set 2 mapped to set 1 | `set-2 sigil fires only after the swap at 1350 ms: []` | fires only after the swap; moved to set 1, only before |
+| timing (swap) | `reaper_swap_keeps_icd_across_sets` | guard | passes before and after | one cooldown across the swap |
+| coverage (swap) | `reaper_set_two_sigil_leaves_coverage_line` | `swap` | `the stowed sigil's record is loaded (it has a trial entry): []` | trial entry present, not named |
+| positive/negative (threshold) | `reaper_scholar_applies_only_above_threshold` | `threshold`: threshold forced true | `the threshold is true at the start of the fight: []` | `ConditionalActivated` at 0 ms, ×1.05 above, `ConditionalExpired` at the crossing, no bonus below |
+| timing (stacks) | `reaper_thief_stacks_cap_and_expire` | `stack`: cap removed | `six qualifying weapon-skill hits gain or refresh: []` | 5/5 reached and refreshed, expiry 6 s after the last gain |
+| unresolved stays named | `reaper_unresolved_conditional_stays_named` | — | `named as unresolved: ["Superior Rune of the Scholar (on-health-threshold)"]` | "(unresolved value)", no activation |
+| PvE guard | `pve_output_unchanged_by_conditional_tagging` | — | pinned before the parser change | identical to 1e-9 |
+| positive (dark combo) | `reaper_dark_whirl_life_steals` | `dark`: arm returns to the degraded note | `the dark whirl combo resolves: []` | `ComboResolved "Dark field + Whirl finisher → leeching bolt"`, heals and damages, degraded note gone |
+| negative (expired field) | `reaper_expired_field_makes_no_combo` | guard | passes before and after | no combo after 5 s |
+| real records | `reaper_cached_build_has_recorded_sources` (`#[ignore]`, dev.cfg) | — | — | cached Reaper build (Inquisitor of Pain tab 1: Dolyak, Celerity, Leeching, Energy, Nullification — no records) evaluates; with Fire, Scholar, Thief swapped in all three execute and leave the coverage line |
+| refusal (shroud) | `reaper_shroud_refused_without_life_force` | `shroud_floor`: entry floor ignored | `entry refused: [… no ShroudRefused …]` | `Reaper's Shroud needs 10% life force, had 6%` before any entry |
+| gain and cap (life force) | `reaper_life_force_gain_capped` | `shroud_floor` run | `Gravedigger's 8 % fact is credited: []` | `LifeForceGained "8% → 8%"`, a 1e9 gain caps at the pool |
+| timing (drain and exit) | `reaper_shroud_drains_and_exits` | `drain`: drain zeroed | `entered after the generators: [… no ShroudEntered …]` | entered at 14 %, `ShroudExited "life force 0"` within 2–3.5 s, no weapon skill lands inside |
+| builder (shroud bar) | `shroud_bar_is_prepared_from_transform_skills` | — | could not compile before `shroud_bar_for_build` | Reaper ids in slot order, core five for a core build, nothing for a Warrior |
+| completeness rule | `resource_model_completeness_matches_previous_list` | — | Necromancer `false` under the allowlist | nine professions pinned |
+| determinism | `reaper_results_repeat_identically` | — | — | ten runs identical, trials included |
+| trace cap | `reaper_trace_fits_under_cap` | — | — | under 512 on both profiles |
+
+### Re-recorded anchors
+
+The fixture opener is now Gravedigger, Death Spiral, Well of Suffering, Reaper's Shroud, Soul Spiral, Life Rend (generators first: life force starts at zero and shroud needs 10 %). The open-profile trace, 2026-09-08:
+
+```
+400 HitLanded Gravedigger 1120.5 · 750 LifeForceGained Gravedigger 8% → 8% · 1800 LifeForceGained Death Spiral 6% → 14%
+2100–2500 HitLanded Well of Suffering 149.4 ×5 · 2500 LifeForceGained Well of Suffering 5% → 19%
+2700 ShroudEntered Reaper's Shroud 19% life force · 3750–4150 HitLanded Soul Spiral 70.0 ×8 · 4150 ComboResolved Soul Spiral Dark field + Whirl finisher → leeching bolt
+4850 HitLanded Life Rend 1307.2 · 5950–6250 HitLanded Death's Charge 311.2 ×3 · 6550 CastInterrupted Life Rend 1 hits lost · 6550 ShroudExited Reaper's Shroud life force 0
+totals: damage 19448.8, combos 1, refusals none
+```
+
+Section 6's anchor `[HitLanded Well of Suffering 149.4 … Soul Spiral 70.0]` for the Sprint 1 positive control is superseded by the order above; the experiment itself is unchanged and passes.
+
+### Test budget
+
+Sprint 1 baseline: optimizer lib harness 16.80 s (16.46–16.83 s). Sprint 2 runs this session: 16.57, 16.61, 16.79, 16.86, 16.95, 17.20, 17.48, 17.84, 18.00, 19.01 s, with 1 154 tests against 1 129. Growth is under 2.5 s, inside the 10 s cap (FR-011). The eight-seed trial pass runs only under `trace`, in tests. The cached-build test is `#[ignore]`.
+
+### T042 finding: no trait records for the cached Reaper build
+
+The cached build's nine traits (Bitter Chill, Spiteful Fortitude, Dread, Shrouded Removal, Dark Defense, Corrupter's Fervor, Chilling Nova, Decimate Defenses, Blighter's Boon) got no record: Chilling Nova is on-crit against a *chilled* foe, an enemy-condition prerequisite the record schema and the runtime have no field for; Dread is a trait-owned on-skill-use (only skill-owned ones fire); Spiteful Fortitude and Blighter's Boon are life force gains that US6 reads from facts; the rest are passives or carapace mechanics. Follow-ups: an enemy-condition prerequisite on `NormalizedEffect`, trait-owned `OnSkillUse`, and the `Life Force per 3 Seconds` / `When Ending` fact variants, which the rules skip.
+
+### Known approximations added
+
+- Expected-value scaling of stack and count operations rounds to the nearest whole stack (`apply_operation`).
+- One leeching bolt per whirl activation (the wiki states no count).
+- Dark Aura's torment-on-strike retaliation is not modeled.
+- Overflow damage past the life force pool reaches health at the reduced value.
+- A shroud entry the pool cannot afford is skipped in the opener with a reason, not queued.
