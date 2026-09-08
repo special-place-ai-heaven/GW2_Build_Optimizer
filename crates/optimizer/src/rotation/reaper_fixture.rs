@@ -50,6 +50,8 @@ pub const SHROUD_1: u32 = 30021;
 pub const SHROUD_2: u32 = 30022;
 pub const SHROUD_3: u32 = 30023;
 pub const SHROUD_4: u32 = 30024;
+/// The entry skill's flip: exits shroud (wiki `Death Shroud`).
+pub const EXIT_SHROUD: u32 = 30025;
 pub const SIGNET_OF_VAMPIRISM: u32 = 30030;
 pub const WELL_OF_SUFFERING: u32 = 30031;
 pub const WELL_OF_DARKNESS: u32 = 30032;
@@ -194,19 +196,28 @@ pub fn db() -> GameDb {
     let skills = vec![
         skill_json(GS_AUTO, "Dusk Strike", "Weapon_1", damage(1, 0.9, 0.0), ""),
         // Two hits so the channel-interrupt timing experiment has a later
-        // hit to lose. Real Gravedigger is one hit; this is a fixture.
+        // hit to lose. Real Gravedigger is one hit; this is a fixture. The
+        // Life Force facts feed the shroud experiments (US6).
         skill_json(
             GRAVEDIGGER,
             "Gravedigger",
             "Weapon_2",
-            damage(2, 1.2, 8.0),
+            serde_json::json!([
+                {"type": "Damage", "hit_count": 2, "dmg_multiplier": 1.2},
+                {"type": "Percent", "text": "Life Force", "percent": 8.0},
+                {"type": "Recharge", "value": 8.0}
+            ]),
             "",
         ),
         skill_json(
             DEATH_SPIRAL,
             "Death Spiral",
             "Weapon_3",
-            damage(3, 0.55, 12.0),
+            serde_json::json!([
+                {"type": "Damage", "hit_count": 3, "dmg_multiplier": 0.55},
+                {"type": "Percent", "text": "Life Force", "percent": 6.0},
+                {"type": "Recharge", "value": 12.0}
+            ]),
             "",
         ),
         skill_json(
@@ -242,7 +253,11 @@ pub fn db() -> GameDb {
             GHASTLY_CLAWS,
             "Ghastly Claws",
             "Weapon_2",
-            damage(8, 0.2, 8.0),
+            serde_json::json!([
+                {"type": "Damage", "hit_count": 8, "dmg_multiplier": 0.2},
+                {"type": "Percent", "text": "Life Force", "percent": 12.0},
+                {"type": "Recharge", "value": 8.0}
+            ]),
             "",
         ),
         skill_json(
@@ -266,6 +281,9 @@ pub fn db() -> GameDb {
             damage(1, 0.9, 25.0),
             "",
         ),
+        // The shroud: entry skill with its flip, and the bar skills the
+        // way the API lists them — `transform_skills` on the entry skill,
+        // `Downed_*` slots and the elite specialization on each (R6).
         skill_json(
             REAPER_SHROUD,
             "Reaper's Shroud",
@@ -274,23 +292,24 @@ pub fn db() -> GameDb {
             "",
         ),
         skill_json(
-            SHROUD_1,
-            "Life Rend",
+            EXIT_SHROUD,
+            "Exit Reaper's Shroud",
             "Profession_1",
-            damage(1, 0.7, 0.0),
+            serde_json::json!([]),
             "",
         ),
+        skill_json(SHROUD_1, "Life Rend", "Downed_1", damage(1, 0.7, 0.0), ""),
         skill_json(
             SHROUD_2,
             "Death's Charge",
-            "Profession_2",
+            "Downed_2",
             damage(3, 0.5, 8.0),
             "",
         ),
         skill_json(
             SHROUD_3,
             "Infusing Terror",
-            "Profession_3",
+            "Downed_3",
             serde_json::json!([
                 {"type": "Buff", "status": "Stability", "duration": 3, "apply_count": 3},
                 {"type": "Recharge", "value": 20.0}
@@ -301,7 +320,7 @@ pub fn db() -> GameDb {
         skill_json(
             SHROUD_4,
             "Soul Spiral",
-            "Profession_4",
+            "Downed_4",
             serde_json::json!([
                 {"type": "Damage", "hit_count": 8, "dmg_multiplier": 0.3},
                 {"type": "ComboFinisher", "finisher_type": "Whirl", "percent": 100},
@@ -325,6 +344,7 @@ pub fn db() -> GameDb {
                 {"type": "Damage", "hit_count": 5, "dmg_multiplier": 0.4},
                 {"type": "ComboField", "field_type": "Dark"},
                 {"type": "Time", "text": "Duration", "duration": 5},
+                {"type": "Percent", "text": "Life Force", "percent": 5.0},
                 {"type": "Recharge", "value": 35.0}
             ]),
             "",
@@ -361,7 +381,17 @@ pub fn db() -> GameDb {
             "",
         ),
     ];
-    for skill in skills {
+    for mut skill in skills {
+        match skill.id {
+            REAPER_SHROUD => {
+                skill.transform_skills = vec![SHROUD_1, SHROUD_2, SHROUD_3, SHROUD_4];
+                skill.flip_skill = Some(EXIT_SHROUD);
+            }
+            SHROUD_1 | SHROUD_2 | SHROUD_3 | SHROUD_4 => {
+                skill.specialization = Some(SPEC_REAPER);
+            }
+            _ => {}
+        }
         db.skills_by_profession
             .entry("Necromancer".into())
             .or_default()
@@ -555,13 +585,9 @@ pub fn build() -> ValidatedBuild {
                 Some((YOU_ARE_ALL_WEAKLINGS, "\"You Are All Weaklings!\"".into())),
             ],
             elite: Some((CHILLED_TO_THE_BONE, "\"Chilled to the Bone!\"".into())),
-            profession: vec![
-                (REAPER_SHROUD, "Reaper's Shroud".into()),
-                (SHROUD_1, "Life Rend".into()),
-                (SHROUD_2, "Death's Charge".into()),
-                (SHROUD_3, "Infusing Terror".into()),
-                (SHROUD_4, "Soul Spiral".into()),
-            ],
+            // The shroud bar itself comes from the entry skill's
+            // `transform_skills` in the builder, as it does for real data.
+            profession: vec![(REAPER_SHROUD, "Reaper's Shroud".into())],
         },
         rune: Some(ValidatedItem {
             id: RUNE_OF_THE_SCHOLAR,
@@ -664,12 +690,15 @@ pub fn opener_with_swap() -> Vec<u32> {
     vec![GRAVEDIGGER, GHASTLY_CLAWS]
 }
 
-/// Press order for the pinned experiments.
+/// Press order for the pinned experiments. Since Sprint 2 the generators
+/// come first: life force starts at zero and shroud needs 10 % of the pool
+/// (Gravedigger 8 % + Death Spiral 6 % + Well 5 %), so the shroud entry
+/// moved behind them. Sprint 1's audit anchors were re-recorded (section 8).
 pub fn opener() -> Vec<u32> {
     vec![
-        WELL_OF_SUFFERING,
         GRAVEDIGGER,
         DEATH_SPIRAL,
+        WELL_OF_SUFFERING,
         REAPER_SHROUD,
         SHROUD_4,
         SHROUD_1,

@@ -1243,6 +1243,16 @@ pub fn evaluate_validated_build_with(
                     "The active profession mechanic is outside the bounded resource ledger".into(),
             });
         }
+        // A refused shroud entry is a rotation fact the player can act on,
+        // not a data-quality downgrade.
+        for refusal in &fight.shroud_refusals {
+            quality_reasons.push(DataQualityReason {
+                field: "wvw_timeline.resources".into(),
+                entity: profession_name.into(),
+                modes: vec![ctx.game_mode.label().to_string()],
+                explanation: refusal.clone(),
+            });
+        }
     }
 
     RefereeReport {
@@ -3221,7 +3231,10 @@ coverage: {:?}",
 
     /// FR-010 guard (Sprint 2, T029): tagging conditional clauses in the
     /// parser and dividing them out on the WvW path must not move a single
-    /// PvE number. Pinned before the parser change (commit e531a75).
+    /// PvE number. Pinned before the parser change (commit e531a75) and
+    /// re-pinned once in T053, when the fixture's shroud bar moved from the
+    /// always-available profession list to the shroud set (a fixture
+    /// change: the PvE simulator never held those skills for a real build).
     #[test]
     fn pve_output_unchanged_by_conditional_tagging() {
         use crate::rotation::reaper_fixture as fx;
@@ -3248,13 +3261,13 @@ coverage: {:?}",
             report.user_intent_score,
         ];
         const PINNED: [f64; 7] = [
-            0.01988142845871873,
+            0.026692371089119985,
             0.0,
-            0.05594285714285714,
+            0.014171428571428571,
             0.15,
             0.4302897574123989,
-            0.03833333333333334,
-            0.09310281831080738,
+            0.05722222222222222,
+            0.09311752151262398,
         ];
         for (i, (g, p)) in got.iter().zip(&PINNED).enumerate() {
             assert!(
@@ -3288,18 +3301,19 @@ coverage: {:?}",
             rotation.wvw.is_none(),
             "PvE never runs the timeline; the opener is not pressed and no record executes (CONN-01-03)"
         );
-        // The 2 s PvE Solo gate window is spent on setup-priority casts (the
-        // elite and the stability skill), so the gate simulation lands no
-        // strike at all for this kit (CONN-01-05); the 60 s flow simulation
-        // behind `realized` does.
         assert!(
             report.realized.power > 0.0,
             "the adaptive flow scheduler produced strike damage: {:?}",
             report.realized
         );
-        assert_eq!(
-            rotation.total_dps, 0.0,
-            "gate-sim DPS in the 2 s PvE Solo window is zero for this kit (CONN-01-05);              if this changes, update the audit"
+        // Sprint 1 recorded a zero gate-sim DPS in the 2 s PvE Solo window
+        // (CONN-01-05): the setup priority spent it on the elite and the
+        // stability skill. With the fixture's shroud bar moved to the shroud
+        // set (Sprint 2, T053) the PvE simulator no longer holds Infusing
+        // Terror, and a strike lands inside the window. Audit section 8.
+        assert!(
+            rotation.total_dps > 0.0,
+            "gate-sim DPS in the 2 s PvE Solo window (CONN-01-05, re-recorded in Sprint 2)"
         );
     }
 }
