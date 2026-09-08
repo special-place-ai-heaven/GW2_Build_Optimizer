@@ -3025,7 +3025,7 @@ impl<'a> Timeline<'a> {
                     // "shroud skill N"); otherwise the slot head before `_`.
                     if let Some(n) = slot.strip_prefix("Shroud_") {
                         return s.weapon_set == super::SHROUD_SET
-                            && s.slot_name.as_deref() == Some(&format!("Weapon_{n}"));
+                            && s.slot_name.as_deref() == Some(format!("Weapon_{n}").as_str());
                     }
                     s.slot_name.as_deref().is_some_and(|name| {
                         name.split('_')

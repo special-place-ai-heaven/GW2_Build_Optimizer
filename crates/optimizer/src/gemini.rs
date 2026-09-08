@@ -504,7 +504,6 @@ impl Drop for RateReserve<'_> {
     }
 }
 
-
 #[derive(Serialize)]
 struct GenerateRequest {
     contents: Vec<Content>,
@@ -851,7 +850,6 @@ fn consume_success_body<R: std::io::Read>(
 fn gemini_http_client() -> Result<reqwest::blocking::Client, GeminiError> {
     http_client().map_err(|e| GeminiError::Http(e.to_string()))
 }
-
 
 #[derive(Deserialize)]
 struct Candidate {

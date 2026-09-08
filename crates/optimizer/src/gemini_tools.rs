@@ -1935,7 +1935,6 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
     })
 }
 
-
 /// A full kit of one prefix, priced the same way the optimizer prices one.
 ///
 /// Walking the raw `EQUIPMENT_SLOTS` table counted **all sixteen** entries,

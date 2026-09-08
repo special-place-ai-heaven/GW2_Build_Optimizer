@@ -35,7 +35,6 @@ use gw2_optimizer::validation::validate_gemini_build;
 use serde_json::{json, Value};
 use std::time::Instant;
 
-
 fn gemini_key() -> String {
     std::env::var("GEMINI_API_KEY").expect("Set GEMINI_API_KEY env var to run this test")
 }

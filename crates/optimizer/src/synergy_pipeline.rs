@@ -77,7 +77,6 @@ struct SynergyCandidate {
     synergy_links: Vec<SynergyLink>,
 }
 
-
 /// Run the full deterministic synergy pipeline.
 /// Returns a SynergyResult with a fully determined build.
 /// [`optimize_synergy_cancellable`] with a probe that never fires.
