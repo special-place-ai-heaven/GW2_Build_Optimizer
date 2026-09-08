@@ -1239,6 +1239,13 @@ pub fn prepare_validated_rotation(
         &validated.skills.profession
     };
     non_weapon_ids.extend(profession_skills.iter().map(|(id, _)| *id));
+    // The Necromancer shroud bar: held only in shroud (`SHROUD_SET`).
+    let shroud_ids: Vec<u32> =
+        rotation::builder::shroud_bar_for_build(db, profession_name, &equipped_spec_ids)
+            .into_iter()
+            .map(|(id, _)| id)
+            .filter(|id| !non_weapon_ids.contains(id))
+            .collect();
 
     let mut set1_ids: Vec<u32> = Vec::new();
     let mut set2_ids: Vec<u32> = Vec::new();
@@ -1281,6 +1288,12 @@ pub fn prepare_validated_rotation(
         set1_skills,
         set2_skills,
     ));
+    let mut shroud_skills =
+        rotation::builder::build_rotation_skills_for_context(&shroud_ids, db, &sim_ctx);
+    for skill in &mut shroud_skills {
+        skill.weapon_set = rotation::SHROUD_SET;
+    }
+    rotation_skills.extend(shroud_skills);
     let ne = crate::data::normalized_effects::effects().effects_for_mode(mode.label());
     // Traited cleanses (Cleansing Ire bursts, Restorative Illusions shatters)
     // count only when the build runs the trait.
@@ -1409,8 +1422,14 @@ fn simulate_prepared_with(
     if let Some(scenario) = scenario.filter(|scenario| scenario.game_mode == GameMode::WvW) {
         let (active_effects, unmodeled_sources, sigil_sets) =
             active_normalized_effects(validated, rotation_skills, db, mode.label());
-        let (resource_rules, resource_model_complete) =
-            wvw_resource_rules(validated, rotation_skills, db, profession_name, &sim_ctx);
+        let (resource_rules, resource_model_complete) = wvw_resource_rules(
+            validated,
+            rotation_skills,
+            db,
+            profession_name,
+            &sim_ctx,
+            params.max_health,
+        );
         let wvw_params = wvw_params_without_executed_conditionals(
             params,
             &prepared.conditional_strike,
@@ -1757,12 +1776,69 @@ fn source_type_tag(source_type: &crate::data::normalized_effects::SourceType) ->
     }
 }
 
-fn wvw_resource_rules(
+/// A skill's life force facts: `("Life Force", "Life Force Per Hit")` shares
+/// of the pool. The "per 3 Seconds" and "When Ending" variants are not
+/// modeled (a known approximation, audit section 8).
+fn life_force_fact_shares(skill: &gw2_api::models::Skill) -> (f64, f64) {
+    use gw2_api::models::facts::Fact;
+    let mut on_use = 0.0;
+    let mut per_hit = 0.0;
+    for fact in &skill.facts {
+        if let Fact::Percent {
+            text: Some(text),
+            percent: Some(percent),
+            ..
+        } = fact
+        {
+            match text.as_str() {
+                "Life Force" => on_use += percent / 100.0,
+                "Life Force Per Hit" => per_hit += percent / 100.0,
+                _ => {}
+            }
+        }
+    }
+    (on_use, per_hit)
+}
+
+/// A shroud entry skill: the profession's F1 with a flip (exit) skill.
+fn is_shroud_entry(skill: &gw2_api::models::Skill) -> bool {
+    skill.slot.as_deref() == Some("Profession_1") && skill.flip_skill.is_some()
+}
+
+/// Whether the rules cover every skill that names a resource
+/// (`specs/005-wvw-proc-sites`, FR-015): derived from the skills and the
+/// rules rather than from a list of professions. Empty rules are never a
+/// complete model.
+fn resource_model_complete(
+    rules: &[rotation::wvw_timeline::SkillResourceRule],
+    rotation_skills: &[rotation::RotationSkill],
+    db: &GameDb,
+) -> bool {
+    if rules.is_empty() {
+        return false;
+    }
+    let ruled: std::collections::HashSet<u32> = rules.iter().map(|rule| rule.skill_id).collect();
+    rotation_skills.iter().all(|rotation_skill| {
+        let Some(skill) = db.skills.get(&rotation_skill.skill_id) else {
+            return true;
+        };
+        let (on_use, per_hit) = life_force_fact_shares(skill);
+        let names_resource = skill.initiative.is_some()
+            || skill.cost.is_some()
+            || is_shroud_entry(skill)
+            || on_use > 0.0
+            || per_hit > 0.0;
+        !names_resource || ruled.contains(&rotation_skill.skill_id)
+    })
+}
+
+pub(crate) fn wvw_resource_rules(
     validated: &ValidatedBuild,
     rotation_skills: &[rotation::RotationSkill],
     db: &GameDb,
     profession_name: &str,
     ctx: &BalanceContext,
+    max_health: f64,
 ) -> (Vec<rotation::wvw_timeline::SkillResourceRule>, bool) {
     use rotation::wvw_timeline::{ResourceKind, SkillResourceRule};
 
@@ -1780,6 +1856,74 @@ fn wvw_resource_rules(
             .slot
             .as_deref()
             .is_some_and(|slot| slot.starts_with("Profession_"));
+
+        if profession_name == "Necromancer" {
+            // Life force and shroud: one shape for every specialisation, the
+            // numbers from data/formulas/shroud.json and the skill facts.
+            let table = crate::data::shroud::table();
+            let pool = table.pool_for(max_health);
+            if is_shroud_entry(skill) {
+                let row = table
+                    .row(skill.id)
+                    .or_else(|| table.row_by_name(&skill.name));
+                let numbers = row.and_then(|row| {
+                    row.drain_pct_per_s
+                        .as_ref()
+                        .zip(row.damage_reduction_pct.as_ref())
+                });
+                // An unread row leaves drain and reduction at "unknown":
+                // the entry still needs the floor, and the model is
+                // reported incomplete below.
+                let (drain, factor) = numbers
+                    .map(|(drain, reduction)| {
+                        (
+                            drain.for_mode(ctx.game_mode.clone()) / 100.0 * pool,
+                            1.0 - reduction.for_mode(ctx.game_mode.clone()) / 100.0,
+                        )
+                    })
+                    .unwrap_or((f64::NAN, f64::NAN));
+                rules.push(SkillResourceRule {
+                    skill_id: skill.id,
+                    kind: ResourceKind::LifeForce,
+                    entry_floor: table.entry_floor_pct / 100.0 * pool,
+                    drain_per_second: drain,
+                    shroud_damage_factor: factor,
+                    enters_shroud: true,
+                    ..Default::default()
+                });
+                if let Some(exit) = skill.flip_skill {
+                    rules.push(SkillResourceRule {
+                        skill_id: exit,
+                        kind: ResourceKind::LifeForce,
+                        exits_shroud: true,
+                        ..Default::default()
+                    });
+                }
+                continue;
+            }
+            let (on_use, per_hit) = life_force_fact_shares(skill);
+            if on_use > 0.0 || per_hit > 0.0 {
+                rules.push(SkillResourceRule {
+                    skill_id: skill.id,
+                    kind: ResourceKind::LifeForce,
+                    gain_on_use: on_use * pool,
+                    gain_on_hit: per_hit * pool,
+                    ..Default::default()
+                });
+                continue;
+            }
+            if rotation_skill.weapon_set == rotation::SHROUD_SET {
+                if let Some(cost) = skill.cost {
+                    rules.push(SkillResourceRule {
+                        skill_id: skill.id,
+                        kind: ResourceKind::LifeForce,
+                        cost: f64::from(cost) / 100.0 * pool,
+                        ..Default::default()
+                    });
+                }
+                continue;
+            }
+        }
 
         let initiative_cost =
             rotation::builder::sourced_skill_value(ctx, skill.id, "initiative_cost")
@@ -1849,9 +1993,12 @@ fn wvw_resource_rules(
             });
         }
     }
-    let resource_model_complete =
-        matches!(profession_name, "Thief" | "Revenant" | "Warrior" | "Mesmer");
-    (rules, resource_model_complete)
+    // An unread shroud row (NaN drain) is not a model.
+    let unread_shroud = rules
+        .iter()
+        .any(|rule| rule.enters_shroud && rule.drain_per_second.is_nan());
+    let complete = !unread_shroud && resource_model_complete(&rules, rotation_skills, db);
+    (rules, complete)
 }
 
 fn wvw_weapon_swap_cooldown_ms(profession_name: &str, validated: &ValidatedBuild) -> Option<u32> {
@@ -2625,6 +2772,158 @@ pub fn llm_advisor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sprint 2 (T047, FR-015): the derived completeness rule reproduces the
+    /// profession list it replaces and adds Necromancer once life force
+    /// rules exist.
+    #[test]
+    fn resource_model_completeness_matches_previous_list() {
+        fn api_skill(
+            id: u32,
+            name: &str,
+            slot: &str,
+            extra: serde_json::Value,
+        ) -> gw2_api::models::Skill {
+            let mut value = serde_json::json!({
+                "id": id, "name": name, "slot": slot, "facts": []
+            });
+            if let (Some(base), Some(extra)) = (value.as_object_mut(), extra.as_object()) {
+                for (k, v) in extra {
+                    base.insert(k.clone(), v.clone());
+                }
+            }
+            serde_json::from_value(value).expect("skill")
+        }
+        fn rotation_skill(id: u32, weapon_set: u8) -> rotation::RotationSkill {
+            rotation::RotationSkill {
+                skill_id: id,
+                name: format!("skill {id}"),
+                slot: rotation::SkillSlot::Utility,
+                cast_time_ms: 500,
+                cooldown_ms: 5_000,
+                effects: Vec::new(),
+                next_chain: None,
+                is_stunbreak: false,
+                weapon_set,
+            }
+        }
+        let cases: Vec<(&str, Vec<gw2_api::models::Skill>, bool)> = vec![
+            (
+                "Thief",
+                vec![
+                    api_skill(1, "Steal", "Profession_1", serde_json::json!({})),
+                    api_skill(
+                        2,
+                        "Heartseeker",
+                        "Weapon_2",
+                        serde_json::json!({"initiative": 3}),
+                    ),
+                ],
+                true,
+            ),
+            (
+                "Revenant",
+                vec![api_skill(
+                    3,
+                    "Inspiring Reinforcement",
+                    "Utility",
+                    serde_json::json!({"cost": 30}),
+                )],
+                true,
+            ),
+            (
+                "Warrior",
+                vec![api_skill(
+                    4,
+                    "Eviscerate",
+                    "Profession_1",
+                    serde_json::json!({"cost": 10}),
+                )],
+                true,
+            ),
+            (
+                "Mesmer",
+                vec![api_skill(
+                    5,
+                    "Mind Wrack",
+                    "Profession_1",
+                    serde_json::json!({"cost": 1}),
+                )],
+                true,
+            ),
+            (
+                "Necromancer",
+                vec![
+                    api_skill(
+                        6,
+                        "Reaper's Shroud",
+                        "Profession_1",
+                        serde_json::json!({"flip_skill": 7}),
+                    ),
+                    api_skill(
+                        8,
+                        "Gravedigger",
+                        "Weapon_2",
+                        serde_json::json!({"facts": [{"type": "Percent", "text": "Life Force", "percent": 8.0}]}),
+                    ),
+                ],
+                true,
+            ),
+            (
+                "Guardian",
+                vec![api_skill(
+                    9,
+                    "Virtue of Justice",
+                    "Profession_1",
+                    serde_json::json!({}),
+                )],
+                false,
+            ),
+            (
+                "Elementalist",
+                vec![api_skill(
+                    10,
+                    "Fire Attunement",
+                    "Profession_1",
+                    serde_json::json!({}),
+                )],
+                false,
+            ),
+            (
+                "Engineer",
+                vec![api_skill(
+                    11,
+                    "Toolbelt",
+                    "Profession_1",
+                    serde_json::json!({}),
+                )],
+                false,
+            ),
+            (
+                "Ranger",
+                vec![api_skill(
+                    12,
+                    "Pet Swap",
+                    "Profession_1",
+                    serde_json::json!({}),
+                )],
+                false,
+            ),
+        ];
+        let ctx = BalanceContext::new(GameMode::WvW);
+        let validated = ValidatedBuild::default();
+        for (profession, skills, expected) in cases {
+            let mut db = GameDb::empty_for_tests();
+            let rotation: Vec<rotation::RotationSkill> =
+                skills.iter().map(|s| rotation_skill(s.id, 1)).collect();
+            for skill in skills {
+                db.skills.insert(skill.id, skill);
+            }
+            let (_, complete) =
+                wvw_resource_rules(&validated, &rotation, &db, profession, &ctx, 20_000.0);
+            assert_eq!(complete, expected, "{profession}");
+        }
+    }
 
     // ── C16 / C17 / C18: unpriceable prefixes, PvP amulet misses, advisor ──
 

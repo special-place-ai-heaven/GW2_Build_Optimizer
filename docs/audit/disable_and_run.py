@@ -21,6 +21,9 @@ import shutil
 import subprocess
 import sys
 
+# Windows consoles default to cp1252; the trace carries arrows and multiplication signs.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 WT = "crates/optimizer/src/rotation/wvw_timeline.rs"
 EN = "crates/optimizer/src/engine.rs"
 
@@ -69,6 +72,18 @@ CONTROLS = {
         "                let damage = 198.0 + 0.03 * self.params.power;",
         "                self.note_unmodeled(unmodeled(\"dark field\"));\n                return;\n                #[allow(unreachable_code)]\n                let damage = 198.0 + 0.03 * self.params.power;",
         "reaper_dark_whirl_life_steals",
+    ),
+    "shroud_floor": (
+        WT,
+        "        self.resources.get(&rule.kind).copied().unwrap_or(0.0) >= rule.cost.max(rule.entry_floor)",
+        "        self.resources.get(&rule.kind).copied().unwrap_or(0.0) >= rule.cost",
+        "reaper_shroud_refused_without_life_force",
+    ),
+    "drain": (
+        WT,
+        "            *pool = (*pool - drain * seconds).max(0.0);",
+        "            *pool = (*pool - 0.0 * drain * seconds).max(0.0);",
+        "reaper_shroud_drains_and_exits",
     ),
 }
 

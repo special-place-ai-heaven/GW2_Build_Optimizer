@@ -309,6 +309,71 @@ pub fn profession_skills_for_build(
         .collect()
 }
 
+/// The Necromancer shroud bar for the equipped specialisations
+/// (`specs/005-wvw-proc-sites`, R6). The API lists every shroud's skills in
+/// the core entry skill's `transform_skills` (Death Shroud 10574 carries all
+/// 57) with misleading slots — `Downed_1..4` and `Weapon_5` — and tags each
+/// with its specialisation. An equipped elite's skills replace the core
+/// ones; a specialisation without an entry skill (Scourge) has no bar.
+pub fn shroud_bar_for_build(
+    db: &GameDb,
+    profession_name: &str,
+    equipped_spec_ids: &[u32],
+) -> Vec<(u32, String)> {
+    if profession_name != "Necromancer" {
+        return Vec::new();
+    }
+    let mut candidates: Vec<&gw2_api::models::Skill> = Vec::new();
+    for skill_id in db
+        .skills_by_profession
+        .get(profession_name)
+        .into_iter()
+        .flatten()
+    {
+        let Some(entry) = db.skills.get(skill_id) else {
+            continue;
+        };
+        if entry.slot.as_deref() != Some("Profession_1") || entry.specialization.is_some() {
+            continue;
+        }
+        for transform_id in &entry.transform_skills {
+            let Some(skill) = db.skills.get(transform_id) else {
+                continue;
+            };
+            let bar_slot = skill
+                .slot
+                .as_deref()
+                .is_some_and(|slot| !slot.starts_with("Profession_"));
+            let owned = skill
+                .specialization
+                .is_none_or(|spec| equipped_spec_ids.contains(&spec));
+            if bar_slot && owned {
+                candidates.push(skill);
+            }
+        }
+    }
+    let elite_owned = candidates
+        .iter()
+        .any(|skill| skill.specialization.is_some());
+    let mut bar: Vec<&gw2_api::models::Skill> = candidates
+        .into_iter()
+        .filter(|skill| skill.specialization.is_some() == elite_owned)
+        .collect();
+    let position = |slot: Option<&str>| match slot {
+        Some("Downed_1") => 1,
+        Some("Downed_2") => 2,
+        Some("Downed_3") => 3,
+        Some("Downed_4") => 4,
+        Some("Weapon_5") => 5,
+        _ => 9,
+    };
+    bar.sort_by_key(|skill| (position(skill.slot.as_deref()), skill.id));
+    bar.dedup_by_key(|skill| skill.id);
+    bar.into_iter()
+        .map(|skill| (skill.id, skill.name.clone()))
+        .collect()
+}
+
 /// Extract cooldown from Fact::Recharge (seconds → milliseconds).
 fn extract_cooldown(facts: &[Fact]) -> u32 {
     for fact in facts {
@@ -1523,6 +1588,66 @@ mod tests {
             Some(5),
             "should take maximum conditions_removed across entries"
         );
+    }
+
+    /// Sprint 2 (T046): the shroud bar comes from the core entry skill's
+    /// `transform_skills`, filtered by the equipped elite, in slot order.
+    #[test]
+    fn shroud_bar_is_prepared_from_transform_skills() {
+        let mut db = empty_db();
+        let mut death_shroud = make_test_skill(10574, "Death Shroud", "Profession_1", vec![]);
+        death_shroud.flip_skill = Some(10585);
+        death_shroud.transform_skills = vec![
+            29442, 29458, 30278, 30825, 29958, 30504, 30557, // Reaper
+            10554, 10604, 10645, 10643, 19504, // core
+            62611, // Harbinger
+            30961, // an exit skill with a Profession_ slot: never a bar skill
+        ];
+        let mut reapers_shroud = make_test_skill(30792, "Reaper's Shroud", "Profession_1", vec![]);
+        reapers_shroud.flip_skill = Some(30961);
+        let mut skills = vec![death_shroud, reapers_shroud];
+        for (id, name, slot, spec) in [
+            (29442, "Life Rend", "Downed_1", Some(34)),
+            (29458, "Life Slash", "Downed_1", Some(34)),
+            (30278, "Life Reap", "Downed_1", Some(34)),
+            (30825, "Death's Charge", "Downed_2", Some(34)),
+            (29958, "Infusing Terror", "Downed_3", Some(34)),
+            (30504, "Soul Spiral", "Downed_4", Some(34)),
+            (30557, "Executioner's Scythe", "Weapon_5", Some(34)),
+            (10554, "Life Blast", "Downed_1", None),
+            (10604, "Dark Path", "Downed_2", None),
+            (10645, "Wave of Fear", "Downed_3", None),
+            (10643, "Gathering Plague", "Downed_4", None),
+            (19504, "Tainted Shackles", "Weapon_5", None),
+            (62611, "Tainted Bolts", "Downed_1", Some(64)),
+            (30961, "Exit Reaper's Shroud", "Profession_1", None),
+        ] {
+            let mut skill = make_test_skill(id, name, slot, vec![]);
+            skill.specialization = spec;
+            skills.push(skill);
+        }
+        let ids: Vec<u32> = skills.iter().map(|s| s.id).collect();
+        for skill in skills {
+            db.skills.insert(skill.id, skill);
+        }
+        db.skills_by_profession.insert("Necromancer".into(), ids);
+
+        let reaper: Vec<u32> = shroud_bar_for_build(&db, "Necromancer", &[53, 2, 34])
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(
+            reaper,
+            vec![29442, 29458, 30278, 30825, 29958, 30504, 30557]
+        );
+
+        let core: Vec<u32> = shroud_bar_for_build(&db, "Necromancer", &[53, 2, 19])
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(core, vec![10554, 10604, 10645, 10643, 19504]);
+
+        assert!(shroud_bar_for_build(&db, "Warrior", &[34]).is_empty());
     }
 
     #[test]
