@@ -189,6 +189,9 @@ pub enum TriggerRule {
     OnShroudExit,
     /// The player puts a condition on a foe (scope `Status` names it).
     OnConditionApplied,
+    /// A cleanse removed at least one condition from the player (scope
+    /// `Status` names the last one removed).
+    OnConditionRemoved,
     /// A boon lands on the player (scope `Status` names it).
     OnBoonApplied,
     /// The player removes or corrupts a boon on a foe (scope `Status` names it).
@@ -485,6 +488,11 @@ pub struct NormalizedEffect {
         with = "optional_factual"
     )]
     pub healing_power_coefficient: Option<FactualValue<f64>>,
+    /// Page numbers a derived `value` is computed from (Reaper's Onslaught:
+    /// 300 ferocity as +20 % critical damage); the wiki check verifies these
+    /// in place of `value`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_from: Vec<f64>,
     /// Classified, not executed: the trait's reason for the coverage line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage: Option<CoverageBlock>,
@@ -794,6 +802,7 @@ mod tests {
             prerequisite: None,
             scale_by: None,
             healing_power_coefficient: None,
+            derived_from: Vec::new(),
             coverage: None,
         }
     }
@@ -836,6 +845,7 @@ mod tests {
             prerequisite: None,
             scale_by: None,
             healing_power_coefficient: None,
+            derived_from: Vec::new(),
             coverage: None,
         }
     }
@@ -1331,6 +1341,7 @@ mod tests {
             (TriggerRule::OnShroudEnter, "\"OnShroudEnter\""),
             (TriggerRule::OnShroudExit, "\"OnShroudExit\""),
             (TriggerRule::OnConditionApplied, "\"OnConditionApplied\""),
+            (TriggerRule::OnConditionRemoved, "\"OnConditionRemoved\""),
             (TriggerRule::OnBoonApplied, "\"OnBoonApplied\""),
             (TriggerRule::OnBoonStripped, "\"OnBoonStripped\""),
             (TriggerRule::Periodic, "\"Periodic\""),
@@ -1504,6 +1515,7 @@ mod tests {
                         TriggerRule::OnShroudEnter
                             | TriggerRule::OnShroudExit
                             | TriggerRule::OnConditionApplied
+                            | TriggerRule::OnConditionRemoved
                             | TriggerRule::OnBoonApplied
                             | TriggerRule::OnBoonStripped
                             | TriggerRule::Periodic

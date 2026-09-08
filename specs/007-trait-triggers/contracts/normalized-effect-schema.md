@@ -4,13 +4,14 @@ Applies to every file under `data/normalized_effects/<patch>/{pve,pvp,wvw}.json`
 
 ## New trigger kinds
 
-`trigger_rule` accepts, in addition to the six existing values: `OnShroudEnter`, `OnShroudExit`, `OnConditionApplied`, `OnBoonApplied`, `OnBoonStripped`, `Periodic`.
+`trigger_rule` accepts, in addition to the six existing values: `OnShroudEnter`, `OnShroudExit`, `OnConditionApplied`, `OnConditionRemoved`, `OnBoonApplied`, `OnBoonStripped`, `Periodic`.
 
 | Value | Fires when | Required companions |
 |---|---|---|
 | `OnShroudEnter` | the player's shroud entry skill resolves (Death, Reaper's, Harbinger, Ritualist's Shroud, Desert Shroud); never on Manifest Sand Shade | — |
 | `OnShroudExit` | the shroud ends by skill, opener, drain or damage | — |
 | `OnConditionApplied` | the player puts a condition on a foe (skill fact, record, corrupt) | `trigger_scope: {"Status": "<condition>"}` or `Any` |
+| `OnConditionRemoved` | a cleanse removed at least one condition from the player (never a cleanse of nothing) | `trigger_scope: {"Status": "<condition>"}` (the last one removed) or `Any` |
 | `OnBoonApplied` | a boon lands on the player | `trigger_scope: {"Status": "<boon>"}` or `Any` |
 | `OnBoonStripped` | the player removes or corrupts a boon on a foe | `trigger_scope: {"Status": "<boon>"}` or `Any` |
 | `Periodic` | every `internal_cooldown` seconds from the fight's start | `internal_cooldown` |
@@ -62,7 +63,9 @@ Members are optional; an empty object is rejected. Allowed with any trigger. The
 }
 ```
 
-`class` ∈ `PassiveNoEffect`, `NeedsMechanic`. `mechanic` is required for `NeedsMechanic` and is one of the names the audit lists: `minions`, `shades`, `blight`, `kill`, `downed`, `transform`, `ally state`, `pet`, `clone`, `bundle`, `attunement`, `legend`. A record with `coverage` MUST NOT carry `status_operation`, `inner_category`, `prerequisite` or a resolved `value`.
+`derived_from` (optional, a list of numbers): the page numbers a derived `value` is computed from; the wiki check verifies these instead of `value`. Reaper's Onslaught carries `[300]` for its +20 % critical damage (300 ferocity at 15 per point).
+
+`class` ∈ `PassiveNoEffect`, `NeedsMechanic`. `mechanic` is required for `NeedsMechanic` and names the game mechanism the simulator lacks, as the audit table lists it; the Necromancer increment uses `spirits`, `carapace threshold`, `carapace stat scaling`, `protection condition reduction`, `blight`, `shades`, `life siphon`, `barrier`, `ally state`, `recharge`, `trait skill`, `weapon-scoped duration`, `downed`, `minions`, `incoming damage reduction`, `life force scaling`, `dodge`, `revive`, `disable trigger`, `condition damage heal`, `crit chance per stack`, `fear damage`, `kill`, `percent heal`, `elixir`, `incoming condition duration`, `damage-scaled heal`, `marks`, `incoming healing`, `life force threshold`; later increments add theirs (`pet`, `clone`, `bundle`, `attunement`, `legend`, `transform`). A name is retired when the mechanism lands (Sprint 3 convergence retired `carapace`). A record with `coverage` MUST NOT carry `status_operation`, `inner_category`, `prerequisite` or a resolved `value`.
 
 ## Worked examples (Necromancer, WvW column, wiki read 2026-09-08)
 

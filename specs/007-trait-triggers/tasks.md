@@ -240,3 +240,12 @@ Rust workspace. Optimizer crate at `crates/optimizer/src/`; data at `data/`; evi
 - **Increment 1** = Phases 5–8: full Necromancer catalogue and release, the first profession where "optimized" is judged on trait triggers.
 - **Increments 2–9** = Phase 9, one PR each, same shape, no new mechanism expected.
 - Every mechanism task has a control in `docs/audit/disable_and_run.py`; a step is not committed until its failure is quoted in `docs/audit/sprint3-failures.md`.
+
+## Phase 10: Convergence
+
+- [X] T083 Model Death's Carapace in `crates/optimizer/src/rotation/wvw_timeline.rs` (armor-scaled incoming strike damage plus a stacking toughness buff the Death Magic records feed) so the cached Reaper build's coverage line falls to at most two traits and `reaper_cached_build_traits_are_simulated` passes per SC-001, US3/AC3 (partial)
+- [X] T084 Make the four records `records_match_their_wiki_pages` names carry page numbers or an explicit derivation field in `data/normalized_effects/2026-01-13/wvw.json` (Reaper's Onslaught 300 ferocity, Spiteful Fortitude threshold, Sprint 2's Sigil of Bursting and Path of Corruption) so the check is clean for the released increment per FR-006, SC-007, FR-010a (partial)
+- [X] T085 Extend the `Shroud_N` scope in `scope_admits` (`crates/optimizer/src/rotation/wvw_timeline.rs`) to the Scourge shade bar (F1 = shroud skill 1) with a firing test on a synthetic Scourge kit per the spec edge case "a Scourge with no shade out" (partial)
+- [X] T086 Update the `mechanic` list in `specs/007-trait-triggers/contracts/normalized-effect-schema.md` to the set the audit table uses (`docs/audit/trait-coverage.md`), or fold the new names into the fixed set per data-model / contract coverage block (partial)
+- [ ] T087 Create the 1.14.3 GitHub release with the DLL and `SHA256SUMS.txt` once the copied DLL has been run, per plan step 7 and quickstart §7 (partial) — superseded by 1.14.4 (convergence); release 1.14.4 after the user runs the copied DLL
+- [X] T088 Record the two decisions taken during implementation in `specs/007-trait-triggers/plan.md` "Risks and implementation decisions": the shroud-entry priority in `pick_skill` and the WvW-only routing of non-damaging skill-fact conditions and Fear/Taunt as outgoing conditions (or revert them) per plan: execution order (unrequested)

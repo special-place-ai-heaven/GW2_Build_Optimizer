@@ -13,7 +13,7 @@ Existing: `effect_id`, `source_type`, `source_id`, `source_name`, `category`, `v
 | `scale_by` | `ScaleBy` | multiply the effect by a count known at the firing site | only with `GainsLifeForce` or `Heal` |
 | `coverage` | `CoverageBlock` | this trait is classified, not executed | excludes `status_operation`, `inner_category`, a resolved `value` |
 
-`TriggerRule` (extended): `Passive`, `OnCrit`, `OnHit`, `OnSkillUse`, `OnHealthThreshold`, `Conditional`, **`OnShroudEnter`, `OnShroudExit`, `OnConditionApplied`, `OnBoonApplied`, `OnBoonStripped`, `Periodic`**.
+`TriggerRule` (extended): `Passive`, `OnCrit`, `OnHit`, `OnSkillUse`, `OnHealthThreshold`, `Conditional`, **`OnShroudEnter`, `OnShroudExit`, `OnConditionApplied`, `OnConditionRemoved`, `OnBoonApplied`, `OnBoonStripped`, `Periodic`**.
 
 - `OnSkillUse` with `source_type: Trait` requires `trigger_scope` ≠ `Any`.
 - `Periodic` requires `internal_cooldown` (the period, seconds).
@@ -43,7 +43,7 @@ A failed prerequisite traces `ProcSkippedPrerequisite` with the member name; it 
 "coverage": { "class": "NeedsMechanic", "mechanic": "minions" }
 ```
 
-`class` ∈ `PassiveNoEffect` | `NeedsMechanic`; `mechanic` required for `NeedsMechanic`, forbidden otherwise. A record with `coverage` has `trigger_rule: Passive`, `category: FlatStat`, `value` unresolved, and exists so the audit lists the trait's state from data.
+`class` ∈ `PassiveNoEffect` | `NeedsMechanic`; `mechanic` required for `NeedsMechanic`, forbidden otherwise; its names are the audit table's set and grow by increment (the contract lists them). A record with `coverage` has `trigger_rule: Passive`, `category: FlatStat`, `value` unresolved, and exists so the audit lists the trait's state from data.
 
 ## Runtime proc (`ProcSpec`, extended)
 

@@ -73,14 +73,14 @@
       "source_id": 44944,
       "source_name": "Superior Sigil of Bursting",
       "category": "ConditionDamagePct",
-      "value": 6.0,
+      "value": 5.0,
       "stacking_rule": "Multiplicative",
       "trigger_rule": "Passive",
       "uptime_model": {
         "kind": "AlwaysOn"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Bursting"
+      "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Bursting (read 2026-09-08: +5% condition damage; the Sprint 2 record said 6)"
     },
     {
       "effect_id": "trait:1711:0",
@@ -909,22 +909,27 @@
       }
     },
     {
-      "effect_id": "trait:856:coverage",
+      "effect_id": "trait:856:0",
       "source_type": "Trait",
       "source_id": 856,
       "source_name": "Armored Shroud",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "AppliesBoon",
+      "value": 5.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnShroudEnter",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Armored_Shroud (read 2026-09-08)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "carapace"
+      "source": "https://wiki.guildwars2.com/wiki/Armored_Shroud (read 2026-09-08: 5 stacks of Death's Carapace, 10 s, 20 toughness each in WvW)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Death's Carapace",
+        "amount_mode": "Stacks",
+        "amount_value": 5.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
       }
     },
     {
@@ -947,22 +952,30 @@
       }
     },
     {
-      "effect_id": "trait:857:coverage",
+      "effect_id": "trait:857:0",
       "source_type": "Trait",
       "source_id": 857,
       "source_name": "Putrid Defense",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Putrid_Defense (read 2026-09-08: the 15% poison damage is a parsed percent fact)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "carapace"
+      "source": "https://wiki.guildwars2.com/wiki/Putrid_Defense (read 2026-09-08: a stack of Death's Carapace per poison applied, 10 s; the 15% poison damage is a parsed percent fact)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Death's Carapace",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
+      },
+      "trigger_scope": {
+        "Status": "Poisoned"
       }
     },
     {
@@ -1016,22 +1029,27 @@
       "internal_cooldown": 3.0
     },
     {
-      "effect_id": "trait:1922:coverage",
+      "effect_id": "trait:1922:2",
       "source_type": "Trait",
       "source_id": 1922,
       "source_name": "Shrouded Removal",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "AppliesBoon",
+      "value": 3.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionRemoved",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Shrouded_Removal (read 2026-09-08)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "carapace"
+      "source": "https://wiki.guildwars2.com/wiki/Shrouded_Removal (read 2026-09-08: 3 stacks of Death's Carapace, 10 s, when a removal takes a condition off the player)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Death's Carapace",
+        "amount_mode": "Stacks",
+        "amount_value": 3.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
       }
     },
     {
@@ -1113,11 +1131,39 @@
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Dark_Defense (read 2026-09-08: protection's condition damage reduction is not modeled)",
+      "source": "https://wiki.guildwars2.com/wiki/Dark_Defense (read 2026-09-08: the carapace and protection halves are records; protection's 20% condition damage reduction is not modeled)",
       "coverage": {
         "class": "NeedsMechanic",
-        "mechanic": "carapace"
+        "mechanic": "protection condition reduction"
       }
+    },
+    {
+      "effect_id": "trait:860:1",
+      "source_type": "Trait",
+      "source_id": 860,
+      "source_name": "Dark Defense",
+      "category": "AppliesBoon",
+      "value": 10.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dark_Defense (read 2026-09-08: 10 stacks of Death's Carapace, 10 s, on the healing skill, 5 s recharge)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Death's Carapace",
+        "amount_mode": "Stacks",
+        "amount_value": 10.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      },
+      "internal_cooldown": 5.0
     },
     {
       "effect_id": "trait:855:coverage",
@@ -1132,10 +1178,10 @@
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Deadly_Strength (read 2026-09-08)",
+      "source": "https://wiki.guildwars2.com/wiki/Deadly_Strength (read 2026-09-08: 10 power and 10 condition damage per stack of carapace is not modeled)",
       "coverage": {
         "class": "NeedsMechanic",
-        "mechanic": "carapace"
+        "mechanic": "carapace stat scaling"
       }
     },
     {
@@ -1151,10 +1197,10 @@
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Beyond_the_Veil (read 2026-09-08)",
+      "source": "https://wiki.guildwars2.com/wiki/Beyond_the_Veil (read 2026-09-08: 10% condition damage reduction at 10 stacks of carapace is not modeled)",
       "coverage": {
         "class": "NeedsMechanic",
-        "mechanic": "carapace"
+        "mechanic": "carapace threshold"
       }
     },
     {
@@ -1189,10 +1235,34 @@
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Corrupter%27s_Fervor (read 2026-09-08)",
+      "source": "https://wiki.guildwars2.com/wiki/Corrupter%27s_Fervor (read 2026-09-08: the carapace gain is a record; the 15% damage reduction at 25 stacks is not modeled)",
       "coverage": {
         "class": "NeedsMechanic",
-        "mechanic": "carapace"
+        "mechanic": "carapace threshold"
+      }
+    },
+    {
+      "effect_id": "trait:1940:0",
+      "source_type": "Trait",
+      "source_id": 1940,
+      "source_name": "Corrupter's Fervor",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Corrupter%27s_Fervor (read 2026-09-08: a stack of Death's Carapace per condition inflicted, 10 s)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Death's Carapace",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000
       }
     },
     {
@@ -1931,7 +2001,10 @@
       "inner_category": "CritDamagePct",
       "prerequisite": {
         "in_shroud": true
-      }
+      },
+      "derived_from": [
+        300.0
+      ]
     },
     {
       "effect_id": "trait:2021:1",

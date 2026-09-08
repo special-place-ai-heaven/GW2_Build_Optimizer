@@ -400,6 +400,50 @@ Increment 1 at `ff0eb5b` (Phases 1-7 landed, 1 190 tests, 9 ignored): 16.04 s, 1
 
 Gate run for the increment (T067-T069, 2026-09-08 at `ff0eb5b`): `python docs/audit/disable_and_run.py shroud_enter prereq scope population coverage` fails all five with the quoted blocks and restores each file byte-identically; `pve_output_unchanged_by_conditional_tagging`, `pve_trait_fact_consumption_set_unchanged` and the nine `scoring_regression` tests unchanged to the last digit (SC-004). Sweep (T070): no machine path, `poslj`, `scratchpad`, `DEBUG` or `mock` in code; no fixture id in `data/`; the only lines changed under `prompts.rs` and `llm/` since the base are the concurrent agent's comment-line removals (`601d884`, `c2d75ec`, `79e731d`).
 
+### 9.7 Convergence (T083-T088)
+
+Death's Carapace (wiki `Death's Carapace`, read 2026-09-08): 20 toughness per stack in WvW, 30 stacks at most, 10 s. The timeline holds it as a self buff and `receive_strike` scales an incoming strike by armor / (armor + 20 x stacks), the same 1 / armor the profile's strike was built on. Five Death Magic records feed it (Armored Shroud 5 at entry, Putrid Defense 1 per poison applied, Shrouded Removal 3 per removal, Dark Defense 10 on the heal skill with its 5 s recharge, Corrupter's Fervor 1 per condition inflicted); the removal needed a seventh trigger kind, `OnConditionRemoved`, fired from `cleanse` only when it took a condition off the player (`necro_condition_removed_needs_a_removed_condition`: a cleanse of nothing is not a firing site). `necro_carapace_scales_incoming_strikes_by_armor` pins the ratio armor / (armor + 100) after Armored Shroud's entry. Approximations: the 10 s runs through the boon-duration multiplier like every self buff; the threshold halves (Corrupter's Fervor 15 % damage reduction at 25 stacks, Beyond the Veil 10 % condition damage reduction at 10 stacks) and Deadly Strength's 10 power / 10 condition damage per stack stay classified under their own names (`carapace threshold`, `carapace stat scaling`), as does Dark Defense's protection-condition-reduction half (`protection condition reduction`).
+
+SC-001 (`reaper_cached_build_traits_are_simulated`): **met, 2 of 9**:
+
+```
+860 Dark Defense: record — on the line: needs: protection condition reduction
+1940 Corrupter's Fervor: record — on the line: needs: carapace threshold
+```
+
+Both execute their carapace half; the line names the other. Necromancer row after the change: record 27, facts+record 20, NeedsMechanic 56 (was 25 / 19 / 59). SC-003 (`necro_published_ranks_by_its_triggers`) still passes.
+
+Scourge (T085, spec edge case "a Scourge with no shade out"): with no shroud bar on the skill list, `Shroud_N` admits the `Profession_N` skill (wiki `Shade`: the shade skills are the Scourge's shroud skills); a list with a shroud bar keeps `Weapon_N` of that bar. `necro_scourge_shade_skill_is_shroud_skill_one` pins both directions on a synthetic shade in `Profession_1` with Unyielding Blast's `Shroud_1` record.
+
+Wiki check (T084, `records_match_their_wiki_pages`): **0 mismatches**. `derived_from` names the page numbers a derived value comes from and the check verifies those instead of the value (Reaper's Onslaught: 300 ferocity as +20 % critical damage); the cached API facts of the trait or skill count beside the page (Spiteful Fortitude's 50 % threshold is an API `Health Threshold` fact the page leaves to the tooltip); records with heuristic evidence are skipped by name (Path of Corruption's 10 s cooldown, Phalanx Strength, Sharpened Edges: estimates, not page claims); Superior Sigil of Bursting now carries the page's 5 % (the Sprint 2 record said 6).
+
+Gates after the change: `python docs/audit/disable_and_run.py shroud_enter prereq scope population coverage`:
+
+```
+### shroud_enter
+test: necro_shroud_enter_fires_once_at_entry
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1201 filtered out; finished in 0.01s
+restored: byte-identical
+### prereq
+test: necro_chilled_prerequisite_gates_chilling_nova
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1201 filtered out; finished in 0.01s
+restored: byte-identical
+### scope
+test: necro_shout_scope_fires_on_shouts_only
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1201 filtered out; finished in 0.01s
+restored: byte-identical
+### population
+test: population_havoc_credits_five_or_cap
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1201 filtered out; finished in 0.01s
+restored: byte-identical
+### coverage
+test: coverage_line_never_names_executed_weapon_skills
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1201 filtered out; finished in 0.01s
+restored: byte-identical
+```
+
+clippy `-D warnings` clean, fmt clean, workspace tests green. Timing (`cargo test -p gw2-optimizer --lib`, 1193 tests): 18.61 s, 17.93 s, 16.35 s.
+
 ## 10. Sprint 3 increments 2-9
 
 Profession order (T074): `cache/characters.json` holds names only (no `profession` field), so the fallback applies: alphabetical. Elementalist, Engineer, Guardian, Mesmer, Ranger, Revenant, Thief, Warrior. Each is its own branch off the previous increment's tip, its own PR and its own patch version, on the mechanism of section 9; the trait coverage table's `NoRecord` column is the progress bar (Necromancer 0; the other eight 65-85 at `ff0eb5b`).
