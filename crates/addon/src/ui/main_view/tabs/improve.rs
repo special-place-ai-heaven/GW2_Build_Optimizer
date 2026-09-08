@@ -1,6 +1,6 @@
 //! Improve tab — current vs optimized side-by-side, lock panel.
 
-use nexus::imgui::{ChildWindow, Selectable, Ui};
+use nexus::imgui::{ChildWindow, Ui};
 
 use crate::state::AddonState;
 use crate::ui::comparison::ResultPane;
@@ -74,35 +74,9 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
             .collect();
 
         if has_suggestion {
-            // Suggestion tabs above panels
-            let tab_count = state.main.comparison.suggestions.len();
-            if tab_count > 1 {
-                for (i, sug) in state.main.comparison.suggestions.iter().enumerate() {
-                    let selected = state.main.comparison.selected_suggestion == i;
-                    let label = if sug.label.is_empty() {
-                        tf("fmt.build_n", &[("n", &(i + 1).to_string())])
-                    } else if sug.label.starts_with("Score:") {
-                        tf(
-                            "fmt.option_n",
-                            &[("n", &(i + 1).to_string()), ("prefix", &sug.stat_prefix)],
-                        )
-                    } else {
-                        sug.label.clone()
-                    };
-                    if Selectable::new(&format!("{}##sug_{}", label, i))
-                        .selected(selected)
-                        .size([0.0, 0.0])
-                        .build(ui)
-                    {
-                        state.main.comparison.selected_suggestion = i;
-                        state.main.comparison.show_optimized = true;
-                    }
-                    if i < tab_count - 1 {
-                        ui.same_line();
-                    }
-                }
-                ui.spacing();
-            }
+            // One tinted tab per build, the equipped one first (specs/006 US2).
+            crate::ui::comparison::render_tab_strip(ui, &mut state.main.comparison, true);
+            ui.spacing();
 
             // ── Gate outcome banner ──
             // "We could not beat this" is a state of the Improve tab, not a
