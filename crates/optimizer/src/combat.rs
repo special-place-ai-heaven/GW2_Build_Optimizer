@@ -191,7 +191,7 @@ pub struct CombatPerformance {
     pub damage_reduction_pct: f64,
 }
 
-// ─── Condition Tick Formulas (Level 80) ───
+// Condition Tick Formulas (Level 80)
 // Formulas loaded from data/formulas/conditions.json via data::conditions().
 // Source: https://wiki.guildwars2.com/wiki/Bleeding, Burning, Poisoned, Torment, Confusion
 
@@ -245,7 +245,7 @@ fn torment_movement_blend(stationary: f64, moving: f64, f: f64) -> f64 {
     stationary * (1.0 - f) + moving * f
 }
 
-// ─── Condition Stack Weights ───
+// Condition Stack Weights
 
 /// Per-condition stack-count weights for a typical rotation.
 /// Now constructed from rotation profile data via `condition_weights_for_profession()`.
@@ -280,7 +280,7 @@ pub fn condition_weights_for_profession(
     }
 }
 
-// ─── Duration Formulas ───
+// Duration Formulas
 //
 // Sources:
 // - https://wiki.guildwars2.com/wiki/Expertise (condition duration)
@@ -448,7 +448,7 @@ pub fn outgoing_boon_duration_mult(
     trait_duration_factor(&mods.trait_boon_duration_pct) * (1.0 + capped)
 }
 
-// ─── Combat Performance Calculation ───
+// Combat Performance Calculation
 
 /// Reference weapon strength (Ascended greatsword average).
 /// This is an empirical reference baseline, NOT a wiki formula constant.
@@ -573,7 +573,7 @@ pub fn calculate_combat_performance(
     }
 }
 
-// ─── Buff Profiles ───
+// Buff Profiles
 
 /// Returns the three standard buff profiles: Solo, Party, Full Squad.
 ///
@@ -643,7 +643,7 @@ pub fn buff_profiles_for_profession(profession: &str, ctx: &BalanceContext) -> V
     profiles
 }
 
-// ─── Damage Modifier Extraction ───
+// Damage Modifier Extraction
 
 /// Extract percentage modifiers from equipped traits and upgrades.
 ///
@@ -1592,7 +1592,7 @@ mod tests {
         assert!((ticks.burning - 377.52).abs() < 0.1);
     }
 
-    // ─── Mode dispatch integration tests ───
+    // Mode dispatch integration tests
 
     #[test]
     fn test_torment_mode_dispatch_in_combat() {
@@ -2324,7 +2324,7 @@ mod tests {
         assert!(perf_with.effective_health > perf_without.effective_health);
     }
 
-    // ─── Profession-Aware Condition Weight Tests (P2-01) ───
+    // Profession-Aware Condition Weight Tests (P2-01)
 
     #[test]
     fn test_firebrand_weights_amplify_burning_score() {
@@ -2630,7 +2630,7 @@ mod tests {
         );
     }
 
-    // ─── Mode-Differentiation Test (P3-02 AC 6) ───
+    // Mode-Differentiation Test (P3-02 AC 6)
 
     #[test]
     fn test_fury_crit_bonus_pve_vs_pvp() {
@@ -2734,7 +2734,7 @@ mod tests {
         );
     }
 
-    // ─── Duration Formula Tests (P3-05) ───
+    // Duration Formula Tests (P3-05)
 
     #[test]
     fn test_condition_duration_basic() {

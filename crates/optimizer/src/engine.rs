@@ -2925,7 +2925,7 @@ mod tests {
         }
     }
 
-    // ── C16 / C17 / C18: unpriceable prefixes, PvP amulet misses, advisor ──
+    // C16 / C17 / C18: unpriceable prefixes, PvP amulet misses, advisor
 
     /// The live `/v2/itemstats` cache holds ten rows (1041-1044, 1046-1048,
     /// 1050-1052) whose every multiplier is `0.0`, with the real numbers in the
@@ -3259,8 +3259,8 @@ mod tests {
             "the pick depended on pool order"
         );
     }
-    // ── A11-1: SWAP candidates must pass the plate slot rules before they can
-    // win ───────────────────────────────────────────────────────────────────
+    // A11-1: SWAP candidates must pass the plate slot rules before they can
+    // win
 
     /// Scripted LLM client: always answers with the same SWAP lines.
     struct StubAdvisor {

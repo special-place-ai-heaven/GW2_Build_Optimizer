@@ -5131,7 +5131,7 @@ mod reaper_experiments {
             .map(|event| event.t_ms)
     }
 
-    // ── US2: swapping weapons swaps sigils (T020, T021) ─────────────────────
+    // US2: swapping weapons swaps sigils (T020, T021)
 
     /// US2 positive and negative control: a sigil on set 2 fires only after
     /// the swap; moved to set 1 it fires only before.
@@ -5290,7 +5290,7 @@ mod reaper_experiments {
             .collect()
     }
 
-    // ── Sprint 2 fixture variants (specs/005-wvw-proc-sites, T002) ──────────
+    // Sprint 2 fixture variants (specs/005-wvw-proc-sites, T002)
 
     #[test]
     fn sprint2_fixture_variants_are_consistent() {
@@ -5342,7 +5342,7 @@ mod reaper_experiments {
         );
     }
 
-    // ── US3: conditional bonuses (T027, T028) ───────────────────────────────
+    // US3: conditional bonuses (T027, T028)
 
     fn strike_at(at_ms: u32, damage: f64) -> EnemyEvent {
         EnemyEvent {
@@ -5534,7 +5534,7 @@ mod reaper_experiments {
         );
     }
 
-    // ── US4: dark field combos (T035, T036) ─────────────────────────────────
+    // US4: dark field combos (T035, T036)
 
     /// US4 scenario 1: Soul Spiral (whirl) inside Nightfall (dark field)
     /// resolves to leeching bolts: damage plus healing, traced, and no
@@ -5642,7 +5642,7 @@ mod reaper_experiments {
         assert_eq!(report.combo_activations, 0);
     }
 
-    // ── US6: life force and shroud (T044, T045) ─────────────────────────────
+    // US6: life force and shroud (T044, T045)
 
     /// US6 scenario 2: with no life force, shroud entry is refused with a
     /// readable reason and the shroud skills never land.
@@ -5774,7 +5774,7 @@ mod reaper_experiments {
         );
     }
 
-    // ── Polish (T056): determinism and the trace cap ────────────────────────
+    // Polish (T056): determinism and the trace cap
 
     /// SC-004: ten evaluations of the fixture, trials included, are identical.
     #[test]
@@ -5817,7 +5817,7 @@ mod reaper_experiments {
         );
     }
 
-    // ── Diagnostics (T022) ──────────────────────────────────────────────────
+    // Diagnostics (T022)
 
     #[test]
     fn trace_is_empty_unless_requested() {
@@ -5862,7 +5862,7 @@ mod reaper_experiments {
         assert!(report.trace_truncated);
     }
 
-    // ── Positive control ────────────────────────────────────────────────────
+    // Positive control
 
     #[test]
     fn reaper_positive_control_onhit_proc_changes_events() {
@@ -5900,7 +5900,7 @@ mod reaper_experiments {
         assert_eq!(with.unmodeled_sources, without.unmodeled_sources);
     }
 
-    // ── Negative control ────────────────────────────────────────────────────
+    // Negative control
 
     #[test]
     fn reaper_negative_control_wrong_mode_and_stowed_set() {
@@ -5996,7 +5996,7 @@ mod reaper_experiments {
         );
     }
 
-    // ── Timing ──────────────────────────────────────────────────────────────
+    // Timing
 
     #[test]
     fn reaper_timing_icd_interrupt_and_late_buff() {
@@ -6102,7 +6102,7 @@ mod reaper_experiments {
         );
     }
 
-    // ── Ablation ────────────────────────────────────────────────────────────
+    // Ablation
 
     #[test]
     fn reaper_ablation_enabler_and_payoff() {
@@ -6159,7 +6159,7 @@ mod reaper_experiments {
         );
     }
 
-    // ── Unsupported control (regression test of the coverage remedy) ────────
+    // Unsupported control (regression test of the coverage remedy)
 
     /// US1 positive control (was Sprint 1's `reaper_unsupported_oncrit_is_named_not_zeroed`,
     /// inverted): with the on-crit firing site the shipped Sigil of Fire
@@ -6280,7 +6280,7 @@ mod reaper_experiments {
         );
         assert!(f64::from(trial.min) <= trial.mean && trial.mean <= f64::from(trial.max));
     }
-    // ── Fixture records against the runtime's own semantics ─────────────────
+    // Fixture records against the runtime's own semantics
 
     #[test]
     fn reaper_fixture_records_follow_runtime_semantics() {

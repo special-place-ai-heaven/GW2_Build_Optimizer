@@ -22,7 +22,7 @@ use crate::validation::{
 use gw2_api::models::{Profession, Skill, Specialization};
 use gw2_core::types::{BuildLocks, GearSlot, PrefixRef};
 
-// ─── Core types ──────────────────────────────────────────────────────────────
+// Core types
 
 /// A single candidate on the beam: a fully-validated build together with its
 /// referee evaluation (score, viability, stats, …).
@@ -308,7 +308,7 @@ pub(crate) fn refine_piece_swaps_within(
     current
 }
 
-// ─── Mutation operators ───────────────────────────────────────────────────────
+// Mutation operators
 
 /// Generate all immediate neighbours of `candidate` by applying each of the
 /// six atomic mutation operators in turn and collecting the results.
@@ -619,7 +619,7 @@ fn shortfall_key(report: &RefereeReport) -> i64 {
     (report.viability.shortfall * 1_000_000.0).round() as i64
 }
 
-// ─── Beam search entry point ──────────────────────────────────────────────────
+// Beam search entry point
 
 /// Run the beam/evolutionary search over complete build states.
 ///
@@ -982,7 +982,7 @@ fn finish_search(beam: Vec<BeamCandidate>) -> Result<ValidatedBuild, String> {
     Ok(best.validated)
 }
 
-// ─── Individual mutation operators (private helpers) ─────────────────────────
+// Individual mutation operators (private helpers)
 
 /// May a gear operator move this slot?
 ///
@@ -2004,7 +2004,6 @@ fn swap_weapons(
     out
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -2677,7 +2676,7 @@ mod tests {
     /// prefix pool, and it stops when its budget is gone.
     #[test]
     fn nudge_uses_canonical_pool_and_budget() {
-        // ── the pool ────────────────────────────────────────────────────────────
+        // the pool
         let mut db = empty_db();
         let power = |id: u32, name: &str, multiplier: f64| gw2_api::models::ItemStat {
             id,
@@ -2743,7 +2742,7 @@ mod tests {
             );
         }
 
-        // ── the budget ──────────────────────────────────────────────────────────
+        // the budget
         use crate::synergy_pipeline::runtime_diagnostics_tests::make_diag_db;
 
         let diag = make_diag_db();

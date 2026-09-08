@@ -77,7 +77,6 @@ struct SynergyCandidate {
     synergy_links: Vec<SynergyLink>,
 }
 
-// ─── Main Entry Point ───
 
 /// Run the full deterministic synergy pipeline.
 /// Returns a SynergyResult with a fully determined build.
@@ -240,7 +239,7 @@ pub fn optimize_synergy_cancellable(
     )
 }
 
-// ─── Stage 2: Specs + Traits ───
+// Specs + Traits
 
 fn select_specs_and_traits(
     profession: &Profession,
@@ -472,7 +471,7 @@ fn cross_product_trait_configs(per_spec: &[Vec<(Vec<u32>, f64)>]) -> Vec<Vec<Vec
     result
 }
 
-// ─── Stage 3: Rune ───
+// Rune
 
 fn select_rune(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
     let runes = db.all_runes();
@@ -522,7 +521,7 @@ fn select_rune(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Optim
     }
 }
 
-// ─── Stage 4: Sigils ───
+// Sigils
 
 fn select_sigils(
     candidates: &mut [SynergyCandidate],
@@ -601,7 +600,7 @@ fn select_sigils(
     }
 }
 
-// ─── Stage 5: Relic ───
+// Relic
 
 fn select_relic(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
     let relics = db.all_relics();
@@ -643,7 +642,7 @@ fn select_relic(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opti
     }
 }
 
-// ─── Stage 6: Weapons ───
+// Weapons
 
 fn select_weapons(
     candidates: &mut [SynergyCandidate],
@@ -831,7 +830,7 @@ fn score_weapon_skills(
     score
 }
 
-// ─── Stage 7: Skills ───
+// Skills
 
 fn select_skills(
     candidates: &mut [SynergyCandidate],
@@ -1249,7 +1248,7 @@ pub(crate) fn pick_best_skill(
     best
 }
 
-// ─── Final Ranking ───
+// Final Ranking
 
 fn rank_and_select(
     candidates: &[SynergyCandidate],
@@ -1398,7 +1397,7 @@ fn compute_candidate_stats(
     full_stats
 }
 
-// ─── Build SynergyResult ───
+// Build SynergyResult
 
 #[allow(clippy::too_many_arguments)]
 fn build_synergy_result(

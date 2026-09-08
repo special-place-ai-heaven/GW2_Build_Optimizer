@@ -41,7 +41,7 @@ static SEL_HI: AtomicU32 = AtomicU32::new(0);
 static PENDING_BOLD: AtomicBool = AtomicBool::new(false);
 static EDITOR_STEP: AtomicU32 = AtomicU32::new(0);
 
-// ── pure label helpers ───────────────────────────────────────────────────────
+// pure label helpers
 
 /// `Report a bug › Optimize › Wrong result`: the category label followed by
 /// the `choice.<id>` label of every entry in `path`.
@@ -858,7 +858,6 @@ fn fail_copy(r: &FailReason, draft: &Draft, feedback: &FeedbackState, now: u64) 
     fail_text(r)
 }
 
-// ── rendering ────────────────────────────────────────────────────────────────
 
 /// What the player did this frame; applied after every widget has rendered so
 /// no `&Draft` is alive while the state is mutated.
@@ -1327,7 +1326,7 @@ fn render_summary(
     action
 }
 
-// ── apply phase ──────────────────────────────────────────────────────────────
+// apply phase
 
 /// Run `f` on the open draft; `R::default()` when none is open.
 fn with_draft<R: Default>(state: &mut AddonState, f: impl FnOnce(&mut Draft) -> R) -> R {
@@ -1401,7 +1400,7 @@ fn apply(state: &mut AddonState, action: Action) {
     }
 }
 
-// ── hooks: state-side handlers behind the `apply` arms ───────────────────────
+// hooks: state-side handlers behind the `apply` arms
 
 /// Send the draft: row, lock, background post (`feedback::tasks::send_draft`).
 pub(super) fn on_send(state: &mut AddonState) {

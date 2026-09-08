@@ -38,7 +38,7 @@ impl CancellationToken {
     }
 }
 
-// ── Background workers ───────────────────────────────────────────────────────
+// Background workers
 //
 // Every background thread the addon starts goes through `AddonState::spawn_worker`
 // so that unload has something to wait for. The rules the rest of the addon can
@@ -1243,7 +1243,7 @@ mod tests {
         }
     }
 
-    // ── CancellationToken ─────────────────────────────────────────────────────
+    // CancellationToken
 
     #[test]
     fn test_cancel_token_new_is_not_cancelled() {
@@ -1314,7 +1314,7 @@ mod tests {
         );
     }
 
-    // ── MainState::default() — initial loading-flag safety ────────────────────
+    // MainState::default() — initial loading-flag safety
     //
     // Risk: non-optimizer background threads in main_view.rs (lines 1501, 1584,
     // 2168, 2199, 2279, 2312, 3233) have no catch_unwind.  A panic in any of
@@ -1397,7 +1397,7 @@ mod tests {
         assert!(main.comparison.current_combat_squad.is_none());
     }
 
-    // ── init() screen routing ─────────────────────────────────────────────────
+    // init() screen routing
 
     #[test]
     fn test_init_routes_to_language_when_no_keys() {
@@ -1462,7 +1462,7 @@ mod tests {
         reset_state();
     }
 
-    // ── init() loading-flag safety ────────────────────────────────────────────
+    // init() loading-flag safety
     // Complementary to test_main_state_default_fields: confirms init() itself
     // never sets any loading flag — they are set exclusively by background threads.
     // If this test fails, it means init() started a background op without a
@@ -1496,7 +1496,7 @@ mod tests {
         reset_state();
     }
 
-    // ── with_state ────────────────────────────────────────────────────────────
+    // with_state
 
     #[test]
     fn test_with_state_returns_none_when_uninitialized() {
@@ -1538,7 +1538,7 @@ mod tests {
         reset_state();
     }
 
-    // ── clear() ──────────────────────────────────────────────────────────────
+    // clear()
 
     #[test]
     fn test_clear_cancels_token() {
@@ -1581,7 +1581,7 @@ mod tests {
         );
     }
 
-    // ── spawn_worker / join_workers ──────────────────────────────────────────
+    // spawn_worker / join_workers
     //
     // These cover the unload contract: every worker is tracked, cancellation is
     // what makes it stop, the wait is bounded, and a panicking worker cannot
@@ -2154,7 +2154,7 @@ mod tests {
             - body[..at].bytes().filter(|b| *b == b'}').count()
     }
 
-    // ── catch_unwind panic-recovery tests ─────────────────────────────────────
+    // catch_unwind panic-recovery tests
     //
     // P2-03: Every background thread is now wrapped in catch_unwind. These tests
     // verify the Err-arm pattern: after a panic is caught, with_state() still

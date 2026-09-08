@@ -30,7 +30,7 @@ use crate::validation::{
 use gw2_core::types::{GameMode, PrefixRef};
 use std::collections::HashMap;
 
-// ── Fixture ids (synthetic unless noted) ────────────────────────────────────
+// Fixture ids (synthetic unless noted)
 pub const SPEC_SPITE: u32 = 900;
 pub const SPEC_SOUL_REAPING: u32 = 901;
 pub const SPEC_REAPER: u32 = 902;
@@ -617,7 +617,7 @@ pub fn build() -> ValidatedBuild {
     build
 }
 
-// ── Sprint 2 variants (specs/005-wvw-proc-sites) ────────────────────────────
+// Sprint 2 variants (specs/005-wvw-proc-sites)
 
 /// `build()` with Superior Sigil of Fire moved to set 2's main-hand seat and
 /// Force kept on set 1: the weapon-swap experiments (US2).

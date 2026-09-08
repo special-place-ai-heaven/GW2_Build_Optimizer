@@ -43,7 +43,6 @@ pub fn render_card_header(ui: &Ui, title: &str, color: [f32; 4]) {
     ui.dummy([0.0, 24.0]);
 }
 
-// ─── Helpers ───
 
 fn truncate_to_width(ui: &Ui, text: &str, max_w: f32) -> String {
     if ui.calc_text_size(text)[0] <= max_w {
@@ -612,7 +611,7 @@ fn render_skill_bar(
     ui.dummy([0.0, CARD_GAP]);
 }
 
-// ─── Individual section renderers (for column-aligned layouts) ───
+// Individual section renderers (for column-aligned layouts)
 
 pub fn render_build_skills(
     ui: &Ui,

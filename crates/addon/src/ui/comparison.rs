@@ -1172,7 +1172,7 @@ fn render_rotation_breakdown(ui: &Ui, rotation: &RotationBreakdown, db: Option<&
     }
 }
 
-// ─── Trust UI helpers ────────────────────────────────────────────────────────
+// Trust UI helpers
 
 /// Render data quality badge in comparison header.
 fn render_data_quality_badge(ui: &Ui, suggestion: &BuildSuggestion) {

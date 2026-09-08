@@ -95,7 +95,7 @@ pub struct ScrapeResult {
     pub failed: usize,
 }
 
-// ─── Matching ────────────────────────────────────────────────────────────────
+// Matching
 
 /// Find the best-matching benchmark build for a given profession, mode, and role hint.
 ///
@@ -593,7 +593,7 @@ fn role_similarity(a: &str, b: &str) -> usize {
     words_a.intersection(&words_b).count()
 }
 
-// ─── Scoring proxy ────────────────────────────────────────────────────────────
+// Scoring proxy
 
 /// Estimate a score for a benchmark build by proxying its gear prefix through the
 /// objective scorer. This is a rough estimate — the benchmark build has no full

@@ -2030,7 +2030,7 @@ mod tests {
         assert!(result.skill_usage.len() >= 2);
     }
 
-    // ─── Cleanse detection tests ───
+    // Cleanse detection tests
 
     fn cleanse_skill(cooldown_ms: u32, conditions: u32) -> RotationSkill {
         RotationSkill {
@@ -2497,7 +2497,7 @@ mod tests {
             "high-crit params pick strike"
         );
     }
-    // ── Reaper slice interaction pair (specs/004-simulator-trust) ────────────
+    // Reaper slice interaction pair (specs/004-simulator-trust)
 
     /// 2 × 2 over Might stacks {0, 25} and `strike_mult` {1.0, 1.1} on total
     /// strike damage. Under the multiplicative model

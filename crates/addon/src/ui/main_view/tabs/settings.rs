@@ -37,7 +37,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.columns(2, "##settings_cols", false);
     ui.set_column_width(0, col_w);
 
-    // ── LEFT COLUMN ─────────────────────────────────────────────────
+    // Left column
     build_display::render_card_header(ui, &t("settings.ai_provider"), theme::pal().gold);
     render_api_keys_section(ui, state, col_w);
     ui.spacing();
@@ -146,7 +146,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     build_display::render_card_header(ui, &t("settings.news"), theme::pal().gold);
     render_news_sources(ui, state, col_w);
 
-    // ── RIGHT COLUMN ────────────────────────────────────────────────
+    // Right column
     ui.next_column();
     ui.indent_by(gutter);
 
@@ -168,7 +168,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.unindent_by(gutter);
     ui.columns(1, "##settings_end", false);
 
-    // ── Footer ─────────────────────────────────────────────────────
+    // Footer
     ui.dummy([0.0, 4.0]);
     ui.separator();
     ui.dummy([0.0, 2.0]);
@@ -1331,7 +1331,7 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
     // One item_spacing does not read as a break; this does.
     ui.dummy([0.0, style.item_spacing[1]]);
 
-    // ── custom base colors: swatch grid + one always-visible picker ──
+    // custom base colors: swatch grid + one always-visible picker
     //
     // Click a swatch (or its label) to point the picker at that base, edit it
     // in place, then click the next one. No popup, no modal.
@@ -1504,7 +1504,7 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
         crate::ui::save_config_detached(state);
     }
 
-    // ── caption: what the selected base actually paints ──────────────
+    // caption: what the selected base actually paints
     // One description instead of five, at full column width where the long
     // German and Russian strings wrap best. Naming the slot in words is also
     // the one selection cue no color choice can erase.

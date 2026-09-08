@@ -190,7 +190,7 @@ fn render_whats_new(ui: &Ui, state: &AddonState) {
         });
 }
 
-// ── Messages table (pure helpers) ────────────────────────────────────────────
+// Messages table (pure helpers)
 
 /// `YYYY-MM-DD HH:MM` (UTC) from unix seconds - the Saves tab's `format_timestamp`
 /// algorithm, copied because that helper is private to `saveload.rs`.
@@ -425,7 +425,7 @@ fn actions_width(a: &RowActions, btn_w: f32, edit_w: f32, gap: f32) -> f32 {
     widths.iter().sum::<f32>() + gap * (n - 1.0).max(0.0)
 }
 
-// ── Messages table (ImGui) ───────────────────────────────────────────────────
+// Messages table (ImGui)
 
 /// Copied from `saveload.rs` (private there): the header/row plate behind a table row.
 fn paint_row_plate(ui: &Ui, height: f32, header: bool) {

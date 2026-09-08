@@ -341,7 +341,7 @@ pub struct GearPrefixGroups {
     pub weapons: String,
 }
 
-// ─── Per-slot gear model ───
+// Per-slot gear model
 
 /// Every equipment slot that carries a stat prefix. A two-handed weapon fills
 /// its set's Main slot; the Off slot stays `None`.

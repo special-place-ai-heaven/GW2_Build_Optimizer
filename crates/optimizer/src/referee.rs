@@ -11,7 +11,7 @@ use crate::stats;
 use crate::validation::ValidatedBuild;
 use gw2_core::types::GameMode;
 
-// ─── Viability Gate Thresholds ───────────────────────────────────────────────
+// Viability Gate Thresholds
 
 /// Minimum stunbreak skills required for PvP/WvW viability. // HEURISTIC
 const MIN_STUNBREAKS: u32 = 1;
@@ -81,7 +81,7 @@ pub const EHP_FLOOR_WVW: f64 = EHP_FLOOR_WVW_HAVOC;
 /// every real amulet/rune combo viable. // HEURISTIC
 pub const EHP_FLOOR_PVP: f64 = 8_000.0;
 
-// ─── Viability Gate Types ────────────────────────────────────────────────────
+// Viability Gate Types
 
 /// Which gate a `GateResult` describes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -347,7 +347,7 @@ pub fn evaluate_viability_gates_for(
     let need_cleanses = cleanse_count_floor(profile);
 
     if requires_pvp_gates {
-        // ── Stunbreak gate ──────────────────────────────────────────────────
+        // Stunbreak gate
         gates.push(match rotation {
             Some(rot) => {
                 let passed = rot.stunbreak_count >= need_stunbreaks;
@@ -412,7 +412,7 @@ pub fn evaluate_viability_gates_for(
             });
         }
 
-        // ── Cleanse gate ────────────────────────────────────────────────────
+        // Cleanse gate
         gates.push(match rotation {
             Some(rot) => {
                 let required_rate = effective_cleanse_requirement(scenario, rot, profile);
@@ -653,7 +653,7 @@ pub fn evaluate_viability_gates_for(
         }
     }
 
-    // ── Effective health gate (always runs) ─────────────────────────────────
+    // Effective health gate (always runs)
     // WvW floor varies by combat tier: Roamers need more personal sustain than Zerg players.
     // PvP uses its own (lower) floor — amulet-based gear has a smaller stat budget than
     // ascended WvW, so reusing WvW floors here would non-viably score most real PvP builds.
@@ -1161,7 +1161,7 @@ pub fn evaluate_validated_build_with(
     let rotation = prepared
         .as_ref()
         .map(|p| engine::simulate_prepared(p, validated, db, Some(scenario)));
-    // ── Viability gating ──────────────────────────────────────────────────────
+    // Viability gating
     // Run before score computation. Non-viable builds receive sentinel score -1.0.
     let profile = objective_profile_for(
         scenario,
@@ -1297,7 +1297,7 @@ mod tests {
     use gw2_core::types::GameMode;
     use std::collections::HashMap;
 
-    // ─── Gate test helpers ────────────────────────────────────────────────
+    // Gate test helpers
 
     /// A `SimulationResult` that satisfies all WvW/PvP gates.
     fn make_viable_rotation() -> SimulationResult {
@@ -1607,7 +1607,7 @@ mod tests {
         gates.iter().find(|g| &g.gate == kind)
     }
 
-    // ─── Gate scenario tests ──────────────────────────────────────────────
+    // Gate scenario tests
 
     /// WvW build with all gates satisfied → viable.
     #[test]
@@ -2464,7 +2464,7 @@ mod tests {
         assert!(gate_by_kind(&report.gates, &ViabilityGate::StunbreakCount).is_none());
     }
 
-    // ─── CombatTier-differentiated EHP gate tests ──────────────────────────
+    // CombatTier-differentiated EHP gate tests
 
     /// EHP between Zerg floor and Roam floor: passes Zerg (Squad), fails Roaming (Solo).
     #[test]
@@ -2483,7 +2483,7 @@ mod tests {
         let mut combat = make_viable_combat();
         combat.effective_health = mid_ehp;
 
-        // ── Squad scenario → should pass EHP gate ──
+        // Squad scenario → should pass EHP gate
         let squad_scenario = ScenarioSpec {
             game_mode: GameMode::WvW,
             combat_tier: crate::scenario::CombatTier::Squad,
@@ -2503,7 +2503,7 @@ mod tests {
             mid_ehp, EHP_FLOOR_WVW_ZERG, ehp_squad.note
         );
 
-        // ── Solo scenario (Roaming) → should fail EHP gate ──
+        // Solo scenario (Roaming) → should fail EHP gate
         let solo_scenario = ScenarioSpec {
             game_mode: GameMode::WvW,
             combat_tier: crate::scenario::CombatTier::Solo,
@@ -2829,7 +2829,7 @@ mod tests {
         };
         assert!(search_rank(&mk(0.7)) > search_rank(&mk(0.5)));
     }
-    // ── Reaper slice (specs/004-simulator-trust) ────────────────────────────
+    // Reaper slice (specs/004-simulator-trust)
 
     #[test]
     fn reaper_fixture_evaluates_without_errors() {
