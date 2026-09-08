@@ -199,7 +199,6 @@ fn lock_empty_state_key(db: Option<&GameDb>, profession_name: &str) -> Option<&'
     }
 }
 
-
 /// Lock only the three supported specialization slots, even for malformed API/cache input.
 fn lock_current_specs(locks: &mut BuildLocks, db: &GameDb, current_specs: &[(u32, Vec<u32>)]) {
     for (slot, (spec_id, trait_ids)) in current_specs.iter().take(locks.specs.len()).enumerate() {
