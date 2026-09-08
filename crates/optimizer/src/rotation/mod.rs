@@ -4,6 +4,8 @@
 
 pub mod builder;
 pub mod combat_model;
+#[cfg(test)]
+pub(crate) mod necro_published;
 pub mod prose;
 #[cfg(test)]
 pub(crate) mod reaper_fixture;

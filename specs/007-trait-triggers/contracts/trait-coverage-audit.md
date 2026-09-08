@@ -32,10 +32,10 @@ Rules:
 
 ## Wiki-number check
 
-`records_match_their_wiki_pages`, `#[ignore]`, reads `crawl_url` from `dev.cfg` (skips with a printed reason when absent) and, for every record whose `source` starts with `https://wiki.guildwars2.com/`:
+`records_match_their_wiki_pages`, `#[ignore]`, reads `wiki_api` from `dev.cfg` (the MediaWiki `api.php` URL; skips with a printed reason when absent) and, for every record whose `source` starts with `https://wiki.guildwars2.com/`:
 
-1. Fetches the page as markdown through the crawl4ai `md` endpoint (one request per distinct URL, cached for the run).
-2. Extracts the WvW column where the page has mode-split tables, else the single value.
+1. Fetches the page's wikitext through the wiki API (`action=parse&prop=wikitext`, one request per distinct URL, cached for the run). The rendered page shows the PvE column and hides the competitive facts behind mode tabs; only the wikitext carries every `game mode=wvw` fact, so a crawl of the rendered page cannot do this check (found 2026-09-08: 50 of 149 records "mismatched" against the rendered markdown, every one a competitive split).
+2. Reads the numbers of every fact template; a single stack or count (`1`) is implicit on the page and not checked.
 3. Asserts every factual number in the record (`value`, `effect_duration`, `internal_cooldown`, `max_stacks`, `status_operation.amount_value`, `base_duration_ms / 1000`, `target_count`, `prerequisite.foe_health.percent`, `healing_power_coefficient`) appears in that text as a number token.
 4. Prints one line per record: `ok trait:2020:0 Chilling Nova` or `MISMATCH trait:2020:0 Chilling Nova: 1.125 not on page`.
 

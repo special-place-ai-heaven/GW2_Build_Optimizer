@@ -612,6 +612,8 @@ struct ConditionalSpec {
     /// `true`: the percent is critical damage, not strike damage (Death
     /// Perception's in-shroud half). Sprint 3.
     crit_damage: bool,
+    /// `true`: the percent is critical chance (Decimate Defenses). Sprint 3.
+    crit_chance: bool,
     /// Threshold state as of the last evaluation.
     active: bool,
     stacks: u32,
@@ -630,6 +632,21 @@ enum ConditionalKind {
     },
     /// Holds while the player is in shroud (Sprint 3, US1).
     InShroud,
+    /// Holds while the record's prerequisite does (foe condition, foe
+    /// health), re-read at every strike (Sprint 3, US3: Cold Shoulder,
+    /// Close to Death).
+    Prerequisite(Prerequisite),
+    /// A timed bonus a proc switched on (Sprint 3, US3: Soul Barbs, Dread);
+    /// holds until `until_ms`, refreshed by the next firing.
+    Timed {
+        until_ms: u32,
+    },
+    /// Scales with the foe's stacks of `condition`, capped at `max`
+    /// (Sprint 3, US3: Decimate Defenses).
+    PerFoeStack {
+        condition: String,
+        max: u32,
+    },
 }
 
 /// The Necromancer in shroud (`specs/005-wvw-proc-sites`, US6): the weapon
@@ -765,6 +782,10 @@ struct Timeline<'a> {
     /// Records whose prerequisite refused at least once (end-of-fight
     /// `prerequisite never met` summary).
     prerequisite_refused: HashSet<String>,
+    /// Last refusal reason traced per record, so the trace carries changes.
+    last_prerequisite_skip: HashMap<String, String>,
+    /// [`TRACE_CAP`] in production; a diagnostic test may widen it.
+    trace_cap: usize,
     /// Any `Periodic` record loaded: the tick calls the site only then.
     has_periodic: bool,
     /// Fight population (FR-003a); Solo unless the caller says otherwise.
@@ -952,6 +973,8 @@ impl<'a> Timeline<'a> {
             trigger_status: None,
             status_trigger_depth: 0,
             prerequisite_refused: HashSet::new(),
+            last_prerequisite_skip: HashMap::new(),
+            trace_cap: TRACE_CAP,
             has_periodic: false,
             population: FightPopulation::solo(),
             cleave_damage: 0.0,
@@ -1002,8 +1025,67 @@ impl<'a> Timeline<'a> {
                 || matches!(effect.inner_category, Some(EffectCategory::StrikeDamagePct));
             let crit_bonus = matches!(effect.category, EffectCategory::CritDamagePct)
                 || matches!(effect.inner_category, Some(EffectCategory::CritDamagePct));
+            let crit_chance = matches!(effect.category, EffectCategory::CritChancePct)
+                || matches!(effect.inner_category, Some(EffectCategory::CritChancePct));
+            // Per-stack bonus on a foe condition (Sprint 3, US3).
+            if (strike_bonus || crit_bonus || crit_chance)
+                && matches!(effect.trigger_rule, TriggerRule::Conditional)
+                && effect.max_stacks.is_some()
+                && effect
+                    .prerequisite
+                    .as_ref()
+                    .is_some_and(|p| p.foe_condition.is_some())
+            {
+                let (Some(condition), Some(&max), Some(&percent)) = (
+                    effect
+                        .prerequisite
+                        .as_ref()
+                        .and_then(|p| p.foe_condition.clone()),
+                    effect.max_stacks.as_ref().and_then(resolved),
+                    resolved(&effect.value),
+                ) else {
+                    self.note_unmodeled(format!("{} (unresolved value)", effect.source_name));
+                    continue;
+                };
+                self.conditional_specs.push(ConditionalSpec {
+                    source_name: effect.source_name.clone(),
+                    kind: ConditionalKind::PerFoeStack { condition, max },
+                    percent,
+                    crit_damage: crit_bonus,
+                    crit_chance,
+                    active: false,
+                    stacks: 0,
+                    expires_at_ms: 0,
+                });
+                continue;
+            }
             // In-shroud bonuses (Sprint 3, US1): active while in shroud.
-            if (strike_bonus || crit_bonus)
+            if (strike_bonus || crit_bonus || crit_chance)
+                && matches!(effect.trigger_rule, TriggerRule::Conditional)
+                && effect
+                    .prerequisite
+                    .as_ref()
+                    .is_some_and(|p| p.in_shroud.is_none())
+            {
+                let (Some(prerequisite), Some(&percent)) =
+                    (effect.prerequisite.clone(), resolved(&effect.value))
+                else {
+                    self.note_unmodeled(format!("{} (unresolved value)", effect.source_name));
+                    continue;
+                };
+                self.conditional_specs.push(ConditionalSpec {
+                    source_name: effect.source_name.clone(),
+                    kind: ConditionalKind::Prerequisite(prerequisite),
+                    percent,
+                    crit_damage: crit_bonus,
+                    crit_chance,
+                    active: false,
+                    stacks: 0,
+                    expires_at_ms: 0,
+                });
+                continue;
+            }
+            if (strike_bonus || crit_bonus || crit_chance)
                 && matches!(effect.trigger_rule, TriggerRule::Conditional)
                 && effect
                     .prerequisite
@@ -1019,6 +1101,7 @@ impl<'a> Timeline<'a> {
                     kind: ConditionalKind::InShroud,
                     percent,
                     crit_damage: crit_bonus,
+                    crit_chance,
                     active: false,
                     stacks: 0,
                     expires_at_ms: 0,
@@ -1044,6 +1127,7 @@ impl<'a> Timeline<'a> {
                     },
                     percent,
                     crit_damage: false,
+                    crit_chance: false,
                     active: false,
                     stacks: 0,
                     expires_at_ms: 0,
@@ -1071,6 +1155,7 @@ impl<'a> Timeline<'a> {
                     },
                     percent,
                     crit_damage: false,
+                    crit_chance: false,
                     active: false,
                     stacks: 0,
                     expires_at_ms: 0,
@@ -1107,6 +1192,16 @@ impl<'a> Timeline<'a> {
                 self.note_unmodeled(format!("{} (unresolved value)", effect.source_name));
                 continue;
             };
+            // A duration the page did not give for this mode is unresolved,
+            // never zero (Sprint 3: Soul Barbs' competitive duration).
+            if effect
+                .effect_duration
+                .as_ref()
+                .is_some_and(|d| !d.is_resolved())
+            {
+                self.note_unmodeled(format!("{} (unresolved value)", effect.source_name));
+                continue;
+            }
 
             self.proc_specs.push(ProcSpec {
                 source_type: effect.source_type.clone(),
@@ -1518,6 +1613,15 @@ impl<'a> Timeline<'a> {
             }
             if has_control && self.enemy_stability {
                 priority -= 500_000.0;
+            }
+            // Sprint 3 (specs/007-trait-triggers): the shroud is the build.
+            // An affordable entry outranks weapon damage; the improviser
+            // used to leave a Reaper out of shroud for the whole fight.
+            if self.is_shroud_entry(skill.skill_id)
+                && self.in_shroud.is_none()
+                && self.can_pay_resource(skill.skill_id)
+            {
+                priority += 600_000.0;
             }
             if !self.can_pay_resource(skill.skill_id) {
                 if self.is_shroud_entry(skill.skill_id) {
@@ -2078,6 +2182,7 @@ impl<'a> Timeline<'a> {
                 };
                 // Conditional bonuses (US3), evaluated at the strike.
                 self.update_conditionals();
+                let fury_bonus = fury_bonus + self.crit_chance_conditional_pct();
                 let mut damage = self.params.weapon_strength * power / reference_armor()
                     * dmg_multiplier
                     * *hit_count as f64
@@ -2642,7 +2747,7 @@ impl<'a> Timeline<'a> {
         if !self.trace_enabled {
             return;
         }
-        if self.trace.len() >= TRACE_CAP {
+        if self.trace.len() >= self.trace_cap {
             self.trace_truncated = true;
             return;
         }
@@ -2660,6 +2765,7 @@ impl<'a> Timeline<'a> {
         let ratio = self.player_health / self.params.max_health.max(1.0);
         let now = self.now_ms;
         let in_shroud = self.in_shroud.is_some();
+        let prerequisite_holds = PrerequisiteView::of(self);
         let mut changes = Vec::new();
         for spec in &mut self.conditional_specs {
             match spec.kind {
@@ -2685,6 +2791,49 @@ impl<'a> Timeline<'a> {
                             spec.source_name.clone(),
                             false,
                             "stacks expired".to_string(),
+                        ));
+                    }
+                }
+                ConditionalKind::Prerequisite(ref prerequisite) => {
+                    let holds = prerequisite_holds.is_ok_with(prerequisite);
+                    if holds != spec.active {
+                        spec.active = holds;
+                        changes.push((
+                            spec.source_name.clone(),
+                            holds,
+                            if holds {
+                                "prerequisite holds".to_string()
+                            } else {
+                                "prerequisite lapsed".to_string()
+                            },
+                        ));
+                    }
+                }
+                ConditionalKind::PerFoeStack { ref condition, max } => {
+                    let stacks = prerequisite_holds.foe_stacks(condition).min(max);
+                    let holds = stacks > 0;
+                    spec.stacks = stacks;
+                    if holds != spec.active {
+                        spec.active = holds;
+                        changes.push((
+                            spec.source_name.clone(),
+                            holds,
+                            format!("{stacks} stacks of {condition}"),
+                        ));
+                    }
+                }
+                ConditionalKind::Timed { until_ms } => {
+                    let holds = now < until_ms;
+                    if holds != spec.active {
+                        spec.active = holds;
+                        changes.push((
+                            spec.source_name.clone(),
+                            holds,
+                            if holds {
+                                "timed bonus on".to_string()
+                            } else {
+                                "timed bonus expired".to_string()
+                            },
                         ));
                     }
                 }
@@ -2725,15 +2874,37 @@ impl<'a> Timeline<'a> {
     fn strike_conditional_mult(&self) -> f64 {
         self.conditional_specs
             .iter()
-            .filter(|spec| !spec.crit_damage)
+            .filter(|spec| !spec.crit_damage && !spec.crit_chance)
             .map(|spec| match spec.kind {
-                ConditionalKind::Threshold { .. } | ConditionalKind::InShroud if spec.active => {
+                ConditionalKind::Threshold { .. }
+                | ConditionalKind::InShroud
+                | ConditionalKind::Prerequisite(_)
+                | ConditionalKind::Timed { .. }
+                    if spec.active =>
+                {
                     1.0 + spec.percent / 100.0
                 }
-                ConditionalKind::Stacking { .. } => 1.0 + spec.stacks as f64 * spec.percent / 100.0,
+                ConditionalKind::Stacking { .. } | ConditionalKind::PerFoeStack { .. } => {
+                    1.0 + spec.stacks as f64 * spec.percent / 100.0
+                }
                 _ => 1.0,
             })
             .product()
+    }
+
+    /// Critical chance percentage points of every conditional bonus that
+    /// holds now (Sprint 3: Decimate Defenses per vulnerability stack).
+    fn crit_chance_conditional_pct(&self) -> f64 {
+        self.conditional_specs
+            .iter()
+            .filter(|spec| spec.crit_chance && spec.active)
+            .map(|spec| match spec.kind {
+                ConditionalKind::PerFoeStack { .. } | ConditionalKind::Stacking { .. } => {
+                    spec.stacks as f64 * spec.percent
+                }
+                _ => spec.percent,
+            })
+            .sum()
     }
 
     /// Critical damage percentage points of every conditional bonus that
@@ -2742,7 +2913,10 @@ impl<'a> Timeline<'a> {
         self.conditional_specs
             .iter()
             .filter(|spec| spec.crit_damage && spec.active)
-            .map(|spec| spec.percent)
+            .map(|spec| match spec.kind {
+                ConditionalKind::PerFoeStack { .. } => spec.stacks as f64 * spec.percent,
+                _ => spec.percent,
+            })
             .sum()
     }
 
@@ -2846,11 +3020,18 @@ impl<'a> Timeline<'a> {
                 }),
             crate::data::normalized_effects::TriggerScope::Slot(slot) => skill_id
                 .and_then(|id| self.skills.iter().find(|s| s.skill_id == id))
-                .and_then(|s| s.slot_name.as_deref())
-                .is_some_and(|name| {
-                    name.split('_')
-                        .next()
-                        .is_some_and(|head| head.eq_ignore_ascii_case(slot))
+                .is_some_and(|s| {
+                    // `Shroud_N`: the Nth skill of the shroud bar (wiki
+                    // "shroud skill N"); otherwise the slot head before `_`.
+                    if let Some(n) = slot.strip_prefix("Shroud_") {
+                        return s.weapon_set == super::SHROUD_SET
+                            && s.slot_name.as_deref() == Some(&format!("Weapon_{n}"));
+                    }
+                    s.slot_name.as_deref().is_some_and(|name| {
+                        name.split('_')
+                            .next()
+                            .is_some_and(|head| head.eq_ignore_ascii_case(slot))
+                    })
                 }),
             crate::data::normalized_effects::TriggerScope::Status(status) => self
                 .trigger_status
@@ -2964,7 +3145,9 @@ impl<'a> Timeline<'a> {
                     .as_ref()
                     .map_or(Ok(()), |p| self.prerequisite_holds(p))
                 {
-                    skipped_prerequisite.push((proc_spec.source_name.clone(), reason));
+                    if proc_spec.next_ready_ms <= self.now_ms {
+                        skipped_prerequisite.push((idx, proc_spec.source_name.clone(), reason));
+                    }
                 } else if proc_spec.next_ready_ms <= self.now_ms {
                     ready.push(idx);
                 } else {
@@ -2972,9 +3155,25 @@ impl<'a> Timeline<'a> {
                 }
             }
         }
-        for (name, reason) in skipped_prerequisite {
+        for (idx, name, reason) in skipped_prerequisite {
+            // A periodic record re-checks its prerequisite at its next
+            // interval, not every tick (Shrouded Removal: every 3 s while in
+            // shroud), so the refusal is one trace per period.
+            if matches!(trigger, TriggerRule::Periodic) {
+                let spec = &mut self.proc_specs[idx];
+                spec.next_ready_ms = self
+                    .now_ms
+                    .saturating_add(spec.internal_cooldown_ms.max(TIMELINE_TICK_MS));
+            }
             self.prerequisite_refused.insert(name.clone());
-            self.trace(TraceKind::ProcSkippedPrerequisite, &name, reason);
+            // One trace per reason change, not one per hit: the refusal is a
+            // state the reader needs once, until the record fires or the
+            // reason moves (`foe not Chilled` -> `not in shroud`).
+            if self.last_prerequisite_skip.get(&name) != Some(&reason) {
+                self.last_prerequisite_skip
+                    .insert(name.clone(), reason.clone());
+                self.trace(TraceKind::ProcSkippedPrerequisite, &name, reason);
+            }
         }
         for idx in on_cooldown {
             let (name, ready_at) = (
@@ -3021,6 +3220,31 @@ impl<'a> Timeline<'a> {
                 )
             };
             let fired = match category {
+                EffectCategory::StrikeDamagePct if value > 2.0 && duration_ms > 0 => {
+                    // Sprint 3 (US3): a percent with a duration is a timed
+                    // strike bonus (Soul Barbs, Dread), one spec per source,
+                    // refreshed by every firing.
+                    let until_ms = self.now_ms.saturating_add(duration_ms);
+                    match self
+                        .conditional_specs
+                        .iter_mut()
+                        .find(|spec| spec.source_name == name)
+                    {
+                        Some(spec) => spec.kind = ConditionalKind::Timed { until_ms },
+                        None => self.conditional_specs.push(ConditionalSpec {
+                            source_name: name.clone(),
+                            kind: ConditionalKind::Timed { until_ms },
+                            percent: value,
+                            crit_damage: false,
+                            crit_chance: false,
+                            active: false,
+                            stacks: 0,
+                            expires_at_ms: 0,
+                        }),
+                    }
+                    self.update_conditionals();
+                    true
+                }
                 EffectCategory::StrikeDamagePct => {
                     // A coefficient (≤ 2.0) is a flame-blast style proc on
                     // the unequipped weapon strength that cannot crit (wiki
@@ -3066,6 +3290,21 @@ impl<'a> Timeline<'a> {
                     } else {
                         let amount = (value + coefficient * self.params.healing_power) * scale;
                         self.heal(amount.max(0.0) * p);
+                        // An area heal (Life from Death): the allies in range
+                        // are counted (FR-003a).
+                        if let Some(op) = operation
+                            .as_ref()
+                            .filter(|op| matches!(op.target_side, TargetSide::Ally))
+                        {
+                            let targets = op
+                                .target_count
+                                .as_ref()
+                                .and_then(resolved)
+                                .copied()
+                                .unwrap_or(1);
+                            let extra = self.ally_fan_out(targets, &name) - 1;
+                            self.ally_healing += extra as f64 * amount.max(0.0) * p;
+                        }
                     }
                     true
                 }
@@ -3077,6 +3316,7 @@ impl<'a> Timeline<'a> {
                 }
             };
             if fired {
+                self.last_prerequisite_skip.remove(&name);
                 *self.proc_fire_counts.entry(name.clone()).or_default() += 1;
                 self.trace(TraceKind::ProcFired, &name, format!("{category:?} ×{p:.2}"));
                 // Sprint 3 (US1): a trait record also says it is a trait
@@ -3598,6 +3838,81 @@ fn strike_crit_factor_with_crit_damage(
     let crit_mult = crate::data::universal_formulas::formulas().crit_damage(ferocity) / 100.0
         + crit_damage_bonus_pct / 100.0;
     1.0 + chance * (crit_mult - 1.0)
+}
+
+/// A snapshot of what `prerequisite_holds` reads, so `update_conditionals`
+/// can evaluate foe prerequisites while it holds `&mut self.conditional_specs`.
+struct PrerequisiteView {
+    in_shroud: bool,
+    foe_conditions: Vec<String>,
+    foe_stacks: Vec<(String, u32)>,
+    foe_ratio: Option<f64>,
+}
+
+impl PrerequisiteView {
+    fn of(timeline: &Timeline<'_>) -> Self {
+        Self {
+            in_shroud: timeline.in_shroud.is_some(),
+            foe_conditions: timeline
+                .outgoing_conditions
+                .iter()
+                .filter(|c| c.expires_at_ms > timeline.now_ms)
+                .map(|c| c.name.clone())
+                .collect(),
+            foe_stacks: timeline
+                .outgoing_conditions
+                .iter()
+                .filter(|c| c.expires_at_ms > timeline.now_ms)
+                .map(|c| (c.name.clone(), c.stacks))
+                .collect(),
+            foe_ratio: timeline
+                .profile
+                .target_health
+                .filter(|h| *h > 0.0)
+                .map(|target| timeline.enemy_health / target),
+        }
+    }
+
+    /// Unexpired stacks of `condition` on the primary foe.
+    fn foe_stacks(&self, condition: &str) -> u32 {
+        self.foe_stacks
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case(condition))
+            .map(|(_, stacks)| *stacks)
+            .sum()
+    }
+
+    fn is_ok_with(&self, prerequisite: &Prerequisite) -> bool {
+        if prerequisite
+            .in_shroud
+            .is_some_and(|want| want != self.in_shroud)
+        {
+            return false;
+        }
+        if let Some(condition) = &prerequisite.foe_condition {
+            if !self
+                .foe_conditions
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(condition))
+            {
+                return false;
+            }
+        }
+        if let Some(gate) = &prerequisite.foe_health {
+            let (Some(ratio), Some(&percent)) = (self.foe_ratio, resolved(&gate.percent)) else {
+                return false;
+            };
+            let holds = if gate.above {
+                ratio > percent / 100.0
+            } else {
+                ratio < percent / 100.0
+            };
+            if !holds {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 fn same_trigger(left: &TriggerRule, right: &TriggerRule) -> bool {
@@ -7094,6 +7409,7 @@ mod necro_experiments {
         skill.name = name.into();
         skill.effects = effects;
         skill.cooldown_ms = 0;
+        skill.cast_time_ms = 300;
         skill.weapon_set = 0;
         skill.categories.clear();
         skill
@@ -7693,6 +8009,256 @@ mod necro_experiments {
         );
     }
 
+    // ---- The Necromancer catalogue (US3): every executable record in
+    // data/normalized_effects/2026-01-13/wvw.json fires on one press order.
+
+    /// One press order that reaches every trigger kind and scope the
+    /// catalogue uses: a chill before the crits, a fear, a blind, a burn, a
+    /// torment, a boon on the player, a corrupt, an elixir, a shout, a
+    /// signet, the generators, the shroud (skills 1 and 2) and the exit.
+    fn catalogue_run(low_health: bool) -> WvwCombatReport {
+        const FEAR: u32 = 41_010;
+        const BLIND: u32 = 41_011;
+        const BURN: u32 = 41_012;
+        const TORMENT: u32 = 41_013;
+        const FURY: u32 = 41_014;
+        const CORRUPT: u32 = 41_015;
+        const ELIXIR: u32 = 41_016;
+        let p = prepared();
+        let condition = |name: &str| SkillEffect::ApplyCondition {
+            condition: name.into(),
+            stacks: 1,
+            duration_ms: 6_000,
+        };
+        let mut skills = p.skills.clone();
+        for skill in &mut skills {
+            if [fx::YOU_ARE_ALL_WEAKLINGS, fx::CHILLED_TO_THE_BONE].contains(&skill.skill_id) {
+                skill.categories = vec!["Shout".into()];
+            }
+            if skill.skill_id == fx::SIGNET_OF_VAMPIRISM {
+                skill.categories = vec!["Signet".into()];
+            }
+            // The fixture's shroud bar uses placeholder slots; the API
+            // publishes shroud skills as Weapon_1..Weapon_5.
+            if skill.weapon_set == super::super::SHROUD_SET {
+                skill.slot_name = Some(format!("Weapon_{}", skill.skill_id - fx::REAPER_SHROUD));
+            }
+        }
+        skills.push(synthetic_skill(
+            &p.skills,
+            FEAR,
+            "Fear Skill",
+            vec![condition("Fear")],
+        ));
+        skills.push(synthetic_skill(
+            &p.skills,
+            BLIND,
+            "Blind Skill",
+            vec![condition("Blinded")],
+        ));
+        skills.push(synthetic_skill(
+            &p.skills,
+            BURN,
+            "Burn Skill",
+            vec![condition("Burning")],
+        ));
+        skills.push(synthetic_skill(
+            &p.skills,
+            TORMENT,
+            "Torment Skill",
+            vec![condition("Torment")],
+        ));
+        skills.push(synthetic_skill(
+            &p.skills,
+            FURY,
+            "Fury Skill",
+            vec![SkillEffect::ApplyBuff {
+                buff: "Fury".into(),
+                stacks: 1,
+                duration_ms: 5_000,
+            }],
+        ));
+        skills.push(synthetic_skill(
+            &p.skills,
+            CORRUPT,
+            "Corrupt Skill",
+            vec![SkillEffect::CorruptBoons],
+        ));
+        let mut elixir = synthetic_skill(&p.skills, ELIXIR, "Elixir Skill", vec![]);
+        elixir.categories = vec!["Elixir".into()];
+        skills.push(elixir);
+        let mut exit = p
+            .skills
+            .iter()
+            .find(|s| s.skill_id == fx::REAPER_SHROUD)
+            .expect("entry skill")
+            .clone();
+        exit.skill_id = fx::EXIT_SHROUD;
+        exit.name = "Exit Reaper's Shroud".into();
+        exit.weapon_set = super::super::SHROUD_SET;
+        exit.cooldown_ms = 0;
+        exit.effects.clear();
+        skills.push(exit);
+        // The fixture's catalogue press order (T050) with the synthetic
+        // status skills after the chill, the signet before the generators
+        // and the exit at the end.
+        let base = fx::opener_catalogue();
+        let mut opener = vec![
+            base[0], base[1], FEAR, BLIND, BURN, TORMENT, FURY, CORRUPT, ELIXIR,
+        ];
+        opener.extend_from_slice(&base[2..4]);
+        opener.push(fx::SIGNET_OF_VAMPIRISM);
+        opener.extend_from_slice(&base[4..]);
+        opener.push(fx::SHROUD_2);
+        opener.push(fx::EXIT_SHROUD);
+        let db = fx::db();
+        let build = fx::build();
+        let (ctx, _) = fx::scenario();
+        let (rules, complete) = engine::wvw_resource_rules(
+            &build,
+            &p.skills,
+            &db,
+            "Necromancer",
+            &ctx,
+            p.params.max_health,
+        );
+        let records: Vec<&NormalizedEffect> = crate::data::normalized_effects::effects()
+            .effects_for_mode("WvW")
+            .iter()
+            .filter(|e| e.source_type == SourceType::Trait && e.coverage.is_none())
+            .collect();
+        let mut profile = open_profile(40_000, vec![]);
+        if low_health {
+            profile.target_health = Some(30_000.0);
+        }
+        let mut timeline = Timeline::new(
+            &skills,
+            &p.params,
+            profile,
+            still_enemy(),
+            &records,
+            &rules,
+            complete,
+            Vec::new(),
+        );
+        if low_health {
+            // The foe starts under the 50 % gates the Spite records read.
+            timeline.enemy_health = 10_000.0;
+        }
+        // Diagnostic run: the production cap would cut a 40 s catalogue
+        // fight short of its shroud exit.
+        timeline.trace_cap = 8_192;
+        timeline.opener = &opener;
+        timeline.trace_enabled = true;
+        timeline.trace_loaded_unmodeled();
+        timeline.run();
+        timeline.report()
+    }
+
+    /// US3: every executable Necromancer record fires at least once on the
+    /// catalogue press order (or the low-health variant), by trait name and
+    /// payload category; unresolved records sit on the line as unresolved.
+    #[test]
+    fn necro_catalogue_every_record_fires_on_its_scenario() {
+        let runs = [catalogue_run(false), catalogue_run(true)];
+        let records: Vec<&NormalizedEffect> = crate::data::normalized_effects::effects()
+            .effects_for_mode("WvW")
+            .iter()
+            .filter(|e| {
+                e.source_type == SourceType::Trait
+                    && e.coverage.is_none()
+                    && e.source
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("read 2026-09-08")
+            })
+            .collect();
+        assert!(
+            records.len() >= 50,
+            "the catalogue is loaded: {}",
+            records.len()
+        );
+        let mut failures = Vec::new();
+        for record in &records {
+            let name = record.source_name.as_str();
+            let payload = record.inner_category.as_ref().unwrap_or(&record.category);
+            let payload = format!("{payload:?}");
+            let unresolved = !record.value.is_resolved();
+            let ok = if unresolved {
+                runs.iter().any(|r| {
+                    r.unmodeled_sources
+                        .iter()
+                        .any(|s| s == &format!("{name} (unresolved value)"))
+                })
+            } else if matches!(record.trigger_rule, TriggerRule::Conditional) {
+                runs.iter().any(|r| {
+                    r.trace.iter().any(|e| {
+                        e.source == name
+                            && matches!(
+                                e.kind,
+                                TraceKind::ShroudBonusActive | TraceKind::ConditionalActivated
+                            )
+                    })
+                })
+            } else {
+                runs.iter().any(|r| {
+                    r.trace.iter().any(|e| {
+                        e.kind == TraceKind::TraitFired
+                            && e.source == name
+                            && e.detail.starts_with(&payload)
+                    })
+                })
+            };
+            if !ok {
+                failures.push(format!(
+                    "{} [{}] {:?} {}",
+                    record.effect_id, name, record.trigger_rule, payload
+                ));
+            }
+        }
+        let shroud: Vec<String> = runs[0]
+            .trace
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    TraceKind::ShroudEntered | TraceKind::ShroudRefused | TraceKind::ShroudExited
+                ) || e.source.contains("Reaper's Shroud")
+            })
+            .map(|e| format!("{} {:?} {} {}", e.t_ms, e.kind, e.source, e.detail))
+            .collect();
+        let tail: Vec<String> = runs[0]
+            .trace
+            .iter()
+            .rev()
+            .take(6)
+            .map(|e| format!("{} {:?} {} {}", e.t_ms, e.kind, e.source, e.detail))
+            .collect();
+        assert!(
+            failures.is_empty(),
+            "{} of {} records never fired:\n{}\nshroud events: {:?}\ntrace tail: {:?}\nactions {} refusals {:?}",
+            failures.len(),
+            records.len(),
+            failures.join("\n"),
+            shroud,
+            tail,
+            runs[0].successful_action_count,
+            runs[0].shroud_refusals
+        );
+        // Nothing an executable record covers is left on the line as "no record".
+        for run in &runs {
+            for record in &records {
+                assert!(
+                    !run.unmodeled_sources
+                        .iter()
+                        .any(|s| s == &format!("{} (no record)", record.source_name)),
+                    "{} has a record",
+                    record.source_name
+                );
+            }
+        }
+    }
+
     /// US2 timing: a long cooldown fires once and refuses the rest.
     #[test]
     fn necro_long_cooldown_fires_once_and_traces_refusal() {
@@ -7887,13 +8453,7 @@ mod necro_experiments {
         skills.push(exit);
         let (by_skill, _) = open_with_skills(
             Some(skills),
-            &[
-                fx::GRAVEDIGGER,
-                fx::DEATH_SPIRAL,
-                fx::WELL_OF_SUFFERING,
-                fx::REAPER_SHROUD,
-                fx::EXIT_SHROUD,
-            ],
+            &fx::opener_shroud_exit(),
             &[&record],
             8_000,
             vec![],

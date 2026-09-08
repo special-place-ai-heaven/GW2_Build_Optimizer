@@ -6,7 +6,7 @@ Validation guide for a finished increment. Commands run from the repo root in Gi
 
 - Rust stable; the workspace builds on `255371f`.
 - `dev.cfg` with `addons_dir` (the cache and the character tabs live under it). Needed by §4 and §5 only.
-- `dev.cfg` with `crawl_url` (the crawl4ai base URL) for §5's wiki check; without it the check skips and says so.
+- `dev.cfg` with `wiki_api` (the wiki's `api.php` URL, for the wikitext read) for §5's wiki check; without it the check skips and says so.
 
 ## 1. The mechanism, on the fixture
 
@@ -83,4 +83,4 @@ Then: bump the patch version, CHANGELOG section naming the profession and the tr
 - No edit under `crates/optimizer/src/prompts.rs`, `crates/optimizer/src/llm/`, `crates/optimizer/examples/choya_live.rs`, or the addon's UI.
 - No change to any `*_NORM`, `WEIGHT_BUDGET`, gate threshold or objective profile; the only rank-key change is the support-kind ally-boon slot in `contracts/wvw-report.md`.
 - No fixture id or value inside `data/`; no wiki page text committed.
-- No machine path in code; `dev.cfg` supplies `addons_dir` and `crawl_url`.
+- No machine path in code; `dev.cfg` supplies `addons_dir` and `wiki_api`.
