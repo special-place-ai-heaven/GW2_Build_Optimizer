@@ -58,23 +58,7 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
         .and_then(|n| n.chars().next())
         .unwrap_or('?');
 
-    let cooking = if state.main.chat.waiting {
-        // Live elapsed timer: during provider slowness the user must see the
-        // request is alive (and how long they've waited), not a frozen bubble.
-        let elapsed = state
-            .main
-            .chat_wait_started
-            .map(|t| t.elapsed().as_secs())
-            .unwrap_or(0);
-        Some(format!(
-            "{} · {:02}:{:02}",
-            state.main.optimize_stage,
-            elapsed / 60,
-            elapsed % 60
-        ))
-    } else {
-        None
-    };
+    let live = state.main.chat.waiting.then(|| live_view(state));
     if state.main.chat.names.is_none() {
         if let Some(db) = state.main.game_db.as_deref() {
             state.main.chat.names =
@@ -107,7 +91,7 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
     match crate::ui::chat_bar::render_chat_bar(
         ui,
         &mut state.main.chat,
-        cooking.as_deref(),
+        live.as_ref(),
         user_icon.as_deref(),
         user_letter,
         &picks,
@@ -119,7 +103,80 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
         Some(ChatAction::OpenPick(n)) => {
             crate::ui::main_view::provider_picks::adopt_provider_pick(state, n)
         }
+        Some(ChatAction::ToggleLive) => {
+            if let Ok(mut live) = state.main.chat_live.lock() {
+                live.expanded = !live.expanded;
+            }
+        }
+        Some(ChatAction::Stop) => crate::ui::main_view::chat_flow::stop_chat(state),
+        Some(ChatAction::Retry(i)) => crate::ui::main_view::chat_flow::retry_chat(state, i),
         None => {}
+    }
+}
+
+/// The step a request is in, in the player's language.
+pub(crate) fn step_label(step: Option<gw2_optimizer::llm::live::Step>) -> String {
+    use gw2_optimizer::llm::live::Step;
+    match step {
+        None => t("choya.thinking"),
+        Some(Step::Handshake) => t("chat.step_handshake"),
+        Some(Step::Reference) => t("chat.step_reference"),
+        Some(Step::Lookup(n)) => gw2_core::i18n::tf("chat.step_lookup", &[("n", &n.to_string())]),
+        Some(Step::Scoring) => t("chat.step_scoring"),
+        Some(Step::Writing) => t("chat.step_writing"),
+        Some(Step::Fallback) => t("chat.step_fallback"),
+    }
+}
+
+/// Snapshot the live output for this frame's bubble. The lock is held only
+/// for the copy; the bubble draws from the snapshot.
+fn live_view(state: &AddonState) -> crate::ui::chat_bar::LiveView {
+    use gw2_optimizer::llm::live::LiveMode;
+    const LINES: usize = 12;
+    let now = std::time::Instant::now();
+    let elapsed = state
+        .main
+        .chat_wait_started
+        .map(|t| now.saturating_duration_since(t).as_secs())
+        .unwrap_or(0);
+    let Ok(live) = state.main.chat_live.lock() else {
+        return crate::ui::chat_bar::LiveView {
+            line: t("choya.thinking"),
+            ..Default::default()
+        };
+    };
+    let line = format!(
+        "{} \u{00b7} {:02}:{:02}",
+        step_label(live.step),
+        elapsed / 60,
+        elapsed % 60
+    );
+    let stall = live
+        .stalled_for(now)
+        .map(|secs| gw2_core::i18n::tf("chat.stall", &[("secs", &secs.to_string())]));
+    let tail = |text: &str| -> Vec<String> {
+        let lines: Vec<&str> = text.lines().collect();
+        lines
+            .iter()
+            .skip(lines.len().saturating_sub(LINES))
+            .map(|l| l.to_string())
+            .collect()
+    };
+    let (caption, body) = match live.mode {
+        LiveMode::AtOnce => (t("chat.live_at_once"), Vec::new()),
+        LiveMode::Reasoning if !live.reasoning.is_empty() => {
+            (t("chat.live_reasoning"), tail(&live.reasoning))
+        }
+        _ if !live.content.is_empty() => (t("chat.live_content"), tail(&live.content)),
+        _ => (t("chat.live_tools"), tail(&live.tools.join("\n"))),
+    };
+    crate::ui::chat_bar::LiveView {
+        line,
+        stall,
+        note: live.note.clone(),
+        expanded: live.expanded,
+        caption,
+        body,
     }
 }
 

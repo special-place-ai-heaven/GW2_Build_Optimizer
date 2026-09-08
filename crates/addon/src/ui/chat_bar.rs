@@ -61,6 +61,29 @@ pub enum ChatAction {
     OpenBuild,
     /// A published build offered beside ours was chosen, by index.
     OpenPick(usize),
+    /// The thinking bubble was clicked: expand or collapse it.
+    ToggleLive,
+    /// Stop the request in flight, keeping what arrived.
+    Stop,
+    /// Ask the model to continue the reply at this index.
+    Retry(usize),
+}
+
+/// What the thinking bubble shows this frame, snapshotted by the caller from
+/// the live output so the bubble never holds that lock while drawing.
+#[derive(Debug, Clone, Default)]
+pub struct LiveView {
+    /// `{step} · mm:ss`
+    pub line: String,
+    /// "nothing for N s", when stalled.
+    pub stall: Option<String>,
+    /// One extra line (a retry that starts over).
+    pub note: String,
+    pub expanded: bool,
+    /// Caption over the body: Thinking / Answer so far / Tools called.
+    pub caption: String,
+    /// The newest lines of the mode's text.
+    pub body: Vec<String>,
 }
 
 /// One community build, as much of it as a card beside the reply can show.
@@ -281,7 +304,7 @@ fn draw_bubble_text(ui: &Ui, p: [f32; 2], lines: &[Line], msg_i: usize) {
 pub fn render_chat_bar(
     ui: &Ui,
     state: &mut ChatBarState,
-    cooking: Option<&str>,
+    live: Option<&LiveView>,
     user_icon: Option<&str>,
     user_letter: char,
     picks: &[PickCard],
@@ -398,18 +421,51 @@ pub fn render_chat_bar(
                         action = Some(ChatAction::OpenPick(n));
                     }
                 }
+                // A stopped or fallback reply can be continued.
+                if !from_user && state.history[i].retry_of.is_some() && !state.waiting {
+                    let cy = ui.cursor_screen_pos()[1] + 4.0;
+                    ui.set_cursor_screen_pos([bub_x, cy]);
+                    if theme::pill(ui, &t("chat.retry"), false, &format!("##retry{i}")) {
+                        action = Some(ChatAction::Retry(i));
+                    }
+                }
                 let end_y = ui.cursor_screen_pos()[1].max(origin[1] + bubble_h) + ROW_GAP;
                 ui.set_cursor_screen_pos([origin[0], end_y]);
             }
             if state.waiting {
-                let line = cooking
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| t("choya.thinking"));
-                let (lines, bw, bh) = bubble_size(ui, &line, avail, false, &names);
-                let row_h = bh.max(AVATAR) + ROW_GAP;
+                // The thinking bubble (specs/006 US5): step and seconds,
+                // the stall line, and on click the model's live output.
+                let text = match live {
+                    Some(v) => {
+                        let mut t = v.line.clone();
+                        if let Some(stall) = &v.stall {
+                            t.push('\n');
+                            t.push_str(stall);
+                        }
+                        if !v.note.is_empty() {
+                            t.push('\n');
+                            t.push_str(&v.note);
+                        }
+                        if v.expanded {
+                            t.push_str("\n\n");
+                            t.push_str(&v.caption);
+                            for line in &v.body {
+                                t.push('\n');
+                                t.push_str(line);
+                            }
+                        }
+                        t
+                    }
+                    None => t("choya.thinking"),
+                };
+                let (lines, bw, bh) = bubble_size(ui, &text, avail, false, &names);
+                let stop = t("chat.stop");
+                let pill_h = ui.calc_text_size(&stop)[1] + 6.0;
+                let row_h = bh.max(AVATAR) + 6.0 + pill_h + ROW_GAP;
                 let origin = ui.cursor_screen_pos();
-                ui.invisible_button("##talk_thinking", [avail, row_h]);
+                if ui.invisible_button("##talk_thinking", [avail, row_h]) {
+                    action = Some(ChatAction::ToggleLive);
+                }
                 let av_x = origin[0];
                 theme::draw_choya_thinking_row(
                     ui,
@@ -419,6 +475,11 @@ pub fn render_chat_bar(
                 let bub_x = origin[0] + AVATAR + AVATAR_GAP;
                 draw_bubble_rect(ui, [bub_x, origin[1]], bw, bh, false);
                 draw_bubble_text(ui, [bub_x, origin[1]], &lines, usize::MAX);
+                ui.set_cursor_screen_pos([bub_x, origin[1] + bh + 6.0]);
+                if theme::pill(ui, &stop, false, "##chat_stop") {
+                    action = Some(ChatAction::Stop);
+                }
+                ui.set_cursor_screen_pos([origin[0], origin[1] + row_h]);
             }
             if state.scroll_to_end {
                 ui.set_scroll_here_y();

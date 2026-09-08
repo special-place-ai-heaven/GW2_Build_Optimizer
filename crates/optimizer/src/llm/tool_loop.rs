@@ -102,6 +102,7 @@ pub(crate) fn run<D: TurnDriver>(
     on_progress: &mut dyn FnMut(usize, usize, &[String]),
 ) -> Result<String, D::Err> {
     let mut conv = driver.open(prompt);
+    super::live::mode(super::live::LiveMode::ToolsOnly);
     let gathering_until = Instant::now() + TOOL_PHASE_BUDGET;
     let mut last_round = Duration::ZERO;
     let mut nudged = false;
@@ -121,6 +122,7 @@ pub(crate) fn run<D: TurnDriver>(
             break;
         }
         let round_started = Instant::now();
+        super::live::step(super::live::Step::Lookup(turn_index + 1));
         driver.trim(&mut conv);
         let mode = TurnMode::Explore;
         let turn = match driver.turn(&mut conv, Some(tools), mode) {
@@ -209,6 +211,7 @@ pub(crate) fn run<D: TurnDriver>(
         return Err(driver.cancelled());
     }
     on_progress(max_turns, max_turns, &[]);
+    super::live::step(super::live::Step::Writing);
     driver.push_user(&mut conv, CLOSING_TURN);
     driver.trim(&mut conv);
     match driver.turn(&mut conv, None, TurnMode::Closing) {
