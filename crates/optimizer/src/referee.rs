@@ -1357,6 +1357,7 @@ mod tests {
                 resource_legal: true,
                 resource_model_complete: true,
                 unmodeled_sources: Vec::new(),
+                coverage: Vec::new(),
                 trace: Vec::new(),
                 trace_truncated: false,
                 proc_trials: Vec::new(),
