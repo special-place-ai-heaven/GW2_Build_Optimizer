@@ -467,7 +467,6 @@ impl NormalizedEffectsData {
             .unwrap_or(&[])
     }
 
-    /// Number of loaded effects files.
     pub fn file_count(&self) -> usize {
         self.files.len()
     }

@@ -78,7 +78,6 @@ impl BuildLocks {
         self.specs[2]
     }
 
-    /// Check if any locks are set at all.
     pub fn has_any_locks(&self) -> bool {
         self.specs.iter().any(|s| s.is_some())
             || self

@@ -193,7 +193,6 @@ impl SlotBudgets {
         self.map.get(&(slot, shape))
     }
 
-    /// Number of loaded entries.
     pub fn len(&self) -> usize {
         self.map.len()
     }

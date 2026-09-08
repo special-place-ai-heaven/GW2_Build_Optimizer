@@ -109,7 +109,6 @@ impl Default for OptimizationWeights {
 }
 
 impl OptimizationWeights {
-    /// Number of axes.
     pub const NUM_AXES: usize = 6;
 
     /// Clamp all axes to [0.0, 1.0].

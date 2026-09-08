@@ -330,7 +330,6 @@ impl BoonFormulas {
         self.map.get(boon)
     }
 
-    /// Number of loaded boon definitions.
     pub fn len(&self) -> usize {
         self.map.len()
     }
@@ -527,7 +526,6 @@ impl ConditionFormulas {
         self.map.get(condition)
     }
 
-    /// Number of loaded condition definitions.
     pub fn len(&self) -> usize {
         self.map.len()
     }
