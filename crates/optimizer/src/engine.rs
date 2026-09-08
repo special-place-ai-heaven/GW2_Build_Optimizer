@@ -1740,6 +1740,7 @@ fn wvw_resource_rules(
                 cost,
                 gain_on_hit: 0.0,
                 spend_all: false,
+                ..Default::default()
             });
             continue;
         }
@@ -1750,6 +1751,7 @@ fn wvw_resource_rules(
                 cost: skill.cost.unwrap_or(0) as f64,
                 gain_on_hit: 0.0,
                 spend_all: false,
+                ..Default::default()
             });
             continue;
         }
@@ -1760,6 +1762,7 @@ fn wvw_resource_rules(
                 cost: skill.cost.unwrap_or(10) as f64,
                 gain_on_hit: 0.0,
                 spend_all: false,
+                ..Default::default()
             });
             continue;
         }
@@ -1774,6 +1777,7 @@ fn wvw_resource_rules(
                 cost: skill.cost.unwrap_or(1).max(1) as f64,
                 gain_on_hit: 0.0,
                 spend_all: true,
+                ..Default::default()
             });
             continue;
         }
@@ -1790,6 +1794,7 @@ fn wvw_resource_rules(
                 cost: 0.0,
                 gain_on_hit: 1.0,
                 spend_all: false,
+                ..Default::default()
             });
         }
     }

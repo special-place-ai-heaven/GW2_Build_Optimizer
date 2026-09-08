@@ -1329,6 +1329,9 @@ mod tests {
                 source_duration_multiplier: None,
             }),
             inner_category: None,
+            health_threshold: None,
+            proc_chance: None,
+            trigger_scope: None,
         }
     }
 

@@ -15,8 +15,9 @@
 
 use crate::balance::BalanceContext;
 use crate::data::normalized_effects::{
-    AmountMode, EffectCategory, NormalizedEffect, OperationType, SourceType, StackingRule,
-    StatusOperation, TargetScope, TargetSide, TriggerRule, UptimeModel, UptimeModelKind,
+    AmountMode, EffectCategory, HealthThreshold, NormalizedEffect, OperationType, SourceType,
+    StackingRule, StatusOperation, TargetScope, TargetSide, TriggerRule, TriggerScope, UptimeModel,
+    UptimeModelKind,
 };
 use crate::data::{EvidenceLevel, FactualValue};
 use crate::gamedb::GameDb;
@@ -62,6 +63,8 @@ pub const SIGIL_OF_FORCE: u32 = 24615;
 pub const RUNE_OF_THE_SCHOLAR: u32 = 99001;
 pub const RELIC_OF_THE_THIEF: u32 = 99002;
 pub const MARAUDER_ITEMSTAT: u32 = 99436;
+/// Precision-free three-stat set for the zero-crit negative control.
+pub const SOLDIER_ITEMSTAT: u32 = 99437;
 /// Real GW2 trait id of Path of Corruption (Curses), used only in `records()`.
 pub const PATH_OF_CORRUPTION: u32 = 1693;
 
@@ -472,26 +475,39 @@ pub fn db() -> GameDb {
         db.items.insert(item.id, item);
     }
 
-    db.itemstats.insert(
-        MARAUDER_ITEMSTAT,
-        gw2_api::models::ItemStat {
-            id: MARAUDER_ITEMSTAT,
-            name: "Marauder".into(),
-            attributes: [
+    for (id, name, attributes) in [
+        (
+            MARAUDER_ITEMSTAT,
+            "Marauder",
+            vec![
                 ("Power", 0.35),
                 ("Precision", 0.35),
                 ("Vitality", 0.25),
                 ("CritDamage", 0.25),
-            ]
-            .into_iter()
-            .map(|(attribute, multiplier)| gw2_api::models::StatAttribute {
-                attribute: attribute.into(),
-                multiplier,
-                value: 0,
-            })
-            .collect(),
-        },
-    );
+            ],
+        ),
+        (
+            SOLDIER_ITEMSTAT,
+            "Soldier",
+            vec![("Power", 0.35), ("Toughness", 0.25), ("Vitality", 0.25)],
+        ),
+    ] {
+        db.itemstats.insert(
+            id,
+            gw2_api::models::ItemStat {
+                id,
+                name: name.into(),
+                attributes: attributes
+                    .into_iter()
+                    .map(|(attribute, multiplier)| gw2_api::models::StatAttribute {
+                        attribute: attribute.into(),
+                        multiplier,
+                        value: 0,
+                    })
+                    .collect(),
+            },
+        );
+    }
 
     db
 }
@@ -575,6 +591,79 @@ pub fn build() -> ValidatedBuild {
     build
 }
 
+// ── Sprint 2 variants (specs/005-wvw-proc-sites) ────────────────────────────
+
+/// `build()` with Superior Sigil of Fire moved to set 2's main-hand seat and
+/// Force kept on set 1: the weapon-swap experiments (US2).
+pub fn build_with_set_two_fire() -> ValidatedBuild {
+    let mut build = build();
+    build.set_sigil_seats([
+        Some(ValidatedItem {
+            id: SIGIL_OF_FORCE,
+            name: "Superior Sigil of Force".into(),
+        }),
+        None,
+        Some(ValidatedItem {
+            id: SIGIL_OF_FIRE,
+            name: "Superior Sigil of Fire".into(),
+        }),
+        None,
+    ]);
+    build
+}
+
+/// `build()` on a precision-free prefix, so the critical chance is the
+/// base 5 % only and an on-crit proc has almost nothing to fire from
+/// (US1 negative control; the test pins precision to zero on top).
+pub fn build_with_zero_precision() -> ValidatedBuild {
+    let mut build = build();
+    build.fill_worn_gear_slots(PrefixRef {
+        itemstat_id: SOLDIER_ITEMSTAT,
+        name: "Soldier".into(),
+    });
+    build
+}
+
+/// Scholar-shaped and Thief-shaped records on the fixture's synthetic rune
+/// and relic ids (US3): +5 % strike while above 90 % health, and +1 % strike
+/// per stack, five stacks, 6 s, from weapon skills with a recharge.
+pub fn records_with_threshold_and_stack() -> Vec<NormalizedEffect> {
+    let mut scholar = record(
+        SourceType::Rune,
+        RUNE_OF_THE_SCHOLAR,
+        "Superior Rune of the Scholar",
+        EffectCategory::TriggeredEffect,
+        5.0,
+        TriggerRule::OnHealthThreshold,
+    );
+    scholar.stacking_rule = StackingRule::Multiplicative;
+    scholar.inner_category = Some(EffectCategory::StrikeDamagePct);
+    scholar.health_threshold = Some(HealthThreshold {
+        above: true,
+        percent: FactualValue::Resolved(90.0),
+    });
+
+    let mut thief = record(
+        SourceType::Relic,
+        RELIC_OF_THE_THIEF,
+        "Relic of the Thief",
+        EffectCategory::TriggeredEffect,
+        1.0,
+        TriggerRule::OnHit,
+    );
+    thief.stacking_rule = StackingRule::Multiplicative;
+    thief.inner_category = Some(EffectCategory::StrikeDamagePct);
+    thief.max_stacks = Some(FactualValue::Resolved(5));
+    thief.effect_duration = Some(FactualValue::Resolved(6.0));
+    thief.trigger_scope = Some(TriggerScope::WeaponSkillWithRecharge);
+    vec![scholar, thief]
+}
+
+/// Set-1 hit, then a set-2 weapon skill so the timeline swaps (US2).
+pub fn opener_with_swap() -> Vec<u32> {
+    vec![GRAVEDIGGER, GHASTLY_CLAWS]
+}
+
 /// Press order for the pinned experiments.
 pub fn opener() -> Vec<u32> {
     vec![
@@ -619,6 +708,9 @@ fn record(
         max_stacks: None,
         status_operation: None,
         inner_category: None,
+        health_threshold: None,
+        proc_chance: None,
+        trigger_scope: None,
     }
 }
 
