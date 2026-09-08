@@ -102,14 +102,14 @@ description: "Task list for Choya readable chat (006)"
 
 ### Tests
 
-- [ ] T023 [P] [US3] Add tests in `crates/addon/src/ui/main_view/provider_picks.rs`: `picks_key_from_newest_plate` (key ignores selection, ignores published tabs, changes when a new empty-`source_url` suggestion arrives, empty when none)
-- [ ] T024 [P] [US3] Add test `cards_anchor_is_newest_open_result_message` in `crates/addon/src/ui/chat_bar.rs`: history [plate reply (open_result), question, answer] → anchor index 0; [plate, new plate] → 1; no plate → None
+- [X] T023 [P] [US3] Add tests in `crates/addon/src/ui/main_view/provider_picks.rs`: `picks_key_from_newest_plate` (key ignores selection, ignores published tabs, changes when a new empty-`source_url` suggestion arrives, empty when none)
+- [X] T024 [P] [US3] Add test `cards_anchor_is_newest_open_result_message` in `crates/addon/src/ui/chat_bar.rs`: history [plate reply (open_result), question, answer] → anchor index 0; [plate, new plate] → 1; no plate → None
 
 ### Implementation
 
-- [ ] T025 [US3] Add `fn picks_key(suggestions: &[BuildSuggestion]) -> Option<String>` building `"{profession}|{mode}|{role}|{specs}"` from the newest suggestion with empty `source_url`; use it in `refresh_provider_picks` (`crates/addon/src/ui/main_view/provider_picks.rs` ~line 21) instead of the selected suggestion; T023 green
-- [ ] T026 [US3] Add `fn cards_anchor(history: &[ChatMessage]) -> Option<usize>` (newest message with `open_result == true`) in `crates/addon/src/ui/chat_bar.rs` and render the cards under that message in `render_chat_bar` (~line 222) instead of only the last; `Clear` still empties picks with history; T024 green
-- [ ] T027 [US3] Run the US3 tests, `cargo fmt --all`; commit "Provider cards belong to the plate, not the last message (006 US3)"
+- [X] T025 [US3] Add `fn picks_key(suggestions: &[BuildSuggestion]) -> Option<String>` building `"{profession}|{mode}|{role}|{specs}"` from the newest suggestion with empty `source_url`; use it in `refresh_provider_picks` (`crates/addon/src/ui/main_view/provider_picks.rs` ~line 21) instead of the selected suggestion; T023 green
+- [X] T026 [US3] Add `fn cards_anchor(history: &[ChatMessage]) -> Option<usize>` (newest message with `open_result == true`) in `crates/addon/src/ui/chat_bar.rs` and render the cards under that message in `render_chat_bar` (~line 222) instead of only the last; `Clear` still empties picks with history; T024 green
+- [X] T027 [US3] Run the US3 tests, `cargo fmt --all`; commit "Provider cards belong to the plate, not the last message (006 US3)"
 
 **Checkpoint**: US3 complete.
 
@@ -123,16 +123,16 @@ description: "Task list for Choya readable chat (006)"
 
 ### Tests
 
-- [ ] T028 [P] [US4] Add tests in `crates/addon/src/ui/main_view/chat_flow.rs`: `classify_scoring_question_with_plate` ("Score that exact build and tell me the gates and what was not simulated", has_plate → AboutPlate); `classify_same_without_plate` → Chat; `classify_build_with_elite` ("make me a reaper build" → Build{elite: Some("Reaper")}); `classify_ambiguous_is_chat`; `profession_for_elite` ("Reaper" → Necromancer via `db.specializations`)
-- [ ] T029 [P] [US4] Add test `verdict_bullets_shape` in `crates/addon/src/ui/main_view/chat_flow.rs`: given a `score_full_build` verdict JSON fixture, the formatted reply has lines for viable, gates, score and coverage and starts with `choya.fallback_verdict`
+- [X] T028 [P] [US4] Add tests in `crates/addon/src/ui/main_view/chat_flow.rs`: `classify_scoring_question_with_plate` ("Score that exact build and tell me the gates and what was not simulated", has_plate → AboutPlate); `classify_same_without_plate` → Chat; `classify_build_with_elite` ("make me a reaper build" → Build{elite: Some("Reaper")}); `classify_ambiguous_is_chat`; `profession_for_elite` ("Reaper" → Necromancer via `db.specializations`)
+- [X] T029 [P] [US4] Add test `verdict_bullets_shape` in `crates/addon/src/ui/main_view/chat_flow.rs`: given a `score_full_build` verdict JSON fixture, the formatted reply has lines for viable, gates, score and coverage and starts with `choya.fallback_verdict`
 
 ### Implementation
 
-- [ ] T030 [US4] Add `enum RequestKind { Build { elite: Option<String> }, AboutPlate, Chat }` and `fn classify(message: &str, has_plate: bool) -> RequestKind` in `crates/addon/src/ui/main_view/chat_flow.rs` reusing `wants_a_build` (~1411), `asks_about_own_build` (~1436), `wished_elite_spec` (~1497); AboutPlate keywords: score, gate, simulate, why, explain, rate, compare, "what was not"; ambiguous → Chat; T028 green
-- [ ] T031 [US4] Add `fn profession_for_elite(db: &GameDb, elite: &str) -> Option<Profession>` in `crates/addon/src/ui/main_view/chat_flow.rs`; make `reference_build` (~1125) take the profession and an elite lock instead of always the character's
-- [ ] T032 [US4] Add `fn verdict_reply(verdict: &serde_json::Value) -> String` in `crates/addon/src/ui/main_view/chat_flow.rs` formatting `gemini_tools::score_full_build` output as bullets (viable, gates, score, what was not simulated) prefixed by `choya.fallback_verdict`; T029 green
-- [ ] T033 [US4] Replace the single `fallback_reference` branch (`crates/addon/src/ui/main_view/chat_flow.rs` ~line 237) with a match on `classify`: Build → `reference_build(profession_for_elite)` with `build_failed = true`; AboutPlate → `verdict_reply` on the newest plate, no suggestion pushed, `build_failed = false`; Chat → `choya.fallback_chat` line with the two next steps (ask for a build, score the plate), nothing run; "no build to score" line when AboutPlate has no plate
-- [ ] T034 [US4] Run the US4 tests, `cargo fmt --all`; commit "Choya fallback matches the request: verdict for scoring questions, wished profession for builds (006 US4)"
+- [X] T030 [US4] Add `enum RequestKind { Build { elite: Option<String> }, AboutPlate, Chat }` and `fn classify(message: &str, has_plate: bool) -> RequestKind` in `crates/addon/src/ui/main_view/chat_flow.rs` reusing `wants_a_build` (~1411), `asks_about_own_build` (~1436), `wished_elite_spec` (~1497); AboutPlate keywords: score, gate, simulate, why, explain, rate, compare, "what was not"; ambiguous → Chat; T028 green
+- [X] T031 [US4] (already in place: `send_chat_message` resolves the wished elite's profession before spawning, so `reference_build` gets it) Add `fn profession_for_elite(db: &GameDb, elite: &str) -> Option<Profession>` in `crates/addon/src/ui/main_view/chat_flow.rs`; make `reference_build` (~1125) take the profession and an elite lock instead of always the character's
+- [X] T032 [US4] Add `fn verdict_reply(verdict: &serde_json::Value) -> String` in `crates/addon/src/ui/main_view/chat_flow.rs` formatting `gemini_tools::score_full_build` output as bullets (viable, gates, score, what was not simulated) prefixed by `choya.fallback_verdict`; T029 green
+- [X] T033 [US4] Replace the single `fallback_reference` branch (`crates/addon/src/ui/main_view/chat_flow.rs` ~line 237) with a match on `classify`: Build → `reference_build(profession_for_elite)` with `build_failed = true`; AboutPlate → `verdict_reply` on the newest plate, no suggestion pushed, `build_failed = false`; Chat → `choya.fallback_chat` line with the two next steps (ask for a build, score the plate), nothing run; "no build to score" line when AboutPlate has no plate
+- [X] T034 [US4] Run the US4 tests, `cargo fmt --all`; commit "Choya fallback matches the request: verdict for scoring questions, wished profession for builds (006 US4)"
 
 **Checkpoint**: US4 complete.
 
