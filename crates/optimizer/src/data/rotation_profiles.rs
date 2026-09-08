@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use super::{try_load, DataLoadError, EvidenceLevel};
 
-// ─── Embedded JSON (compile-time) ───
+// Embedded JSON (compile-time)
 
 const PVE_PROFILES_JSON: &str = include_str!("../../../../data/rotation_profiles/pve.json");
 const PVP_PROFILES_JSON: &str = include_str!("../../../../data/rotation_profiles/pvp.json");
@@ -42,8 +42,6 @@ pub fn try_load_rotation_profiles() -> Result<(), Vec<DataLoadError>> {
     )
 }
 
-// ─── Error type ───
-
 #[derive(Debug, Error)]
 pub enum RotationProfileError {
     #[error("JSON parse error: {0}")]
@@ -51,8 +49,6 @@ pub enum RotationProfileError {
     #[error("validation error: {0}")]
     ValidationError(String),
 }
-
-// ─── Types ───
 
 /// Typed application metrics for conditions, matching P3-04 stacking modes.
 /// Tagged enum: the `mode` field in JSON determines which variant is used.
@@ -183,8 +179,6 @@ impl RotationProfile {
     }
 }
 
-// ─── Data Container ───
-
 /// All loaded rotation profiles, organized by mode.
 #[derive(Debug)]
 pub struct RotationProfileData {
@@ -212,7 +206,6 @@ impl RotationProfileData {
             gw2_core::types::GameMode::WvW => &self.wvw,
         };
 
-        // 1. Exact match (profession + elite_spec)
         if let Some(spec) = elite_spec {
             if let Some(p) = profiles
                 .iter()
@@ -222,7 +215,6 @@ impl RotationProfileData {
             }
         }
 
-        // 2. Profession-only match
         if let Some(p) = profiles
             .iter()
             .find(|p| p.profession == profession && p.elite_spec.is_none())
@@ -230,11 +222,9 @@ impl RotationProfileData {
             return Some(p);
         }
 
-        // 3. Generic fallback
         profiles.iter().find(|p| p.profession == "Generic")
     }
 
-    /// Get all profiles for a given mode.
     pub fn profiles_for_mode(&self, mode: &gw2_core::types::GameMode) -> &[RotationProfile] {
         match mode {
             gw2_core::types::GameMode::PvE => &self.pve,
@@ -248,8 +238,6 @@ impl RotationProfileData {
         self.pve.len() + self.pvp.len() + self.wvw.len()
     }
 }
-
-// ─── Loader ───
 
 fn load_all_rotation_profiles() -> Result<RotationProfileData, RotationProfileError> {
     let pve: Vec<RotationProfile> = serde_json::from_str(PVE_PROFILES_JSON)?;
@@ -383,7 +371,7 @@ fn validate_profiles(
     Ok(())
 }
 
-// ─── Compatibility helpers ───
+// Compatibility helpers
 
 /// Convert a RotationProfile's condition application into a legacy-compatible
 /// ConditionWeights-like struct (5 f64 fields matching the old ConditionWeights).
@@ -472,8 +460,6 @@ impl BuffProfileFromScenario {
         }
     }
 }
-
-// ─── Tests ───
 
 #[cfg(test)]
 mod tests {

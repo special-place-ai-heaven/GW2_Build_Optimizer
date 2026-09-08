@@ -100,7 +100,6 @@ impl DataCache {
         meta.build != current_build
     }
 
-    /// Get the cached build number for a key, if it exists.
     pub fn cached_build(&self, key: &str) -> Option<u32> {
         let path = self.path_for(key);
         let file = std::fs::File::open(&path).ok()?;
@@ -114,7 +113,6 @@ impl DataCache {
             .map(|m| m.build)
     }
 
-    /// Delete a cache entry.
     pub fn delete(&self, key: &str) {
         let path = self.path_for(key);
         std::fs::remove_file(&path).ok();
@@ -155,7 +153,6 @@ impl DataCache {
         }
     }
 
-    /// Check if a cache key exists.
     pub fn exists(&self, key: &str) -> bool {
         self.path_for(key).exists()
     }
@@ -165,7 +162,6 @@ impl DataCache {
         self.base_path.join("graphics")
     }
 
-    // --- Character-specific cache methods ---
     // Character data changes independently of game patches, so these use
     // simple JSON files without build-number invalidation.
 
@@ -232,7 +228,6 @@ impl DataCache {
         result
     }
 
-    /// Load the cached character name list. Returns None if not cached.
     pub fn load_characters(&self) -> Result<Option<Vec<String>>, CacheError> {
         let path = self.path_for("characters");
         if !path.exists() {
@@ -348,7 +343,6 @@ mod tests {
             cache.load_character("Fun Detected", "buildtabs").unwrap();
         assert_eq!(loaded, Some(tabs));
 
-        // Different character returns None
         let other: Option<Vec<String>> = cache.load_character("Other Char", "buildtabs").unwrap();
         assert!(other.is_none());
 

@@ -40,10 +40,6 @@ pub fn build_gemini_context(config: &ContextConfig) -> String {
     sections.join("\n\n")
 }
 
-// ---------------------------------------------------------------------------
-// Section builders
-// ---------------------------------------------------------------------------
-
 /// Profession info: name, available weapons with hand flags and elite spec gates.
 fn section_profession_info(config: &ContextConfig) -> String {
     let mut out = format!("=== PROFESSION: {} ===\n", config.profession_name);
@@ -264,7 +260,6 @@ fn section_profession_skills(config: &ContextConfig) -> String {
         if wt != current_weapon {
             current_weapon = wt.to_string();
 
-            // Check if weapon requires elite spec
             let gate = config
                 .db
                 .profession(config.profession_name)
@@ -422,10 +417,6 @@ fn section_current_build(summary: &str) -> String {
 
     format!("=== CURRENT BUILD (Your Equipped Build) ===\n{}", sanitized)
 }
-
-// ---------------------------------------------------------------------------
-// Fact formatting
-// ---------------------------------------------------------------------------
 
 /// Format a single Fact as compact human-readable text for the context document.
 /// Returns None for facts that don't contribute to synergy reasoning

@@ -315,7 +315,7 @@ pub fn execute_tool(name: &str, args: &Value, ctx: &ToolContext) -> Value {
     }
 }
 
-// ─── Tool Declarations ───
+// Tool Declarations
 
 fn decl_get_profession_info() -> FunctionDeclaration {
     FunctionDeclaration {
@@ -586,7 +586,7 @@ fn decl_get_optimizer_results() -> FunctionDeclaration {
     }
 }
 
-// ─── Synergy Tool Declarations ───
+// Synergy Tool Declarations
 
 fn decl_search_traits_by_effect() -> FunctionDeclaration {
     FunctionDeclaration {
@@ -725,7 +725,7 @@ fn decl_simulate_rotation() -> FunctionDeclaration {
     }
 }
 
-// ─── Tool Execution Handlers ───
+// Tool Execution Handlers
 
 fn exec_get_profession_info(args: &Value, ctx: &ToolContext) -> Value {
     let prof_name = args["profession"].as_str().unwrap_or(ctx.profession_name);
@@ -1334,7 +1334,7 @@ fn exec_get_optimizer_results(ctx: &ToolContext) -> Value {
     json!({ "candidates": results })
 }
 
-// ─── Synergy Tool Execution Handlers ───
+// Synergy Tool Execution Handlers
 
 fn exec_search_traits_by_effect(args: &Value, ctx: &ToolContext) -> Value {
     let effect_type = args["effect_type"].as_str().unwrap_or("");
@@ -1950,8 +1950,6 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
     })
 }
 
-// ─── Helpers ───
-
 /// A full kit of one prefix, priced the same way the optimizer prices one.
 ///
 /// Walking the raw `EQUIPMENT_SLOTS` table counted **all sixteen** entries,
@@ -2274,7 +2272,6 @@ fn detect_proc_triggers(facts: &[Fact], description: Option<&str>) -> Vec<String
         }
     };
 
-    // Check fact descriptions
     for fact in facts {
         match fact {
             Fact::Buff { text: Some(t), .. }
@@ -2285,7 +2282,6 @@ fn detect_proc_triggers(facts: &[Fact], description: Option<&str>) -> Vec<String
         }
     }
 
-    // Check main description
     if let Some(desc) = description {
         check_text(desc);
     }
@@ -2601,7 +2597,7 @@ mod tests {
         assert_eq!(result["total_dps_index"], 8000);
     }
 
-    // ── find_itemstat_by_name() determinism ──────────────────────────────────
+    // find_itemstat_by_name() determinism
 
     fn db_with_itemstats(stats: Vec<(u32, &str)>) -> GameDb {
         let mut itemstats = HashMap::new();
@@ -2732,7 +2728,7 @@ mod tests {
         );
     }
 
-    // ── exec_get_skill_info() fuzzy-match gate (mirrors find_named's ≥5 rule) ──
+    // exec_get_skill_info() fuzzy-match gate (mirrors find_named's ≥5 rule)
 
     fn make_skill(id: u32, name: &str) -> gw2_api::models::Skill {
         gw2_api::models::Skill {
@@ -2839,7 +2835,7 @@ mod tests {
         assert_eq!(is.id, 40);
     }
 
-    // ── find_named() generic lookup: Specialization + Trait ──────────────────
+    // find_named() generic lookup: Specialization + Trait
 
     fn make_spec(id: u32, name: &str) -> gw2_api::models::Specialization {
         gw2_api::models::Specialization {
@@ -2936,7 +2932,7 @@ mod tests {
         assert!(bonuses.is_empty());
     }
 
-    // ── C23: tools see the same sanitized kitchen as the prompt ──────────────
+    // C23: tools see the same sanitized kitchen as the prompt
 
     #[test]
     fn get_current_build_is_sanitized() {
@@ -2989,7 +2985,7 @@ mod tests {
         );
     }
 
-    // ── C23: simulate_rotation's duration_seconds cannot run forever ─────────
+    // C23: simulate_rotation's duration_seconds cannot run forever
 
     #[test]
     fn duration_seconds_is_clamped() {
@@ -3304,7 +3300,7 @@ mod tests {
             "HashMap order must not leak into the prompt"
         );
     }
-    // ── score_build full-build mode (specs/004-simulator-trust, FR-018) ────
+    // score_build full-build mode (specs/004-simulator-trust, FR-018)
 
     fn reaper_ctx<'a>(
         db: &'a GameDb,

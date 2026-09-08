@@ -78,7 +78,6 @@ impl BuildLocks {
         self.specs[2]
     }
 
-    /// Check if any locks are set at all.
     pub fn has_any_locks(&self) -> bool {
         self.specs.iter().any(|s| s.is_some())
             || self
@@ -251,7 +250,6 @@ pub struct StatBlock {
     pub concentration: i32,
     pub ferocity: i32,
     pub healing_power: i32,
-    // Derived
     pub crit_chance: f64,
     pub crit_damage: f64,
     pub health: i32,
@@ -298,7 +296,6 @@ pub struct CombatMetrics {
     pub condi_duration_pct: f64,
     pub effective_health: i32,
     pub damage_reduction_pct: f64,
-    // Condition breakdown
     pub bleeding_tick: i32,
     pub burning_tick: i32,
     pub poison_tick: i32,
@@ -342,7 +339,7 @@ pub struct GearPrefixGroups {
     pub weapons: String,
 }
 
-// ─── Per-slot gear model ───
+// Per-slot gear model
 
 /// Every equipment slot that carries a stat prefix. A two-handed weapon fills
 /// its set's Main slot; the Off slot stays `None`.
@@ -616,7 +613,6 @@ pub struct SavedBuild {
     /// Balance manifest version used when this save was created (P3-08, future).
     #[serde(default)]
     pub balance_manifest_version: Option<String>,
-    // Build suggestion data (mirrors BuildSuggestion fields)
     pub label: String,
     pub stat_prefix: String,
     /// Canonical per-group prefixes. Empty fields in older saves fall back to

@@ -162,7 +162,6 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
     }
     ui.spacing();
 
-    // Validate button
     let can_validate = !state.setup.gw2_key_input.is_empty()
         && state.setup.gw2_key_status != KeyStatus::Validating;
 
@@ -289,7 +288,6 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
         }
     }
 
-    // Show scopes if validated
     if !state.setup.gw2_key_scopes.is_empty() {
         ui.spacing();
         ui.text(t("setup.permissions"));
@@ -393,7 +391,6 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
     }
     ui.spacing();
 
-    // Validate button
     let can_validate = !state.setup.llm_key_input.is_empty()
         && state.setup.llm_key_status != KeyStatus::Validating;
 
@@ -678,7 +675,6 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
             }
         }
         Some(dl) => {
-            // Show progress
             let overlay = format!("{}/{} — {}", dl.current_step, dl.total_steps, dl.step_name);
             theme::download_scribble(ui, dl.fraction(), &overlay);
 

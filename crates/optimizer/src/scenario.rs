@@ -103,7 +103,7 @@ impl ScenarioSpec {
     }
 }
 
-// ─── Role Objectives ─────────────────────────────────────────────────────────
+// Role Objectives
 
 /// Job the player picked. Mode remaps weights via [`profile_id_for`].
 /// Overlay chips are families ([`PLAY_ROLES`]); conversation picks the lean
@@ -416,7 +416,7 @@ mod tests {
         assert_eq!(scenario.optimization_target.label, "WvW");
     }
 
-    // ─── RoleObjective profile mapping ──────────────────────────────────────
+    // RoleObjective profile mapping
 
     #[test]
     fn role_wvw_roamer_maps_to_correct_profile_and_tier() {

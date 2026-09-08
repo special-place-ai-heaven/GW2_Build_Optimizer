@@ -587,7 +587,6 @@ impl Gw2Client {
             return Err(ApiError::Cancelled);
         }
 
-        // All retries exhausted
         Err(last_error.unwrap_or_else(|| {
             ApiError::Internal(format!(
                 "GW2 API unavailable after {} retries on {}",
@@ -601,7 +600,6 @@ impl Gw2Client {
         &self,
         endpoint: &str,
     ) -> Result<Vec<T>, ApiError> {
-        // First get all IDs
         let ids: Vec<serde_json::Value> = self.get(endpoint)?;
         self.fetch_by_ids(endpoint, &ids)
     }
@@ -794,12 +792,11 @@ impl Gw2Client {
         Ok(info)
     }
 
-    /// Fetch character names (requires authenticated client).
+    /// Requires an authenticated client.
     pub fn fetch_characters(&self) -> Result<Vec<String>, ApiError> {
         self.get("characters")
     }
 
-    /// Fetch build tabs for a character.
     pub fn fetch_build_tabs(
         &self,
         character: &str,
@@ -808,7 +805,6 @@ impl Gw2Client {
         self.get_with_params(&endpoint, &[("tabs", "all")])
     }
 
-    /// Fetch equipment tabs for a character.
     pub fn fetch_equipment_tabs(
         &self,
         character: &str,

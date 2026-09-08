@@ -48,7 +48,6 @@ pub struct GameDb {
 impl GameDb {
     /// Load all game data from the file cache and build indexes.
     pub fn load(cache: &DataCache) -> Result<Self, String> {
-        // Load raw vectors from cache
         let items_vec: Vec<Item> = cache
             .load("items")
             .map_err(|e| e.to_string())?
@@ -108,7 +107,6 @@ impl GameDb {
             return Err("No items found in cache — game data may not be downloaded".into());
         }
 
-        // Build primary indexes (ID → data)
         let items: HashMap<u32, Item> = items_vec.into_iter().map(|i| (i.id, i)).collect();
         let itemstats: HashMap<u32, ItemStat> =
             itemstats_vec.into_iter().map(|i| (i.id, i)).collect();
@@ -126,7 +124,6 @@ impl GameDb {
             pvp_amulets_vec.into_iter().map(|a| (a.id, a)).collect();
         let pets: HashMap<u32, Pet> = pets_vec.into_iter().map(|p| (p.id, p)).collect();
 
-        // Build derived indexes
         let mut skills_by_profession = profession_skill_index(&skills);
 
         let mut traits_by_spec: HashMap<u32, Vec<u32>> = HashMap::new();
@@ -296,7 +293,6 @@ impl GameDb {
         })
     }
 
-    /// Get a profession by name.
     pub fn profession(&self, name: &str) -> Option<&Profession> {
         self.professions.get(name)
     }
@@ -575,7 +571,6 @@ impl GameDb {
         None
     }
 
-    /// Get all skills for a profession.
     pub fn profession_skills(&self, profession: &str) -> Vec<&Skill> {
         self.skills_by_profession
             .get(profession)
@@ -599,7 +594,6 @@ impl GameDb {
         out
     }
 
-    /// Get all traits in a specialization.
     pub fn spec_traits(&self, spec_id: u32) -> Vec<&GW2Trait> {
         self.traits_by_spec
             .get(&spec_id)
@@ -607,7 +601,6 @@ impl GameDb {
             .unwrap_or_default()
     }
 
-    /// Get all rune items.
     pub fn all_runes(&self) -> Vec<&Item> {
         self.runes
             .iter()
@@ -615,7 +608,6 @@ impl GameDb {
             .collect()
     }
 
-    /// Get all sigil items.
     pub fn all_sigils(&self) -> Vec<&Item> {
         self.sigils
             .iter()
@@ -623,7 +615,6 @@ impl GameDb {
             .collect()
     }
 
-    /// Get all relics.
     pub fn all_relics(&self) -> Vec<&Item> {
         self.relics
             .iter()
@@ -631,12 +622,10 @@ impl GameDb {
             .collect()
     }
 
-    /// Get a specialization by ID.
     pub fn spec(&self, id: u32) -> Option<&Specialization> {
         self.specializations.get(&id)
     }
 
-    /// Get trait IDs that apply a specific condition.
     pub fn traits_applying_condition(&self, condition: &str) -> Vec<&GW2Trait> {
         self.traits_by_condition
             .get(condition_index_key(condition))
@@ -644,7 +633,6 @@ impl GameDb {
             .unwrap_or_default()
     }
 
-    /// Get skill IDs that apply a specific condition.
     pub fn skills_applying_condition(&self, condition: &str) -> Vec<&Skill> {
         self.skills_by_condition
             .get(condition_index_key(condition))
@@ -652,7 +640,6 @@ impl GameDb {
             .unwrap_or_default()
     }
 
-    /// Get trait IDs that grant a specific boon.
     pub fn traits_granting_buff(&self, buff: &str) -> Vec<&GW2Trait> {
         self.traits_by_buff
             .get(buff)
@@ -660,7 +647,6 @@ impl GameDb {
             .unwrap_or_default()
     }
 
-    /// Get skill IDs that grant a specific boon.
     pub fn skills_granting_buff(&self, buff: &str) -> Vec<&Skill> {
         self.skills_by_buff
             .get(buff)

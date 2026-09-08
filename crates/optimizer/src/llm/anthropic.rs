@@ -48,7 +48,7 @@ pub struct AnthropicClient {
     usage_path: Option<PathBuf>,
 }
 
-// ─── Anthropic API Types ───
+// Anthropic API Types
 
 #[derive(Serialize)]
 struct MessagesRequest {
@@ -111,7 +111,7 @@ struct MessagesResponse {
     stop_reason: Option<String>,
 }
 
-// ─── SSE Streaming ───
+// SSE Streaming
 
 /// One Anthropic SSE `data:` payload. The `type` field selects the event;
 /// only the fields relevant per event are deserialized.

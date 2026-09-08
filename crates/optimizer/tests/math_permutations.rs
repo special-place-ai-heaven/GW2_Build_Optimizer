@@ -165,6 +165,9 @@ fn extract_trait_percent(text: &str, pct: f64) -> combat::DamageModifiers {
 
 fn auto(id: u32) -> RotationSkill {
     RotationSkill {
+        targets: 1,
+        categories: Vec::new(),
+        slot_name: None,
         skill_id: id,
         name: "Auto".into(),
         slot: SkillSlot::Weapon1,
@@ -281,6 +284,9 @@ fn stack_cap_json_and_sim() {
     assert_eq!(c.max_stacks("Vulnerability"), Some(25));
 
     let bleed_skill = RotationSkill {
+        targets: 1,
+        categories: Vec::new(),
+        slot_name: None,
         skill_id: 10,
         name: "Bleed Dump".into(),
         slot: SkillSlot::Weapon2,
@@ -296,6 +302,9 @@ fn stack_cap_json_and_sim() {
         weapon_set: 0,
     };
     let vuln_skill = RotationSkill {
+        targets: 1,
+        categories: Vec::new(),
+        slot_name: None,
         skill_id: 11,
         name: "Vuln Dump".into(),
         slot: SkillSlot::Weapon2,
@@ -432,6 +441,9 @@ fn unparsed_percent_stamps_provisional() {
 #[test]
 fn alacrity_recharges_skills_faster() {
     let cd_skill = RotationSkill {
+        targets: 1,
+        categories: Vec::new(),
+        slot_name: None,
         skill_id: 20,
         name: "Big Hit".into(),
         slot: SkillSlot::Weapon2,

@@ -12,7 +12,7 @@ the mechanism is off. The script copies the file, applies the edit in memory
 ending, runs the filtered test, restores the copy (never `git checkout`, the
 tree holds uncommitted work between tasks) and prints the panic block and the
 test result line. Paste that block under the control's heading in
-`docs/audit/sprint2-failures.md`.
+`docs/audit/sprint2-failures.md` (Sprint 3: `sprint3-failures.md`).
 """
 import io
 import os
@@ -85,11 +85,45 @@ CONTROLS = {
         "            *pool = (*pool - 0.0 * drain * seconds).max(0.0);",
         "reaper_shroud_drains_and_exits",
     ),
+    # Sprint 3 controls (specs/007-trait-triggers): filled as each mechanism lands
+    "shroud_enter": (
+        WT,
+        "        self.trigger_procs(TriggerRule::OnShroudEnter, Some(skill_id), false, 1.0);",
+        "        let _ = (TriggerRule::OnShroudEnter, skill_id); // seen-failing: entry site off",
+        "necro_shroud_enter_fires_once_at_entry",
+    ),
+    "prereq": (
+        WT,
+        "            if !carried {\n                return Err(format!(\"foe not {condition}\"));",
+        "            if !carried && false {\n                return Err(format!(\"foe not {condition}\"));",
+        "necro_chilled_prerequisite_gates_chilling_nova",
+    ),
+    "scope": (
+        WT,
+        "            crate::data::normalized_effects::TriggerScope::Category(category) => skill_id",
+        "            crate::data::normalized_effects::TriggerScope::Category(category) => false && skill_id",
+        "necro_shout_scope_fires_on_shouts_only",
+    ),
+    "population": (
+        WT,
+        "        let applied = 1 + (n.max(1) - 1).min(self.population.allies);",
+        "        let applied = 1 + 0 * (n.max(1) - 1).min(self.population.allies);",
+        "population_havoc_credits_five_or_cap",
+    ),
+    "coverage": (
+        EN,
+        "        if executed_from_facts {\n            continue;\n        }",
+        "        if executed_from_facts && false {\n            continue;\n        }",
+        "coverage_line_never_names_executed_weapon_skills",
+    ),
 }
 
 
 def run(name):
     path, anchor, replacement, test = CONTROLS[name]
+    if not anchor:
+        print(f"### {name}\nNOT YET FILLED (mechanism not landed)")
+        return 2
     backup = path + ".seen-failing.bak"
     shutil.copyfile(path, backup)
     text = io.open(path, encoding="utf-8", newline="").read()

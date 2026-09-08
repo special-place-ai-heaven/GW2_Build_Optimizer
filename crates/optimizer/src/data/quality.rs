@@ -71,6 +71,72 @@ pub const COVERAGE_FIELD: &str = "wvw_timeline.effects";
 pub const COVERAGE_PREFIX: &str = "Not simulated: ";
 const COVERAGE_NAMED: usize = 3;
 
+/// Why a source sits on the coverage line (specs/007-trait-triggers, US4).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReasonClass {
+    /// No record and no consumed fact.
+    NoRecord,
+    /// Classified: the trait changes nothing the simulator measures.
+    PassiveNoEffect,
+    /// Classified: needs a mechanic the simulator has no state for.
+    NeedsMechanic(String),
+    /// A record exists but its number is unresolved.
+    UnresolvedValue,
+    /// A record exists but its trigger has no runtime firing site.
+    NoFiringSite,
+}
+
+impl ReasonClass {
+    /// The suffix rendered after the name: `Gravedigger (no record)`.
+    pub fn suffix(&self) -> String {
+        match self {
+            ReasonClass::NoRecord => "no record".into(),
+            ReasonClass::PassiveNoEffect => "passive, no simulated effect".into(),
+            ReasonClass::NeedsMechanic(m) => format!("needs: {m}"),
+            ReasonClass::UnresolvedValue => "unresolved value".into(),
+            ReasonClass::NoFiringSite => "no firing site".into(),
+        }
+    }
+}
+
+/// One skipped source on the coverage line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoverageEntry {
+    pub name: String,
+    pub class: ReasonClass,
+    pub detail: Option<String>,
+}
+
+impl CoverageEntry {
+    /// `"{name} ({suffix})"`, the string `unmodeled_sources` carries. A
+    /// runtime note keeps its own wording in `detail` (`on-crit`, `partial
+    /// combo`), so the Sprint 1 and 2 lines read as they always did.
+    pub fn rendered(&self) -> String {
+        let why = self.detail.clone().unwrap_or_else(|| self.class.suffix());
+        format!("{} ({})", self.name, why)
+    }
+
+    /// Back from a timeline note `"{name} ({why})"`: the two classes the
+    /// loader names verbatim, everything else a trigger with no runtime site.
+    pub fn from_runtime_note(note: &str) -> CoverageEntry {
+        let (name, why) = note
+            .strip_suffix(')')
+            .and_then(|s| s.rsplit_once(" ("))
+            .unwrap_or((note, "no firing site"));
+        let class = match why {
+            "no record" => ReasonClass::NoRecord,
+            "unresolved value" => ReasonClass::UnresolvedValue,
+            _ => ReasonClass::NoFiringSite,
+        };
+        let detail = (why != class.suffix()).then(|| why.to_string());
+        CoverageEntry {
+            name: name.to_string(),
+            class,
+            detail,
+        }
+    }
+}
+
 /// `a, b, c and N others` for up to three named sources; `None` when nothing
 /// is unmodeled. The names are game item names and are not translated.
 pub fn coverage_detail(unmodeled: &[String]) -> Option<String> {
@@ -127,6 +193,36 @@ mod coverage_tests {
     }
 
     #[test]
+    fn reason_class_suffixes_match_the_contract() {
+        let cases = [
+            (ReasonClass::NoRecord, "no record"),
+            (ReasonClass::PassiveNoEffect, "passive, no simulated effect"),
+            (
+                ReasonClass::NeedsMechanic("minions".into()),
+                "needs: minions",
+            ),
+            (ReasonClass::UnresolvedValue, "unresolved value"),
+            (ReasonClass::NoFiringSite, "no firing site"),
+        ];
+        for (class, suffix) in cases {
+            assert_eq!(class.suffix(), suffix);
+        }
+        let entry = CoverageEntry {
+            name: "Flesh of the Master".into(),
+            class: ReasonClass::NeedsMechanic("minions".into()),
+            detail: None,
+        };
+        assert_eq!(entry.rendered(), "Flesh of the Master (needs: minions)");
+
+        let note = CoverageEntry::from_runtime_note("Superior Sigil of Fire (on-crit)");
+        assert_eq!(note.class, ReasonClass::NoFiringSite);
+        assert_eq!(note.rendered(), "Superior Sigil of Fire (on-crit)");
+        let note = CoverageEntry::from_runtime_note("Scholar (unresolved value)");
+        assert_eq!(note.class, ReasonClass::UnresolvedValue);
+        assert_eq!(note.detail, None);
+    }
+
+    #[test]
     fn coverage_line_renders_zero_one_three_and_five_names() {
         assert_eq!(coverage_detail(&names(0)), None);
         assert_eq!(
@@ -169,12 +265,10 @@ pub enum FactualValue<T> {
 }
 
 impl<T> FactualValue<T> {
-    /// Returns true if this value is Resolved.
     pub fn is_resolved(&self) -> bool {
         matches!(self, FactualValue::Resolved(_))
     }
 
-    /// Returns true if this value is Unknown.
     pub fn is_unknown(&self) -> bool {
         matches!(self, FactualValue::Unknown)
     }
@@ -233,7 +327,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for FactualValue<T> {
     }
 }
 
-// ─── Arithmetic for FactualValue<f64> ───
+// Arithmetic for FactualValue<f64>
 
 impl Mul<f64> for FactualValue<f64> {
     type Output = FactualValue<f64>;
@@ -327,7 +421,7 @@ impl Div<FactualValue<f64>> for FactualValue<f64> {
 mod tests {
     use super::*;
 
-    // ─── DataQuality tests ───
+    // DataQuality tests
 
     #[test]
     fn test_data_quality_display() {
@@ -372,7 +466,7 @@ mod tests {
         );
     }
 
-    // ─── DataQualityReason tests ───
+    // DataQualityReason tests
 
     #[test]
     fn test_data_quality_reason_display() {
@@ -388,7 +482,7 @@ mod tests {
         );
     }
 
-    // ─── FactualValue basic tests ───
+    // FactualValue basic tests
 
     #[test]
     fn test_factual_value_is_resolved() {
@@ -436,7 +530,7 @@ mod tests {
         assert_eq!(FactualValue::<f64>::Unknown.to_string(), "Unknown");
     }
 
-    // ─── FactualValue<f64> arithmetic with scalar ───
+    // FactualValue<f64> arithmetic with scalar
 
     #[test]
     fn test_resolved_mul_scalar() {
@@ -490,7 +584,7 @@ mod tests {
         assert_eq!(FactualValue::<f64>::Unknown / 2.0, FactualValue::Unknown);
     }
 
-    // ─── FactualValue<f64> arithmetic with FactualValue<f64> ───
+    // FactualValue<f64> arithmetic with FactualValue<f64>
 
     #[test]
     fn test_resolved_add_resolved() {
@@ -572,7 +666,7 @@ mod tests {
         );
     }
 
-    // ─── DataQuality defaults to Verified for baseline ───
+    // DataQuality defaults to Verified for baseline
 
     #[test]
     fn test_data_quality_baseline_is_verified() {
@@ -581,7 +675,7 @@ mod tests {
         assert_eq!(quality, DataQuality::Verified);
     }
 
-    // ─── FactualValue serde tests ───
+    // FactualValue serde tests
 
     #[test]
     fn test_factual_value_serde_resolved() {

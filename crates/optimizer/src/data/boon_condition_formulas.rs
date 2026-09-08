@@ -68,7 +68,7 @@ pub fn try_load_condition_formulas() -> Result<ConditionFormulas, Vec<DataLoadEr
     )
 }
 
-// ─── Condition name canonicalization ───
+// Condition name canonicalization
 //
 // GW2 wiki uses verb-form names for some conditions (Blind, Poison, Immobilize)
 // while the in-game status-effect tooltips and `data/formulas/conditions.json`
@@ -174,8 +174,6 @@ pub(crate) fn boon_weight(status: &str, weights: &OptimizationWeights) -> f64 {
     }
 }
 
-// ─── Error Types ───
-
 #[derive(Debug, Error)]
 pub enum FormulaLoadError {
     #[error("JSON parse error: {0}")]
@@ -184,7 +182,7 @@ pub enum FormulaLoadError {
     ValidationError(String),
 }
 
-// ─── Boon Types ───
+// Boon Types
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub enum StackingMode {
@@ -330,7 +328,6 @@ impl BoonFormulas {
         self.map.get(boon)
     }
 
-    /// Number of loaded boon definitions.
     pub fn len(&self) -> usize {
         self.map.len()
     }
@@ -341,7 +338,7 @@ impl BoonFormulas {
     }
 }
 
-// ─── Condition Types ───
+// Condition Types
 
 /// A simple condition formula: base + coeff * condition_damage.
 #[derive(Debug, Clone, Deserialize)]
@@ -527,7 +524,6 @@ impl ConditionFormulas {
         self.map.get(condition)
     }
 
-    /// Number of loaded condition definitions.
     pub fn len(&self) -> usize {
         self.map.len()
     }
@@ -537,8 +533,6 @@ impl ConditionFormulas {
         self.map.is_empty()
     }
 }
-
-// ─── Loader Functions ───
 
 fn mode_to_key(mode: &GameMode) -> &'static str {
     match mode {
@@ -679,8 +673,6 @@ mod tests {
     use super::*;
     use gw2_core::types::GameMode;
 
-    // ─── Loader tests ───
-
     #[test]
     fn test_embedded_boon_formulas_load_successfully() {
         let b = boons();
@@ -792,7 +784,7 @@ mod tests {
         assert_eq!(wvw.get("crit_chance_bonus"), Some(0.20));
     }
 
-    // ─── Boon value tests (cite wiki sources) ───
+    // Boon value tests (cite wiki sources)
 
     // Source: https://wiki.guildwars2.com/wiki/Fury
     #[test]
@@ -866,7 +858,7 @@ mod tests {
         );
     }
 
-    // ─── Condition formula tests (cite wiki sources) ───
+    // Condition formula tests (cite wiki sources)
 
     // Source: https://wiki.guildwars2.com/wiki/Bleeding
     #[test]
@@ -1070,7 +1062,7 @@ mod tests {
         );
     }
 
-    // ─── StatusDefinition metadata tests ───
+    // StatusDefinition metadata tests
 
     #[test]
     fn test_boon_stacking_modes() {
@@ -1126,7 +1118,7 @@ mod tests {
         assert_eq!(c.get("Fear").unwrap().effect_class, EffectClass::Control,);
     }
 
-    // ─── Alias-routing regression suite ───
+    // Alias-routing regression suite
     //
     // Fuzzes verb-form and canonical-form input through every site that was
     // updated to route through `canonical_condition_name`. Every paired
@@ -1343,7 +1335,7 @@ mod tests {
         }
     }
 
-    // ─── Shared scoring-table tests ───
+    // Shared scoring-table tests
     //
     // Guards the single source of truth for the empirically-calibrated
     // condition_importance / boon_weight tables now shared by synergy.rs and

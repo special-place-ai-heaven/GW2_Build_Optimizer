@@ -123,13 +123,13 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         state.main.chat_wait_started = None;
     }
 
-    // ── Top status bar: API health + loading + errors ──
+    // Top status bar: API health + loading + errors
     render_top_status_bar(ui, state);
 
-    // ── Horizontal tab bar (main navigation) ──
+    // Horizontal tab bar (main navigation)
     render_top_tabs(ui, state);
 
-    // ── Two-column layout: left dynamic panel + center content ──
+    // Two-column layout: left dynamic panel + center content
     let pad = state.config.panel_padding;
     let content_indent = state.config.content_indent;
     let avail = ui.content_region_avail();
@@ -551,7 +551,7 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
 
 /// Dynamic left panel: content varies by active tab.
 fn render_left_panel(ui: &Ui, state: &mut AddonState) {
-    // ── Character section (always visible except Settings) ──
+    // Character section (always visible except Settings)
     if !matches!(
         state.main.active_tab,
         MainTab::Settings | MainTab::About | MainTab::News | MainTab::Radio
@@ -821,7 +821,6 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
         character::load_character_tabs(state, name);
     }
 
-    // Build Template dropdown
     if !state.main.build_tabs.is_empty() {
         ui.spacing();
         ui.text_colored(theme::pal().muted, t("label.build"));
@@ -915,7 +914,6 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
         }
     }
 
-    // Build resolution indicator
     if state.main.build_loading {
         ui.text_colored(theme::WARN, t("status.resolving"));
     }

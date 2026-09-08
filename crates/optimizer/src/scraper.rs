@@ -14,7 +14,7 @@ use std::path::Path;
 
 use crate::benchmark::{BenchmarkBuild, ScrapeResult};
 
-// ─── User agent ──────────────────────────────────────────────────────────────
+// User agent
 
 /// Firefox on Windows, matching the platform the addon actually runs on.
 ///
@@ -30,8 +30,6 @@ use crate::benchmark::{BenchmarkBuild, ScrapeResult};
 /// this welcome is [`PACE_MS`] and the retry backoff, not the header.
 const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0";
-
-// ─── Public entry point ───────────────────────────────────────────────────────
 
 /// Sentinel error string set on `ScrapeResult.error` when a scrape was skipped
 /// because cancellation was requested before it started.
@@ -321,7 +319,7 @@ pub fn load_benchmarks(addon_dir: &Path) -> Vec<BenchmarkBuild> {
     builds
 }
 
-// ─── Snowcrows ────────────────────────────────────────────────────────────────
+// Snowcrows
 
 /// Professions enumerated directly — Snowcrows uses server-side rendering per-profession page.
 /// The top-level `/builds` page is a SPA shell with no static links.
@@ -560,7 +558,7 @@ fn scrape_snowcrows_build(
     ))
 }
 
-// ─── Hardstuck ────────────────────────────────────────────────────────────────
+// Hardstuck
 
 /// Hardstuck URL format: /gw2/builds/{profession}/{id-or-name-slug}/
 /// The index page is Next.js — links appear as hrefs in the static HTML.
@@ -738,7 +736,7 @@ fn scrape_hardstuck_build(
     ))
 }
 
-// ─── GuildJen ─────────────────────────────────────────────────────────────────
+// GuildJen
 
 /// Scrape GuildJen (WvW/PvP builds).
 /// Index: https://guildjen.com/
@@ -1033,7 +1031,7 @@ fn group_rows_by_profession(
     buckets
 }
 
-// ─── HTML extraction helpers ──────────────────────────────────────────────────
+// HTML extraction helpers
 
 /// Extra milliseconds added to every gap after the site pushes back.
 ///
@@ -1867,8 +1865,6 @@ fn redirect_stays_on_request_host(request_host: Option<&str>, next_host: Option<
         _ => false,
     }
 }
-
-// ─── Utilities ────────────────────────────────────────────────────────────────
 
 fn build_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
     // What Firefox sends on a top-level navigation, because that is what

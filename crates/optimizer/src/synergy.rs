@@ -11,7 +11,7 @@ use crate::data::boon_condition_formulas::{boon_weight, condition_importance};
 use crate::scoring::OptimizationWeights;
 use crate::text_util::{strip_gw2_markup, text_describes_condition_cleanse};
 
-// ─── Supporting Enums ───
+// Supporting Enums
 
 /// GW2 primary attribute identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -76,7 +76,7 @@ pub enum DurationKind {
     SpecificCondition(String),
 }
 
-// ─── NormalizedEffect ───
+// NormalizedEffect
 
 /// Unified representation for all synergy-relevant effects from any build component.
 #[derive(Debug, Clone)]
@@ -141,7 +141,7 @@ pub enum SynergyLinkType {
     DurationAlignment,
 }
 
-// ─── Effect Extractors ───
+// Effect Extractors
 
 /// Extract normalized effects from a trait, considering equipped traits for TraitedFact resolution.
 ///
@@ -275,7 +275,7 @@ pub fn extract_skill_effects(skill: &Skill) -> Vec<NormalizedEffect> {
     effects
 }
 
-// ─── Internal fact-to-effect conversion ───
+// Internal fact-to-effect conversion
 
 /// Convert a single GW2 API Fact into zero or more NormalizedEffects.
 fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
@@ -599,7 +599,7 @@ fn normalized_from_modifiers(mods: &crate::combat::DamageModifiers) -> Vec<Norma
     effects
 }
 
-// ─── Scoring Functions ───
+// Scoring Functions
 
 /// Score a single NormalizedEffect against optimization weights.
 /// Returns a value roughly on the 0.0-1.0 scale.
@@ -830,7 +830,7 @@ pub fn compute_marginal_synergy(
     (synergy, links)
 }
 
-// ─── Template Explanation ───
+// Template Explanation
 
 /// Generate a template-based explanation from synergy links (no LLM needed).
 pub fn template_explanation(
@@ -862,8 +862,6 @@ pub fn template_explanation(
     }
     parts.join(" ")
 }
-
-// ─── Helper Functions ───
 
 fn weight_for_stat(stat: &StatType, weights: &OptimizationWeights) -> f64 {
     match stat {

@@ -148,9 +148,7 @@ fn sniff_ext(bytes: &[u8]) -> Option<&'static str> {
     (bytes.len() >= 6 && (&bytes[..6] == b"GIF87a" || &bytes[..6] == b"GIF89a")).then_some("gif")
 }
 
-// ---------------------------------------------------------------------------
 // Render-thread API
-// ---------------------------------------------------------------------------
 
 /// Render-thread lookup: the logo texture if it is live or creatable within
 /// budget, `None` (letter plate) otherwise. First sighting of a URL enqueues
@@ -249,9 +247,7 @@ pub fn kick(state: &AddonState) {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Worker side
-// ---------------------------------------------------------------------------
 
 /// Worker drop guard: on any exit (done, cancel, unwind) the not-yet-finished
 /// URLs go back to unseen so a later frame can re-request them, and the

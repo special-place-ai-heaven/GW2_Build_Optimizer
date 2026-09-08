@@ -100,7 +100,7 @@ static WAS_PLAYING: AtomicU32 = AtomicU32::new(0);
 const DANCE_ON: f32 = 0.32;
 const DANCE_OFF: f32 = 0.18;
 
-// ── Quips: short lines in a speech bubble near the DJ, fired at a random
+// Quips: short lines in a speech bubble near the DJ, fired at a random
 // interval between 30 s and 2 min (unpredictability is a sign of
 // intelligence), tiered by how hard the music is hitting and flavored by the
 // station's genre tags. ASCII only — the game font atlas draws '?' for fancy
