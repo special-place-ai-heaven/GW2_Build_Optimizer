@@ -1805,6 +1805,48 @@ mod tests {
             .user_agent("gw2-build-optimizer trait audit")
             .build()
             .expect("client");
+        // The game's own facts (cached API) count as a source beside the
+        // page: Spiteful Fortitude's 50 % threshold is an API fact the page
+        // leaves to the tooltip.
+        let db = cache_db().map(|(_, db)| db);
+        let api_numbers =
+            |source_type: &crate::data::normalized_effects::SourceType, id: u32| -> Vec<f64> {
+                use crate::data::normalized_effects::SourceType;
+                use gw2_api::models::Fact;
+                let Some(db) = &db else {
+                    return Vec::new();
+                };
+                let facts = match source_type {
+                    SourceType::Trait => db.traits.get(&id).map(|t| &t.facts),
+                    SourceType::Skill => db.skills.get(&id).map(|s| &s.facts),
+                    _ => None,
+                };
+                facts
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|fact| match fact {
+                        Fact::Percent { percent, .. } => vec![percent.unwrap_or(0.0)],
+                        Fact::Number { value, .. } => vec![value.unwrap_or(0) as f64],
+                        Fact::Recharge { value, .. } => vec![value.unwrap_or(0.0)],
+                        Fact::Time { duration, .. } => vec![duration.unwrap_or(0) as f64],
+                        Fact::AttributeAdjust { value, .. } => vec![value.unwrap_or(0) as f64],
+                        Fact::Buff {
+                            duration,
+                            apply_count,
+                            ..
+                        }
+                        | Fact::PrefixedBuff {
+                            duration,
+                            apply_count,
+                            ..
+                        } => vec![
+                            duration.unwrap_or(0) as f64,
+                            apply_count.unwrap_or(0) as f64,
+                        ],
+                        _ => Vec::new(),
+                    })
+                    .collect()
+            };
         let mut pages: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let mut mismatches = 0usize;
         for effect in crate::data::normalized_effects::effects().effects_for_mode("WvW") {
@@ -1844,6 +1886,15 @@ mod tests {
                     })
                     .unwrap_or_else(|e| format!("FETCH FAILED: {e}"))
             });
+            // A heuristic record's numbers are estimates, not page claims
+            // (Sprint 2's Path of Corruption cooldown).
+            if effect.evidence_level != crate::data::EvidenceLevel::Factual {
+                println!(
+                    "skip {} {} ({:?} evidence)",
+                    effect.effect_id, effect.source_name, effect.evidence_level
+                );
+                continue;
+            }
             let mut numbers: Vec<f64> = Vec::new();
             let push = |numbers: &mut Vec<f64>, v: &FactualValue<f64>| {
                 if let FactualValue::Resolved(x) = v {
@@ -1851,10 +1902,13 @@ mod tests {
                 }
             };
             // A status record's value mirrors its stack count; one stack is
-            // implicit on the page.
+            // implicit on the page. A derived value is checked through the
+            // page numbers it comes from.
             let single_status = effect.status_operation.is_some()
                 && matches!(effect.value, FactualValue::Resolved(v) if v == 1.0);
-            if !single_status {
+            if !effect.derived_from.is_empty() {
+                numbers.extend(effect.derived_from.iter().copied());
+            } else if !single_status {
                 push(&mut numbers, &effect.value);
             }
             if let Some(d) = &effect.effect_duration {
@@ -1885,10 +1939,11 @@ mod tests {
             {
                 push(&mut numbers, &gate.percent);
             }
-            let tokens: Vec<f64> = text
+            let mut tokens: Vec<f64> = text
                 .split(|c: char| !(c.is_ascii_digit() || c == '.'))
                 .filter_map(|t| t.trim_matches('.').parse::<f64>().ok())
                 .collect();
+            tokens.extend(api_numbers(&effect.source_type, effect.source_id));
             let missing: Vec<String> = numbers
                 .iter()
                 .filter(|n| !tokens.iter().any(|t| (t - **n).abs() < 1e-9))

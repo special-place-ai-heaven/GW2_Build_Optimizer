@@ -6,7 +6,7 @@
 | Engineer | 108 | 32 | 0 | 0 | 0 | 0 | 76 | 0 |
 | Guardian | 108 | 35 | 1 | 0 | 0 | 0 | 72 | 0 |
 | Mesmer | 108 | 22 | 0 | 1 | 0 | 0 | 85 | 0 |
-| Necromancer | 108 | 2 | 25 | 19 | 1 | 59 | 0 | 2 |
+| Necromancer | 108 | 2 | 27 | 20 | 1 | 56 | 0 | 2 |
 | Ranger | 108 | 42 | 1 | 0 | 0 | 0 | 65 | 0 |
 | Revenant | 108 | 36 | 0 | 0 | 0 | 0 | 72 | 0 |
 | Thief | 108 | 42 | 0 | 0 | 0 | 0 | 66 | 0 |
@@ -492,17 +492,17 @@
 | Curses | 813 | Weakening Shroud | record | https://wiki.guildwars2.com/wiki/Weakening_Shroud (read 2026-09-08: weakness 2.5 s (WvW), 10 s recharge (API)) |
 | Curses | 1696 | Terror | NeedsMechanic: fear damage | https://wiki.guildwars2.com/wiki/Terror (read 2026-09-08) |
 | Curses | 801 | Lingering Curse | NeedsMechanic: weapon-scoped duration | https://wiki.guildwars2.com/wiki/Lingering_Curse (read 2026-09-08: the 200 condition damage is on the stat sheet) |
-| Death Magic | 856 | Armored Shroud | NeedsMechanic: carapace | https://wiki.guildwars2.com/wiki/Armored_Shroud (read 2026-09-08) |
+| Death Magic | 856 | Armored Shroud | record | https://wiki.guildwars2.com/wiki/Armored_Shroud (read 2026-09-08: 5 stacks of Death's Carapace, 10 s, 20 toughness each in WvW) |
 | Death Magic | 820 | Flesh of the Master | NeedsMechanic: minions | https://wiki.guildwars2.com/wiki/Flesh_of_the_Master (read 2026-09-08) |
-| Death Magic | 857 | Putrid Defense | NeedsMechanic: carapace | https://wiki.guildwars2.com/wiki/Putrid_Defense (read 2026-09-08: the 15% poison damage is a parsed percent fact) |
+| Death Magic | 857 | Putrid Defense | facts+record | https://wiki.guildwars2.com/wiki/Putrid_Defense (read 2026-09-08: a stack of Death's Carapace per poison applied, 10 s; the 15% poison damage is a parsed percent fact) |
 | Death Magic | 1922 | Shrouded Removal | record | https://wiki.guildwars2.com/wiki/Shrouded_Removal (read 2026-09-08) |
 | Death Magic | 839 | Soul Comprehension | NeedsMechanic: kill | https://wiki.guildwars2.com/wiki/Soul_Comprehension (read 2026-09-08) |
 | Death Magic | 858 | Necromantic Corruption | NeedsMechanic: minions | https://wiki.guildwars2.com/wiki/Necromantic_Corruption (read 2026-09-08) |
 | Death Magic | 860 | Dark Defense | record | https://wiki.guildwars2.com/wiki/Dark_Defense (read 2026-09-08) |
-| Death Magic | 855 | Deadly Strength | NeedsMechanic: carapace | https://wiki.guildwars2.com/wiki/Deadly_Strength (read 2026-09-08) |
-| Death Magic | 1929 | Beyond the Veil | NeedsMechanic: carapace | https://wiki.guildwars2.com/wiki/Beyond_the_Veil (read 2026-09-08) |
+| Death Magic | 855 | Deadly Strength | NeedsMechanic: carapace stat scaling | https://wiki.guildwars2.com/wiki/Deadly_Strength (read 2026-09-08: 10 power and 10 condition damage per stack of carapace is not modeled) |
+| Death Magic | 1929 | Beyond the Veil | NeedsMechanic: carapace threshold | https://wiki.guildwars2.com/wiki/Beyond_the_Veil (read 2026-09-08: 10% condition damage reduction at 10 stacks of carapace is not modeled) |
 | Death Magic | 842 | Death Nova | NeedsMechanic: downed | https://wiki.guildwars2.com/wiki/Death_Nova (read 2026-09-08) |
-| Death Magic | 1940 | Corrupter's Fervor | NeedsMechanic: carapace | https://wiki.guildwars2.com/wiki/Corrupter%27s_Fervor (read 2026-09-08) |
+| Death Magic | 1940 | Corrupter's Fervor | record | https://wiki.guildwars2.com/wiki/Corrupter%27s_Fervor (read 2026-09-08: the carapace gain is a record; the 15% damage reduction at 25 stacks is not modeled) |
 | Death Magic | 1694 | Unholy Sanctuary | NeedsMechanic: percent heal | https://wiki.guildwars2.com/wiki/Unholy_Sanctuary (read 2026-09-08: 1% of max health per second in shroud) |
 | Soul Reaping | 887 | Gluttony | NeedsMechanic: life force scaling | https://wiki.guildwars2.com/wiki/Gluttony (read 2026-09-08) |
 | Soul Reaping | 875 | Unyielding Blast | record | https://wiki.guildwars2.com/wiki/Unyielding_Blast (read 2026-09-08: 2 vulnerability 6 s (WvW)) |

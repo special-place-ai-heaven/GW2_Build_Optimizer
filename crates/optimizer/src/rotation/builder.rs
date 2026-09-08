@@ -1414,6 +1414,7 @@ mod tests {
             prerequisite: None,
             scale_by: None,
             healing_power_coefficient: None,
+            derived_from: Vec::new(),
             coverage: None,
         }
     }
