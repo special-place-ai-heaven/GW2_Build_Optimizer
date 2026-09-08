@@ -28,8 +28,8 @@ description: "Task list for Choya readable chat (006)"
 
 ## Phase 1: Setup
 
-- [ ] T001 Confirm branch `006-choya-readable-chat` is checked out on tip `2a2ed40`, tree clean, and record the pre-change gate baseline: `cargo test --workspace` counts and `cargo clippy --workspace --all-targets -- -D warnings` green; note results in `specs/006-choya-readable-chat/quickstart.md` under a new "Baseline 2026-09-08" line
-- [ ] T002 With SymForge (`find_references`) list every caller of `add_plated_response`, `wrap_text`, `draw_bubble_text`, `render_comparison`, `apply_loaded_suggestion`, `refresh_provider_picks`, `fallback_reference`, `spawn_worker`, `CLOSING_REQUEST_TIMEOUT`; paste the list as a comment block at the top of `specs/006-choya-readable-chat/tasks.md` Notes section so later tasks edit every site
+- [X] T001 Confirm branch `006-choya-readable-chat` is checked out on tip `2a2ed40`, tree clean, and record the pre-change gate baseline: `cargo test --workspace` counts and `cargo clippy --workspace --all-targets -- -D warnings` green; note results in `specs/006-choya-readable-chat/quickstart.md` under a new "Baseline 2026-09-08" line
+- [X] T002 With SymForge (`find_references`) list every caller of `add_plated_response`, `wrap_text`, `draw_bubble_text`, `render_comparison`, `apply_loaded_suggestion`, `refresh_provider_picks`, `fallback_reference`, `spawn_worker`, `CLOSING_REQUEST_TIMEOUT`; paste the list as a comment block at the top of `specs/006-choya-readable-chat/tasks.md` Notes section so later tasks edit every site
 
 ---
 
@@ -37,8 +37,8 @@ description: "Task list for Choya readable chat (006)"
 
 **Purpose**: two data-shape changes every story reads.
 
-- [ ] T003 Add `stopped: bool` and `retry_of: Option<String>` with `#[serde(default)]` to `ChatMessage` in `crates/addon/src/ui/chat_bar.rs`; add a test that an old `kitchen.json` message object without the fields deserializes
-- [ ] T004 [P] Add the sixteen locale keys from research R6 (`chat.stop`, `chat.retry`, `chat.stopped`, `chat.retrying_over`, `chat.stall`, `chat.step_lookup`, `chat.step_scoring`, `chat.step_writing`, `chat.step_handshake`, `chat.live_reasoning`, `chat.live_content`, `chat.live_tools`, `chat.live_at_once`, `cmp.tab_current`, `choya.fallback_verdict`, `choya.fallback_chat`) to `locales/en.json` with English text; run locale parity test #21 and confirm it now fails for the other eleven files (seen-failing; the eleven are filled in T048)
+- [X] T003 Add `stopped: bool` and `retry_of: Option<String>` with `#[serde(default)]` to `ChatMessage` in `crates/addon/src/ui/chat_bar.rs`; add a test that an old `kitchen.json` message object without the fields deserializes
+- [X] T004 [P] Add the sixteen locale keys from research R6 (`chat.stop`, `chat.retry`, `chat.stopped`, `chat.retrying_over`, `chat.stall`, `chat.step_lookup`, `chat.step_scoring`, `chat.step_writing`, `chat.step_handshake`, `chat.live_reasoning`, `chat.live_content`, `chat.live_tools`, `chat.live_at_once`, `cmp.tab_current`, `choya.fallback_verdict`, `choya.fallback_chat`) to `locales/en.json` with English text; run locale parity test #21 and confirm it now fails for the other eleven files (seen-failing; the eleven are filled in T048)
 
 **Checkpoint**: `cargo check -p gw2-build-optimizer` green; parity test red for eleven locales only.
 
@@ -52,19 +52,19 @@ description: "Task list for Choya readable chat (006)"
 
 ### Tests (write first, watch fail)
 
-- [ ] T005 [P] [US1] Create `crates/addon/src/ui/chat_markup.rs` with only the `Block`, `Span`, `SpanStyle` types from data-model.md and a `#[cfg(test)]` module holding the fixtures from contracts/reply-markup.md: 3,000-character reply keeps every character; nested bullets (two-space depth); rotation of six parts; `**` inside a bullet; unknown name stays plain; URL with trailing punctuation excludes the punctuation; unmatched `**` renders literally; `->` in prose with one part is not a rotation; `1. item` is Numbered; `! text` is Warning; `_x_` and `*x*` are Italic. Register `pub mod chat_markup;` in `crates/addon/src/ui/mod.rs`
-- [ ] T006 [P] [US1] Add test `reply_shape_paragraph_present_in_all_three_prompts` in `crates/optimizer/src/prompts.rs` asserting `chat_refinement_prompt_with_tools`, `new_build_prompt_with_tools` and `improve_build_prompt_with_tools` outputs each contain "REPLY SHAPE" and none contain "2-4 sentences"
+- [X] T005 [P] [US1] Create `crates/addon/src/ui/chat_markup.rs` with only the `Block`, `Span`, `SpanStyle` types from data-model.md and a `#[cfg(test)]` module holding the fixtures from contracts/reply-markup.md: 3,000-character reply keeps every character; nested bullets (two-space depth); rotation of six parts; `**` inside a bullet; unknown name stays plain; URL with trailing punctuation excludes the punctuation; unmatched `**` renders literally; `->` in prose with one part is not a rotation; `1. item` is Numbered; `! text` is Warning; `_x_` and `*x*` are Italic. Register `pub mod chat_markup;` in `crates/addon/src/ui/mod.rs`
+- [X] T006 [P] [US1] Add test `reply_shape_paragraph_present_in_all_three_prompts` in `crates/optimizer/src/prompts.rs` asserting `chat_refinement_prompt_with_tools`, `new_build_prompt_with_tools` and `improve_build_prompt_with_tools` outputs each contain "REPLY SHAPE" and none contain "2-4 sentences"
 
 ### Implementation
 
-- [ ] T007 [US1] Implement `parse(text: &str, names: &dyn Fn(&str) -> bool) -> Vec<Block>` in `crates/addon/src/ui/chat_markup.rs` per data-model.md rules (line order: bullet `- `/`* `/`• ` with depth, `N. ` numbered, `!`/`⚠` warning, `->`/`→` rotation with ≥2 parts, else paragraph; inline `**x**`, `_x_`/`*x*`, `http(s)://` link, longest-match Name unless Bold or Link); nothing dropped; T005 tests green
-- [ ] T008 [US1] Implement `wrap_spans(measure: &dyn Fn(&str) -> f32, blocks: &[Block], max_w: f32, line_h: f32) -> Vec<Line>` in `crates/addon/src/ui/chat_markup.rs` (word-boundary splits, mid-word only when a word exceeds `max_w`, bullet indent per depth, `•`/`N.` prefix, `→` joiner for rotation parts); test with a fixed-width measure that a 3,000-char paragraph yields lines all ≤ `max_w` and concatenates back to the input
-- [ ] T009 [US1] Remove the 600-char cut and `...` append in `add_plated_response` (`crates/addon/src/ui/chat_bar.rs` ~line 709); keep `fold_punctuation`; `CHAT_HISTORY_CAP` stays the only bound; add test `plated_response_keeps_whole_text` with a 3,000-char input
-- [ ] T010 [US1] Add `italic_font_id()` to `crates/addon/src/ui/fonts.rs`: beside the chosen family file look for `segoeuii.ttf`, `ariali.ttf`, `georgiai.ttf` (same directory, family-matched), load through the Nexus `add_font_from_file` path as the existing faces are, store `Option`; atlas-rebuild null font rule applies (store `None`, skip push)
-- [ ] T011 [US1] Replace `draw_bubble_text` in `crates/addon/src/ui/chat_bar.rs` with a span draw pass over `wrap_spans` output: Plain in `pal().cream`; Bold drawn twice 1 px apart (offset rounded by `ui_scale`); Italic pushes `italic_font_id()` when `Some`, else muted colour; Name in accent; Warn line in `WARN`; Link underlined in accent with a 1 px line and an invisible button that opens the URL via the existing `render_source_link` path; rotation joiner `→` in accent. Bubble height = sum of line heights + padding. Cache `Vec<Line>` per message keyed by `(text hash, width)` so layout runs once per width
-- [ ] T012 [US1] Wire the name predicate: build `names: HashSet<String>` from the `GameDb` name index the chips already use (skills, traits, specializations, runes, sigils, relics, weapons) once per `MainState` load in `crates/addon/src/ui/chat_bar.rs`; pass it to `parse`
-- [ ] T013 [US1] In `crates/optimizer/src/prompts.rs` add the REPLY SHAPE paragraph (contracts/reply-markup.md "Asked of the model", verbatim rules) once as a `const REPLY_SHAPE: &str` and append it to the three prompts; replace the three "2-4 sentences" phrases with "in the REPLY SHAPE below"; T006 green; no other line in the file changes
-- [ ] T014 [US1] Run `cargo test -p gw2-build-optimizer --lib -- chat_markup` and `cargo test -p gw2-optimizer --lib -- prompts` green; `cargo fmt --all`; commit "Choya chat: whole replies drawn as spans; REPLY SHAPE in the prompts (006 US1)" with the session footer
+- [X] T007 [US1] Implement `parse(text: &str, names: &dyn Fn(&str) -> bool) -> Vec<Block>` in `crates/addon/src/ui/chat_markup.rs` per data-model.md rules (line order: bullet `- `/`* `/`• ` with depth, `N. ` numbered, `!`/`⚠` warning, `->`/`→` rotation with ≥2 parts, else paragraph; inline `**x**`, `_x_`/`*x*`, `http(s)://` link, longest-match Name unless Bold or Link); nothing dropped; T005 tests green
+- [X] T008 [US1] Implement `wrap_spans(measure: &dyn Fn(&str) -> f32, blocks: &[Block], max_w: f32, line_h: f32) -> Vec<Line>` in `crates/addon/src/ui/chat_markup.rs` (word-boundary splits, mid-word only when a word exceeds `max_w`, bullet indent per depth, `•`/`N.` prefix, `→` joiner for rotation parts); test with a fixed-width measure that a 3,000-char paragraph yields lines all ≤ `max_w` and concatenates back to the input
+- [X] T009 [US1] Remove the 600-char cut and `...` append in `add_plated_response` (`crates/addon/src/ui/chat_bar.rs` ~line 709); keep `fold_punctuation`; `CHAT_HISTORY_CAP` stays the only bound; add test `plated_response_keeps_whole_text` with a 3,000-char input
+- [X] T010 [US1] Add `italic_font_id()` to `crates/addon/src/ui/fonts.rs`: beside the chosen family file look for `segoeuii.ttf`, `ariali.ttf`, `georgiai.ttf` (same directory, family-matched), load through the Nexus `add_font_from_file` path as the existing faces are, store `Option`; atlas-rebuild null font rule applies (store `None`, skip push)
+- [X] T011 [US1] Replace `draw_bubble_text` in `crates/addon/src/ui/chat_bar.rs` with a span draw pass over `wrap_spans` output: Plain in `pal().cream`; Bold drawn twice 1 px apart (offset rounded by `ui_scale`); Italic pushes `italic_font_id()` when `Some`, else muted colour; Name in accent; Warn line in `WARN`; Link underlined in accent with a 1 px line and an invisible button that opens the URL via the existing `render_source_link` path; rotation joiner `→` in accent. Bubble height = sum of line heights + padding. Cache `Vec<Line>` per message keyed by `(text hash, width)` so layout runs once per width
+- [X] T012 [US1] Wire the name predicate: build `names: HashSet<String>` from the `GameDb` name index the chips already use (skills, traits, specializations, runes, sigils, relics, weapons) once per `MainState` load in `crates/addon/src/ui/chat_bar.rs`; pass it to `parse`
+- [X] T013 [US1] In `crates/optimizer/src/prompts.rs` add the REPLY SHAPE paragraph (contracts/reply-markup.md "Asked of the model", verbatim rules) once as a `const REPLY_SHAPE: &str` and append it to the three prompts; replace the three "2-4 sentences" phrases with "in the REPLY SHAPE below"; T006 green; no other line in the file changes
+- [X] T014 [US1] Run `cargo test -p gw2-build-optimizer --lib -- chat_markup` and `cargo test -p gw2-optimizer --lib -- prompts` green; `cargo fmt --all`; commit "Choya chat: whole replies drawn as spans; REPLY SHAPE in the prompts (006 US1)" with the session footer
 
 **Checkpoint**: US1 complete; DLL would already show whole, formatted replies.
 
@@ -212,6 +212,17 @@ Setup ─ Foundational ─┬─ US1 (markup, cap, prompt) ─┐
 
 ## Notes
 
+<!-- T002 reference sites (SymForge find_references, 2026-09-08):
+add_plated_response: chat_bar.rs:678 (add_ai_response), chat_flow.rs:1012 (send_chat_message), test :856
+draw_bubble_text: chat_bar.rs:306, :360 (render_chat_bar)
+wrap_text: chat_bar.rs:163 (bubble_size)
+render_comparison: new_build.rs:80; provider_picks.rs:5 (import)
+apply_loaded_suggestion: saveload.rs:501 (load_named)
+refresh_provider_picks: kitchen.rs:80-81 (render_talk_tab), new_build.rs:68
+fallback_reference: chat_flow.rs (local to send_chat_message; index has no symbol)
+spawn_worker: 29 sites; chat one is chat_flow.rs:214 (send_chat_message)
+CLOSING_REQUEST_TIMEOUT: defined and used in llm/openai.rs:97 (send_closing), not openai_compat.rs
+-->
 - Seen-failing discipline: each story's tests are written before its code and must fail first.
 - `[P]` tasks touch different files; tasks on the same file are serial.
 - Commit after every story checkpoint; footers per the session's attribution instruction.

@@ -75,6 +75,12 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
     } else {
         None
     };
+    if state.main.chat.names.is_none() {
+        if let Some(db) = state.main.game_db.as_deref() {
+            state.main.chat.names =
+                Some(std::sync::Arc::new(crate::ui::chat_markup::name_index(db)));
+        }
+    }
     // Matched before the chat draws, because the cards sit inside it. The
     // match itself only runs when the proposal changed — see
     // `provider_picks::refresh_provider_picks`.
