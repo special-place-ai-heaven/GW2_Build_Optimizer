@@ -581,6 +581,56 @@ impl ComparisonState {
     }
 }
 
+/// One tab per build, tinted by whose it is, so opening a published build
+/// never hides the optimized one behind a twin (specs/006 US2). The Current
+/// tab is the equipped build; it exists whenever there is one. Shared by
+/// the New Build and Improve panes, which used to draw their own strips.
+pub fn render_tab_strip(ui: &Ui, comparison: &mut ComparisonState, has_current: bool) {
+    let tab_count = comparison.suggestions.len();
+    if has_current || tab_count > 1 {
+        let avail = ui.content_region_avail()[0];
+        let mut row_x = 0.0;
+        let mut tabs: Vec<(String, bool, [f32; 4], Option<usize>)> = Vec::new();
+        if has_current {
+            tabs.push((
+                t("cmp.tab_current"),
+                !comparison.show_optimized,
+                crate::ui::theme::CURRENT,
+                None,
+            ));
+        }
+        for (i, suggestion) in comparison.suggestions.iter().enumerate() {
+            tabs.push((
+                tab_label(suggestion, i),
+                comparison.show_optimized && comparison.selected_suggestion == i,
+                tab_kind_colour(&tab_kind(suggestion)),
+                Some(i),
+            ));
+        }
+        for (n, (label, selected, colour, target)) in tabs.iter().enumerate() {
+            let pill_w = ui.calc_text_size(label)[0] + 20.0;
+            if n > 0 {
+                if row_x + pill_w + 6.0 > avail {
+                    row_x = 0.0;
+                } else {
+                    ui.same_line_with_spacing(0.0, 6.0);
+                }
+            }
+            if crate::ui::theme::tinted_pill(ui, label, *selected, &format!("##tab_{n}"), *colour) {
+                match target {
+                    Some(i) => {
+                        comparison.selected_suggestion = *i;
+                        comparison.show_optimized = true;
+                    }
+                    None => comparison.show_optimized = false,
+                }
+            }
+            row_x += pill_w + 6.0;
+        }
+        ui.separator();
+    }
+}
+
 /// Render the comparison view: current build on left, suggestion on right.
 /// Mutates suggestion tab + result pane. `db` is used for hover inspect.
 pub fn render_comparison(
@@ -634,51 +684,7 @@ pub fn render_comparison(
     }
 
     let tab_count = comparison.suggestions.len();
-    // One tab per build, tinted by whose it is, so opening a published build
-    // never hides the optimized one behind a twin (specs/006 US2). The
-    // Current tab is the equipped build; it exists whenever there is one.
-    if has_current || tab_count > 1 {
-        let avail = ui.content_region_avail()[0];
-        let mut row_x = 0.0;
-        let mut tabs: Vec<(String, bool, [f32; 4], Option<usize>)> = Vec::new();
-        if has_current {
-            tabs.push((
-                t("cmp.tab_current"),
-                !comparison.show_optimized,
-                crate::ui::theme::CURRENT,
-                None,
-            ));
-        }
-        for (i, suggestion) in comparison.suggestions.iter().enumerate() {
-            tabs.push((
-                tab_label(suggestion, i),
-                comparison.show_optimized && comparison.selected_suggestion == i,
-                tab_kind_colour(&tab_kind(suggestion)),
-                Some(i),
-            ));
-        }
-        for (n, (label, selected, colour, target)) in tabs.iter().enumerate() {
-            let pill_w = ui.calc_text_size(label)[0] + 20.0;
-            if n > 0 {
-                if row_x + pill_w + 6.0 > avail {
-                    row_x = 0.0;
-                } else {
-                    ui.same_line_with_spacing(0.0, 6.0);
-                }
-            }
-            if crate::ui::theme::tinted_pill(ui, label, *selected, &format!("##tab_{n}"), *colour) {
-                match target {
-                    Some(i) => {
-                        comparison.selected_suggestion = *i;
-                        comparison.show_optimized = true;
-                    }
-                    None => comparison.show_optimized = false,
-                }
-            }
-            row_x += pill_w + 6.0;
-        }
-        ui.separator();
-    }
+    render_tab_strip(ui, comparison, has_current);
 
     let idx = comparison.selected_suggestion.min(tab_count - 1);
     comparison.selected_suggestion = idx;
