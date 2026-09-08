@@ -332,10 +332,11 @@ pub(in crate::ui::main_view) fn adopt_provider_pick(state: &mut AddonState, inde
         .filter_map(|id| db.items.get(id).map(|item| item.name.clone()))
         .collect();
 
+    // The tab prefixes the site's name itself (`comparison::tab_label`).
     let label = if build.spec_name.is_empty() {
-        format!("{} \u{00b7} {}", build.profession, build.source)
+        build.profession.clone()
     } else {
-        format!("{} \u{00b7} {}", build.spec_name, build.source)
+        build.spec_name.clone()
     };
     let weapons = published_weapons(&build);
     let mut summary = build.role.clone();

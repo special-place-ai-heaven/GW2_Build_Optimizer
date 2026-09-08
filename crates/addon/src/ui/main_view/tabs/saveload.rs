@@ -427,9 +427,9 @@ fn apply_loaded_suggestion(
     state: &mut AddonState,
     suggestion: crate::ui::comparison::BuildSuggestion,
 ) {
-    state.main.comparison.suggestions = vec![suggestion];
-    state.main.comparison.selected_suggestion = 0;
-    state.main.comparison.show_optimized = true;
+    // Pushed beside the existing suggestions, never instead of them
+    // (specs/006 FR-004).
+    state.main.comparison.push_or_replace(suggestion);
     state.main.comparison.error = None;
     state.main.active_tab = MainTab::NewBuild;
 }
