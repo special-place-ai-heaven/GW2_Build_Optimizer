@@ -136,6 +136,9 @@ struct StreamDelta {
     r#type: String,
     #[serde(default)]
     text: Option<String>,
+    /// `thinking_delta` payload, when extended thinking is on.
+    #[serde(default)]
+    thinking: Option<String>,
     #[serde(default)]
     partial_json: Option<String>,
     #[serde(default)]
@@ -212,9 +215,14 @@ fn read_anthropic_stream<R: std::io::Read>(
                     continue;
                 };
                 if let Some(delta) = event.delta {
+                    if delta.r#type == "thinking_delta" {
+                        super::live::reasoning(delta.thinking.as_deref().unwrap_or_default());
+                    }
                     match (delta.r#type.as_str(), block) {
                         ("text_delta", StreamBlock::Text { text }) => {
-                            text.push_str(delta.text.as_deref().unwrap_or_default());
+                            let piece = delta.text.as_deref().unwrap_or_default();
+                            super::live::content(piece);
+                            text.push_str(piece);
                         }
                         ("input_json_delta", StreamBlock::ToolUse { input_json, .. }) => {
                             input_json.push_str(delta.partial_json.as_deref().unwrap_or_default());

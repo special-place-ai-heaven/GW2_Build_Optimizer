@@ -6,6 +6,7 @@ pub mod anthropic;
 pub(crate) mod body;
 pub mod cancel;
 pub mod gemini;
+pub mod live;
 pub mod models_dev;
 pub mod openai;
 pub(crate) mod openai_compat;
