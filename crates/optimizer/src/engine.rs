@@ -1402,7 +1402,7 @@ fn simulate_prepared_with(
         rotation::simulator::simulate_with(rotation_skills, duration_ms, params, enemy);
 
     if let Some(scenario) = scenario.filter(|scenario| scenario.game_mode == GameMode::WvW) {
-        let (active_effects, unmodeled_sources) =
+        let (active_effects, unmodeled_sources, sigil_sets) =
             active_normalized_effects(validated, rotation_skills, db, mode.label());
         let (resource_rules, resource_model_complete) =
             wvw_resource_rules(validated, rotation_skills, db, profession_name, &sim_ctx);
@@ -1418,6 +1418,7 @@ fn simulate_prepared_with(
                 resource_rules: &resource_rules,
                 resource_model_complete,
                 unmodeled_sources,
+                sigil_sets,
                 weapon_swap_cooldown_ms: wvw_weapon_swap_cooldown_ms(profession_name, validated),
                 trace,
             },
@@ -1599,10 +1600,12 @@ fn land_weapon_slot_type(
     }
 }
 
-/// The normalized-effect records selected for this build in `mode`, plus the
+/// The normalized-effect records selected for this build in `mode`, the
 /// names of the equipped sources that have no record at all, formatted
 /// `"{name} (no record)"` and sorted, so the report can say what it did not
-/// simulate instead of counting it.
+/// simulate instead of counting it, and each sigil's weapon set (1, 2, or 0
+/// when the same sigil is socketed on both) so the timeline fires it only
+/// while that set is held (CONN-00-07).
 fn active_normalized_effects(
     validated: &ValidatedBuild,
     rotation_skills: &[rotation::RotationSkill],
@@ -1611,6 +1614,7 @@ fn active_normalized_effects(
 ) -> (
     Vec<&'static crate::data::normalized_effects::NormalizedEffect>,
     Vec<String>,
+    std::collections::HashMap<u32, u8>,
 ) {
     use crate::data::normalized_effects::SourceType;
 
@@ -1623,11 +1627,19 @@ fn active_normalized_effects(
         rotation_skills.iter().map(|skill| skill.skill_id).collect();
     let rune_ids: std::collections::HashSet<u32> =
         validated.rune.iter().map(|item| item.id).collect();
-    // Worn set only. A sigil in the weapon set you are not holding grants
-    // nothing in GW2, so crediting its timed effect to the fight is the same
-    // stowed-set error `calculate_validated_stats` used to make on stats.
-    let sigil_ids: std::collections::HashSet<u32> =
-        validated.active_sigil_ids().into_iter().collect();
+    // Both sets, each tagged with its seat: a stowed sigil grants nothing
+    // until a swap brings it in, and the timeline enforces that per hit.
+    let [set_one, set_two] = validated.sigil_ids_by_set();
+    let mut sigil_sets: std::collections::HashMap<u32, u8> = std::collections::HashMap::new();
+    for id in &set_one {
+        sigil_sets.insert(*id, 1);
+    }
+    for id in &set_two {
+        // Socketed on both sets: held whichever set is out.
+        let set = if set_one.contains(id) { 0 } else { 2 };
+        sigil_sets.insert(*id, set);
+    }
+    let sigil_ids: std::collections::HashSet<u32> = sigil_sets.keys().copied().collect();
     let relic_ids: std::collections::HashSet<u32> =
         validated.relic.iter().map(|item| item.id).collect();
 
@@ -1692,7 +1704,7 @@ fn active_normalized_effects(
         .map(|(tag, id)| format!("{} (no record)", name_of(*tag, *id)))
         .collect();
     unmodeled.sort();
-    (active, unmodeled)
+    (active, unmodeled, sigil_sets)
 }
 
 fn source_type_tag(source_type: &crate::data::normalized_effects::SourceType) -> u8 {
