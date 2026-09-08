@@ -147,14 +147,12 @@ pub struct ObjectiveProfileData {
 }
 
 impl ObjectiveProfileData {
-    /// Get the default profile for a game mode.
     pub fn default_for_mode(&self, mode: &str) -> Option<&ObjectiveProfile> {
         self.files
             .get(mode)
             .and_then(|f| f.profiles.iter().find(|p| p.is_mode_default))
     }
 
-    /// Get a profile by its ID across all modes.
     pub fn profile_by_id(&self, id: &str) -> Option<&ObjectiveProfile> {
         for file in self.files.values() {
             if let Some(p) = file.profiles.iter().find(|p| p.objective_profile_id == id) {
@@ -164,7 +162,6 @@ impl ObjectiveProfileData {
         None
     }
 
-    /// Get all profiles for a game mode.
     pub fn profiles_for_mode(&self, mode: &str) -> Vec<&ObjectiveProfile> {
         self.files
             .get(mode)
@@ -172,7 +169,6 @@ impl ObjectiveProfileData {
             .unwrap_or_default()
     }
 
-    /// Get all profiles across all modes.
     pub fn all_profiles(&self) -> Vec<&ObjectiveProfile> {
         self.files
             .values()

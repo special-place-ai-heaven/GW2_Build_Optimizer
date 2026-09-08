@@ -94,7 +94,6 @@ impl ProfessionProfiles {
         })
     }
 
-    /// Get the full profile for a profession.
     pub fn get(&self, profession: &str) -> Option<&ProfessionProfile> {
         self.map.get(profession)
     }

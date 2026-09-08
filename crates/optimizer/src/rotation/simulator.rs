@@ -437,9 +437,7 @@ impl SimState {
             }
             self.weapon_swap_cooldown_ms = self.weapon_swap_cooldown_ms.saturating_sub(TICK_MS);
 
-            // Try to use a skill if the character is free
             if self.current_time_ms >= self.next_action_ms {
-                // Check if weapon swap would be beneficial
                 if self.has_weapon_sets && self.should_weapon_swap(power) {
                     self.weapon_swap();
                 }
