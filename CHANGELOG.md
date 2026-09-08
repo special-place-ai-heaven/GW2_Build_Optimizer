@@ -2,6 +2,14 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.4 - 2026-09-08
+
+Sprint 3 convergence: Death's Carapace, the Scourge's shroud skills and a clean wiki check.
+
+- Death's Carapace is simulated: a stacking toughness effect (20 per stack in WvW, 30 stacks at most, 10 s) that shrinks incoming strikes by armor / (armor + toughness). Armored Shroud, Putrid Defense, Shrouded Removal, Dark Defense and Corrupter's Fervor feed it from their wiki records, and a cleanse that removed a condition is now a trigger (Shrouded Removal). The cached Reaper build's "Not simulated" line falls from three traits to two, each naming the half still unmodeled.
+- A Scourge's shade skills count as its shroud skills for traits that say "shroud skill N", as the wiki states; a build with a shroud bar is unchanged.
+- The wiki-number check is clean: a derived value names the page number it comes from, the game's own API facts count beside the page, heuristic records are skipped, and Superior Sigil of Bursting carries the page's +5% (the record said 6).
+
 ## 1.14.3 - 2026-09-08
 
 Trait triggers are the build: the WvW simulation now fires the Necromancer's traits.
