@@ -21,6 +21,15 @@ The evening's question was why no free model produced a build any more. The answ
 - Gemini's closing request now carries an output cap, so a model that reasons at length cannot spend minutes on it.
 - `cargo run -p gw2-optimizer --example choya_live -- <provider> <model>` runs the real contract against the configured keys and prints PASS or FAIL with the request count. This is what "the model works" means from now on.
 
+### What the simulator now simulates in WvW
+
+- On-crit sigils fire. Ranking counts them at the build's critical chance with the cooldown applied to the expected rate; the diagnostic trace also rolls eight fixed seeds and reports how far the expected value sits from a proc that either fires or does not.
+- Swapping weapons swaps sigils: the sigils on the stowed set load, fire only while their set is held, and keep one cooldown across the swap.
+- Health-threshold and stacking bonuses apply per strike, only while true: Rune of the Scholar above 90 % health, Relic of the Thief up to five stacks for six seconds from weapon skills with a recharge. Nothing is counted twice, and PvE and PvP results are unchanged.
+- Dark field combos resolve: whirl finishers leech, leap and blast grant Dark Aura.
+- Life force and shroud: every Necromancer specialisation shares one shroud shape (10 % to enter, drain per second, damage to the pool at the mode's reduction, no healing inside, out at zero); the shroud bar is built from the game data, and a build that cannot enter shroud says why.
+- The records for Sigil of Fire, Rune of the Scholar and Relic of the Thief are rewritten from the wiki and dated; the resource-model check is derived from the skills instead of a list of professions.
+
 ### What the simulator did not simulate
 
 - A build's result now says what it did not simulate, by name, instead of counting it: the quality marker on a comparison carries "Not simulated: Superior Sigil of Fire (on-crit), … and N others" beside it, the same line is in Choya's evidence and appended to a plate's concerns, and a plate served by Choya now shows the referee's Provisional / Verified marker instead of Verified regardless. Nothing is scored differently; the line qualifies, it does not penalise.
