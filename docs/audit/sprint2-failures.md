@@ -157,7 +157,46 @@ See the block above: before the edit the rune was named "(on-health-threshold)",
 
 ### reaper_dark_whirl_life_steals
 
+Before the dark arm existed (2026-09-08):
+
+```
+test rotation::wvw_timeline::reaper_experiments::reaper_dark_whirl_life_steals ... FAILED
+test rotation::wvw_timeline::reaper_experiments::reaper_expired_field_makes_no_combo ... FAILED
+
+failures:
+--
+thread 'rotation::wvw_timeline::reaper_experiments::reaper_dark_whirl_life_steals' (1971316) panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5271:9:
+the dark whirl combo resolves: []
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+--
+thread 'rotation::wvw_timeline::reaper_experiments::reaper_expired_field_makes_no_combo' (1971452) panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5333:9:
+the finisher comes after the field: 3200
+
+--
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 1148 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+```
+
+Harness `dark` after the edit (arm returns to the degraded note):
+
+```
+### dark
+file: crates/optimizer/src/rotation/wvw_timeline.rs
+disabled: let damage = 198.0 + 0.03 * self.params.power;
+test: reaper_dark_whirl_life_steals
+panicked at crates\optimizer\src\rotation\wvw_timeline.rs:5313:9:
+the dark whirl combo resolves: []
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1149 filtered out; finished in 0.01s
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+restored: byte-identical
+```
+
 ### reaper_expired_field_makes_no_combo (regression guard, not seen-failing)
+
+First run failed on its own premise (the finisher landed at 3 200 ms, inside the 5 s field); the opener was lengthened so the finisher lands after 5 s. Passes before and after the dark arm.
 
 ## US6 life force and shroud
 
