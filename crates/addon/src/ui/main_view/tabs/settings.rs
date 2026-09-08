@@ -77,6 +77,52 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
                 crate::ui::save_config_detached(state);
             }
         }
+
+        // Scale and role beside the mode, one row each, labelled for the
+        // default mode chosen above (2026-09-08).
+        use gw2_optimizer::scenario::{CombatTier, RoleObjective};
+        let mode = match state.config.default_game_mode.as_deref() {
+            Some("PvP") => gw2_core::types::GameMode::PvP,
+            Some("WvW") => gw2_core::types::GameMode::WvW,
+            _ => gw2_core::types::GameMode::PvE,
+        };
+        ui.text(t("settings.default_scale"));
+        let current_tier = state.config.default_combat_tier.clone();
+        for (at, tier) in [CombatTier::Solo, CombatTier::Party, CombatTier::Squad]
+            .into_iter()
+            .enumerate()
+        {
+            if at > 0 {
+                ui.same_line();
+            }
+            let name = format!("{tier:?}");
+            let is_sel = current_tier.as_deref() == Some(name.as_str());
+            let label = format!(
+                "{}##tier_{name}",
+                t(crate::ui::main_view::scale_i18n_key(&mode, tier))
+            );
+            if ui.radio_button_bool(&label, is_sel) && !is_sel {
+                state.config.default_combat_tier = Some(name);
+                crate::ui::save_config_detached(state);
+            }
+        }
+        ui.text(t("settings.default_role"));
+        let current_role = state.config.default_role.clone();
+        for (at, role) in RoleObjective::play_roles_for(&mode).iter().enumerate() {
+            if at > 0 {
+                ui.same_line();
+            }
+            let name = format!("{role:?}");
+            let is_sel = current_role.as_deref() == Some(name.as_str());
+            let label = format!(
+                "{}##role_{name}",
+                t(crate::ui::main_view::role_i18n_key(&mode, *role))
+            );
+            if ui.radio_button_bool(&label, is_sel) && !is_sel {
+                state.config.default_role = Some(name);
+                crate::ui::save_config_detached(state);
+            }
+        }
     }
 
     ui.dummy([0.0, 8.0]);

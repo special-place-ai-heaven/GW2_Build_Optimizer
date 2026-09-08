@@ -1024,6 +1024,27 @@ pub fn init(addon_dir: PathBuf) {
         _ => gw2_core::types::GameMode::PvE,
     };
     main.weights = OptimizationWeights::default_for_mode(main.game_mode.label());
+    // Saved defaults for scale and role, so the left panel opens the way the
+    // player set it in Settings instead of on the first chip (2026-09-08).
+    if let Some(tier) = config.default_combat_tier.as_deref() {
+        use gw2_optimizer::scenario::CombatTier;
+        if let Some(t) = [CombatTier::Solo, CombatTier::Party, CombatTier::Squad]
+            .into_iter()
+            .find(|t| format!("{t:?}") == tier)
+        {
+            main.combat_tier = t;
+        }
+    }
+    if let Some(role) = config.default_role.as_deref() {
+        if let Some(r) = gw2_optimizer::scenario::RoleObjective::play_roles_for(&main.game_mode)
+            .iter()
+            .copied()
+            .find(|r| format!("{r:?}") == role)
+        {
+            main.selected_role = Some(r);
+            main.weights = r.to_weights_for(&main.game_mode, main.combat_tier);
+        }
+    }
     main.chat.history = crate::ui::chat_bar::load_history(&addon_dir);
     main.hydrate_benchmarks_from_disk(&addon_dir);
     crate::ui::icons::set_graphics_dir(addon_dir.join("cache").join("graphics"));

@@ -170,6 +170,8 @@
   "settings.ai_provider": "FORNITORE IA",
   "settings.opt_defaults": "PREDEFINIZIONI DI OTTIMIZZAZIONE",
   "settings.default_mode": "Modalità di gioco predefinita:",
+  "settings.default_scale": "Scala predefinita:",
+  "settings.default_role": "Ruolo predefinito:",
   "settings.legend": "LEGENDA QUALITÀ DATI",
   "settings.verified": "Verificato",
   "settings.verified_note": "-- Tutti i dati di input sono supportati da fonti.",

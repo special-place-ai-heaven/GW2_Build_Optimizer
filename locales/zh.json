@@ -170,6 +170,8 @@
   "settings.ai_provider": "AI 提供商",
   "settings.opt_defaults": "优化默认值",
   "settings.default_mode": "默认游戏模式：",
+  "settings.default_scale": "默认规模：",
+  "settings.default_role": "默认职责：",
   "settings.legend": "数据质量图例",
   "settings.verified": "已验证",
   "settings.verified_note": "-- 所有输入均有来源。",
