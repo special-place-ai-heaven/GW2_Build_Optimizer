@@ -141,7 +141,6 @@ impl BalanceOverrides {
         })
     }
 
-    /// Number of loaded override files.
     pub fn file_count(&self) -> usize {
         self.files.len()
     }
