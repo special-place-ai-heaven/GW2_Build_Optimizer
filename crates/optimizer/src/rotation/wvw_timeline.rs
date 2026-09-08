@@ -5,8 +5,9 @@
 //! the build establish control of a real exchange long enough to finish its
 //! chain, survive the answer, recover, and do it again?"
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
+use crate::data::normalized_effects::Prerequisite;
 use crate::data::normalized_effects::{
     EffectCategory, NormalizedEffect, OperationType, SourceType, TargetSide, TriggerRule,
 };
@@ -15,8 +16,7 @@ use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
 
 use super::combat_model::{corrupt_into, EnemyDummy};
 use super::simulator::{
-    alacrity_cd_advance_ms, condition_tick_damage, crit_chance_fraction, reference_armor,
-    strike_crit_factor_with_bonus, SimParams,
+    alacrity_cd_advance_ms, condition_tick_damage, crit_chance_fraction, reference_armor, SimParams,
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect, SkillSlot};
@@ -211,6 +211,8 @@ pub struct WvwCombatReport {
     /// The same list with its classes (specs/007-trait-triggers, US4): one
     /// entry per skipped source; empty iff the coverage reason is absent.
     pub coverage: Vec<CoverageEntry>,
+    /// Trait records that fired at least once, by source name (US1).
+    pub trait_fire_counts: BTreeMap<String, u32>,
     /// Bounded event trace. Empty unless [`WvwTimelineInput::trace`] was set;
     /// capped at [`TRACE_CAP`] events.
     pub trace: Vec<TraceEvent>,
@@ -258,6 +260,17 @@ pub enum TraceKind {
     ShroudExited,
     ShroudRefused,
     LifeForceGained,
+    // Sprint 3 (specs/007-trait-triggers)
+    /// A trait record fired: `{category} ×{weight}` plus `at entry`,
+    /// `at exit ({why})` or `periodic`.
+    TraitFired,
+    /// A record's prerequisite did not hold at its trigger.
+    ProcSkippedPrerequisite,
+    /// An effect was counted onto extra foes or allies.
+    PopulationApplied,
+    /// An in-shroud conditional bonus turned on / off.
+    ShroudBonusActive,
+    ShroudBonusEnded,
 }
 
 /// Seeded-trial summary for one proc source, trace mode only
@@ -563,6 +576,9 @@ struct ProcSpec {
     /// start (R1): the cooldown begins when it reaches 1.0.
     mass: f64,
     scope: crate::data::normalized_effects::TriggerScope,
+    // Sprint 3 (specs/007-trait-triggers)
+    /// What must hold on the foe or the player at the trigger.
+    prerequisite: Option<Prerequisite>,
 }
 
 /// A rune or relic strike bonus that holds only while its prerequisite does
@@ -573,6 +589,9 @@ struct ConditionalSpec {
     kind: ConditionalKind,
     /// Percent per activation or per stack (record `value`).
     percent: f64,
+    /// `true`: the percent is critical damage, not strike damage (Death
+    /// Perception's in-shroud half). Sprint 3.
+    crit_damage: bool,
     /// Threshold state as of the last evaluation.
     active: bool,
     stacks: u32,
@@ -589,6 +608,8 @@ enum ConditionalKind {
         duration_ms: u32,
         scope: crate::data::normalized_effects::TriggerScope,
     },
+    /// Holds while the player is in shroud (Sprint 3, US1).
+    InShroud,
 }
 
 /// The Necromancer in shroud (`specs/005-wvw-proc-sites`, US6): the weapon
@@ -711,6 +732,13 @@ struct Timeline<'a> {
     crit_mode: CritMode,
     /// `ProcFired` count per proc source, for the trials (trace only).
     proc_fire_counts: HashMap<String, u32>,
+    // Sprint 3 (specs/007-trait-triggers)
+    trait_fire_counts: BTreeMap<String, u32>,
+    /// `why` of the shroud exit in progress, for the `TraitFired` detail.
+    shroud_exit_why: Option<String>,
+    /// Any shroud entry happened this fight (shroud records that never fired
+    /// otherwise get the shroud-floor reason at the end).
+    shroud_entered_once: bool,
     protection_multiplier: f64,
     resource_rules: HashMap<u32, SkillResourceRule>,
     resources: HashMap<ResourceKind, f64>,
@@ -878,6 +906,9 @@ impl<'a> Timeline<'a> {
             shroud_refusals: Vec::new(),
             crit_mode: CritMode::Expected,
             proc_fire_counts: HashMap::new(),
+            trait_fire_counts: BTreeMap::new(),
+            shroud_exit_why: None,
+            shroud_entered_once: false,
             protection_multiplier: crate::data::boon_condition_formulas::boons()
                 .protection_multiplier(),
             resource_rules: resource_rules
@@ -914,6 +945,31 @@ impl<'a> Timeline<'a> {
             // stacking bonus on strike damage becomes a ConditionalSpec.
             let strike_bonus = matches!(effect.category, EffectCategory::StrikeDamagePct)
                 || matches!(effect.inner_category, Some(EffectCategory::StrikeDamagePct));
+            let crit_bonus = matches!(effect.category, EffectCategory::CritDamagePct)
+                || matches!(effect.inner_category, Some(EffectCategory::CritDamagePct));
+            // In-shroud bonuses (Sprint 3, US1): active while in shroud.
+            if (strike_bonus || crit_bonus)
+                && matches!(effect.trigger_rule, TriggerRule::Conditional)
+                && effect
+                    .prerequisite
+                    .as_ref()
+                    .is_some_and(|p| p.in_shroud == Some(true))
+            {
+                let Some(&percent) = resolved(&effect.value) else {
+                    self.note_unmodeled(format!("{} (unresolved value)", effect.source_name));
+                    continue;
+                };
+                self.conditional_specs.push(ConditionalSpec {
+                    source_name: effect.source_name.clone(),
+                    kind: ConditionalKind::InShroud,
+                    percent,
+                    crit_damage: crit_bonus,
+                    active: false,
+                    stacks: 0,
+                    expires_at_ms: 0,
+                });
+                continue;
+            }
             if strike_bonus && matches!(effect.trigger_rule, TriggerRule::OnHealthThreshold) {
                 let (Some(threshold), Some(&percent)) =
                     (effect.health_threshold.as_ref(), resolved(&effect.value))
@@ -932,6 +988,7 @@ impl<'a> Timeline<'a> {
                         percent: line,
                     },
                     percent,
+                    crit_damage: false,
                     active: false,
                     stacks: 0,
                     expires_at_ms: 0,
@@ -958,6 +1015,7 @@ impl<'a> Timeline<'a> {
                         scope: effect.trigger_scope.clone().unwrap_or_default(),
                     },
                     percent,
+                    crit_damage: false,
                     active: false,
                     stacks: 0,
                     expires_at_ms: 0,
@@ -967,7 +1025,10 @@ impl<'a> Timeline<'a> {
 
             let supported = matches!(
                 effect.trigger_rule,
-                TriggerRule::OnHit | TriggerRule::OnCrit
+                TriggerRule::OnHit
+                    | TriggerRule::OnCrit
+                    | TriggerRule::OnShroudEnter
+                    | TriggerRule::OnShroudExit
             ) || (matches!(effect.trigger_rule, TriggerRule::OnSkillUse)
                 && matches!(effect.source_type, SourceType::Skill));
             if !supported {
@@ -1024,6 +1085,7 @@ impl<'a> Timeline<'a> {
                     .unwrap_or(1.0),
                 mass: 0.0,
                 scope: effect.trigger_scope.clone().unwrap_or_default(),
+                prerequisite: effect.prerequisite.clone(),
             });
         }
     }
@@ -1060,6 +1122,7 @@ impl<'a> Timeline<'a> {
             self.now_ms = self.now_ms.min(self.profile.duration_ms);
             self.land_scheduled_hits();
         }
+        self.note_never_fired();
     }
 
     /// How fast skills come back this tick.
@@ -1654,11 +1717,24 @@ impl<'a> Timeline<'a> {
             &name,
             format!("{:.0}% life force", have / cap * 100.0),
         );
+        self.shroud_entered_once = true;
+        // Sprint 3 (US1): the entry is a firing site, then the in-shroud
+        // bonuses switch on.
+        self.trigger_procs(TriggerRule::OnShroudEnter, Some(skill_id), false, 1.0);
+        self.update_conditionals();
     }
 
     /// Leave shroud: `why` is `exit skill`, `opener` or `life force 0`; the
     /// forced exit cancels the pending cast the way an interrupt does.
     fn exit_shroud(&mut self, why: &str) {
+        if self.in_shroud.is_none() {
+            return;
+        }
+        // Sprint 3 (US1): exit records fire while the state still stands, so
+        // an in-shroud prerequisite on them holds; `why` reaches the trace.
+        self.shroud_exit_why = Some(why.to_string());
+        self.trigger_procs(TriggerRule::OnShroudExit, None, false, 1.0);
+        self.shroud_exit_why = None;
         let Some(state) = self.in_shroud.take() else {
             return;
         };
@@ -1669,6 +1745,7 @@ impl<'a> Timeline<'a> {
         self.set_skill_cooldown(state.entry_skill_id, state.exit_recharge_ms);
         let name = self.skill_name(state.entry_skill_id);
         self.trace(TraceKind::ShroudExited, &name, why);
+        self.update_conditionals();
     }
 
     /// Life force credited when a cast resolves (Percent fact "Life Force").
@@ -1922,20 +1999,21 @@ impl<'a> Timeline<'a> {
                 } else {
                     0.0
                 };
+                // Conditional bonuses (US3), evaluated at the strike.
+                self.update_conditionals();
                 let mut damage = self.params.weapon_strength * power / reference_armor()
                     * dmg_multiplier
                     * *hit_count as f64
-                    * strike_crit_factor_with_bonus(
+                    * strike_crit_factor_with_crit_damage(
                         self.params.precision,
                         self.params.ferocity,
                         self.params.crit_chance_bonus + fury_bonus,
+                        self.crit_damage_conditional_pct(),
                     )
                     * self.params.strike_mult;
                 if self.enemy_protection {
                     damage *= self.protection_multiplier;
                 }
-                // Conditional bonuses (US3), evaluated at the strike.
-                self.update_conditionals();
                 damage *= self.strike_conditional_mult();
                 self.record_damage(damage, protected);
                 if self.trace_enabled {
@@ -2309,6 +2387,7 @@ impl<'a> Timeline<'a> {
     fn update_conditionals(&mut self) {
         let ratio = self.player_health / self.params.max_health.max(1.0);
         let now = self.now_ms;
+        let in_shroud = self.in_shroud.is_some();
         let mut changes = Vec::new();
         for spec in &mut self.conditional_specs {
             match spec.kind {
@@ -2337,13 +2416,34 @@ impl<'a> Timeline<'a> {
                         ));
                     }
                 }
+                ConditionalKind::InShroud => {
+                    let holds = in_shroud;
+                    if holds != spec.active {
+                        spec.active = holds;
+                        changes.push((
+                            spec.source_name.clone(),
+                            holds,
+                            format!(
+                                "×{:.2} {}",
+                                1.0 + spec.percent / 100.0,
+                                if spec.crit_damage {
+                                    "crit damage"
+                                } else {
+                                    "strike"
+                                }
+                            ),
+                        ));
+                    }
+                }
             }
         }
         for (name, on, detail) in changes {
-            let kind = if on {
-                TraceKind::ConditionalActivated
-            } else {
-                TraceKind::ConditionalExpired
+            let shroud = detail.starts_with('×');
+            let kind = match (shroud, on) {
+                (true, true) => TraceKind::ShroudBonusActive,
+                (true, false) => TraceKind::ShroudBonusEnded,
+                (false, true) => TraceKind::ConditionalActivated,
+                (false, false) => TraceKind::ConditionalExpired,
             };
             self.trace(kind, &name, detail);
         }
@@ -2353,12 +2453,62 @@ impl<'a> Timeline<'a> {
     fn strike_conditional_mult(&self) -> f64 {
         self.conditional_specs
             .iter()
+            .filter(|spec| !spec.crit_damage)
             .map(|spec| match spec.kind {
-                ConditionalKind::Threshold { .. } if spec.active => 1.0 + spec.percent / 100.0,
+                ConditionalKind::Threshold { .. } | ConditionalKind::InShroud if spec.active => {
+                    1.0 + spec.percent / 100.0
+                }
                 ConditionalKind::Stacking { .. } => 1.0 + spec.stacks as f64 * spec.percent / 100.0,
                 _ => 1.0,
             })
             .product()
+    }
+
+    /// Critical damage percentage points of every conditional bonus that
+    /// holds now (Sprint 3: the in-shroud half of Death Perception).
+    fn crit_damage_conditional_pct(&self) -> f64 {
+        self.conditional_specs
+            .iter()
+            .filter(|spec| spec.crit_damage && spec.active)
+            .map(|spec| spec.percent)
+            .sum()
+    }
+
+    /// Whether a record's prerequisite holds now; `Err` names the reason for
+    /// the `ProcSkippedPrerequisite` trace. Sprint 3 US1 evaluates the shroud
+    /// member; the foe members land with US2.
+    fn prerequisite_holds(&self, prerequisite: &Prerequisite) -> Result<(), &'static str> {
+        if let Some(want) = prerequisite.in_shroud {
+            if self.in_shroud.is_some() != want {
+                return Err(if want { "not in shroud" } else { "in shroud" });
+            }
+        }
+        if prerequisite.foe_condition.is_some() || prerequisite.foe_health.is_some() {
+            return Err("foe prerequisite not evaluated");
+        }
+        Ok(())
+    }
+
+    /// End of fight: a shroud record that never fired because no shroud was
+    /// entered goes on the coverage line with that reason (spec edge case).
+    fn note_never_fired(&mut self) {
+        if self.shroud_entered_once {
+            return;
+        }
+        let names: Vec<String> = self
+            .proc_specs
+            .iter()
+            .filter(|spec| {
+                matches!(
+                    spec.trigger,
+                    TriggerRule::OnShroudEnter | TriggerRule::OnShroudExit
+                ) && !self.proc_fire_counts.contains_key(&spec.source_name)
+            })
+            .map(|spec| spec.source_name.clone())
+            .collect();
+        for name in names {
+            self.note_unmodeled(format!("{name} (shroud never entered)"));
+        }
     }
 
     /// Whether `skill_id` counts for a trigger scope.
@@ -2470,6 +2620,7 @@ impl<'a> Timeline<'a> {
     ) {
         let mut ready = Vec::new();
         let mut on_cooldown = Vec::new();
+        let mut skipped_prerequisite = Vec::new();
         let held_set = self.held_set_for(activating_skill_id);
         for (idx, proc_spec) in self.proc_specs.iter().enumerate() {
             let source_matches = !matches!(proc_spec.source_type, SourceType::Skill)
@@ -2478,12 +2629,21 @@ impl<'a> Timeline<'a> {
             let scope_ok = self.scope_admits(&proc_spec.scope, activating_skill_id);
             if same_trigger(&proc_spec.trigger, &trigger) && source_matches && set_held && scope_ok
             {
-                if proc_spec.next_ready_ms <= self.now_ms {
+                if let Err(reason) = proc_spec
+                    .prerequisite
+                    .as_ref()
+                    .map_or(Ok(()), |p| self.prerequisite_holds(p))
+                {
+                    skipped_prerequisite.push((proc_spec.source_name.clone(), reason));
+                } else if proc_spec.next_ready_ms <= self.now_ms {
                     ready.push(idx);
                 } else {
                     on_cooldown.push(idx);
                 }
             }
+        }
+        for (name, reason) in skipped_prerequisite {
+            self.trace(TraceKind::ProcSkippedPrerequisite, &name, reason);
         }
         for idx in on_cooldown {
             let (name, ready_at) = (
@@ -2569,6 +2729,25 @@ impl<'a> Timeline<'a> {
             if fired {
                 *self.proc_fire_counts.entry(name.clone()).or_default() += 1;
                 self.trace(TraceKind::ProcFired, &name, format!("{category:?} ×{p:.2}"));
+                // Sprint 3 (US1): a trait record also says it is a trait
+                // and when it fired, on top of the ProcFired every proc gets.
+                if matches!(self.proc_specs[idx].source_type, SourceType::Trait) {
+                    *self.trait_fire_counts.entry(name.clone()).or_default() += 1;
+                    let when = match trigger {
+                        TriggerRule::OnShroudEnter => " at entry".to_string(),
+                        TriggerRule::OnShroudExit => format!(
+                            " at exit ({})",
+                            self.shroud_exit_why.as_deref().unwrap_or("shroud ended")
+                        ),
+                        TriggerRule::Periodic => " periodic".to_string(),
+                        _ => String::new(),
+                    };
+                    self.trace(
+                        TraceKind::TraitFired,
+                        &name,
+                        format!("{category:?} ×{p:.2}{when}"),
+                    );
+                }
             }
         }
     }
@@ -2861,6 +3040,7 @@ impl<'a> Timeline<'a> {
             resource_model_complete: self.resource_model_complete,
             unmodeled_sources: coverage.iter().map(CoverageEntry::rendered).collect(),
             coverage,
+            trait_fire_counts: self.trait_fire_counts.clone(),
             trace: self.trace.clone(),
             trace_truncated: self.trace_truncated,
             proc_trials: Vec::new(),
@@ -3046,6 +3226,23 @@ fn trigger_label(trigger: &TriggerRule) -> &'static str {
         TriggerRule::OnBoonStripped => "on-boon-stripped",
         TriggerRule::Periodic => "periodic",
     }
+}
+
+/// `strike_crit_factor_with_bonus` with extra critical damage percentage
+/// points from an active conditional (Sprint 3). Equal to it at 0.
+fn strike_crit_factor_with_crit_damage(
+    precision: f64,
+    ferocity: f64,
+    crit_chance_bonus_pct: f64,
+    crit_damage_bonus_pct: f64,
+) -> f64 {
+    if precision <= 0.0 {
+        return 1.0;
+    }
+    let chance = crit_chance_fraction(precision, crit_chance_bonus_pct);
+    let crit_mult = crate::data::universal_formulas::formulas().crit_damage(ferocity) / 100.0
+        + crit_damage_bonus_pct / 100.0;
+    1.0 + chance * (crit_mult - 1.0)
 }
 
 fn same_trigger(left: &TriggerRule, right: &TriggerRule) -> bool {
@@ -5077,7 +5274,7 @@ mod reaper_experiments {
     use crate::sigil_slots::SigilSlots;
     use crate::validation::ValidatedBuild;
 
-    fn prepared() -> engine::PreparedRotation {
+    pub(super) fn prepared() -> engine::PreparedRotation {
         let db = fx::db();
         let build = fx::build();
         let (ctx, scenario) = fx::scenario();
@@ -5342,7 +5539,7 @@ mod reaper_experiments {
         );
     }
 
-    fn open_profile(duration_ms: u32, events: Vec<EnemyEvent>) -> WvwProfile {
+    pub(super) fn open_profile(duration_ms: u32, events: Vec<EnemyEvent>) -> WvwProfile {
         WvwProfile {
             duration_ms,
             target_health: None,
@@ -5352,7 +5549,7 @@ mod reaper_experiments {
         }
     }
 
-    fn still_enemy() -> EnemyDummy {
+    pub(super) fn still_enemy() -> EnemyDummy {
         EnemyDummy {
             protection: false,
             stability: true,
@@ -5394,7 +5591,7 @@ mod reaper_experiments {
             .collect()
     }
 
-    fn events<'a>(
+    pub(super) fn events<'a>(
         report: &'a WvwCombatReport,
         kind: TraceKind,
         source: &str,
@@ -5406,7 +5603,7 @@ mod reaper_experiments {
             .collect()
     }
 
-    fn landed(report: &WvwCombatReport, skill: &str) -> Vec<f64> {
+    pub(super) fn landed(report: &WvwCombatReport, skill: &str) -> Vec<f64> {
         events(report, TraceKind::HitLanded, skill)
             .iter()
             .map(|event| event.detail.parse::<f64>().expect("damage detail"))
@@ -6438,5 +6635,434 @@ mod reaper_experiments {
             "the passive record is folded into SimParams upstream and never listed: {:?}",
             report.unmodeled_sources
         );
+    }
+}
+
+/// Sprint 3 (specs/007-trait-triggers): Necromancer trait triggers on the
+/// Reaper fixture. Records are test-local (never in `data/`); each firing
+/// site is seen failing under `docs/audit/disable_and_run.py` before it
+/// lands, and the quoted failures live in `docs/audit/sprint3-failures.md`.
+#[cfg(test)]
+mod necro_experiments {
+    use super::reaper_experiments::{events, landed, open_profile, prepared, still_enemy};
+    use super::*;
+    use crate::data::normalized_effects::{
+        AmountMode, OperationType, StatusOperation, TargetScope, TargetSide,
+    };
+    use crate::data::quality::ReasonClass;
+    use crate::engine;
+    use crate::rotation::reaper_fixture as fx;
+
+    // Wiki trait ids (read 2026-09-08).
+    const SPEED_OF_SHADOWS: u32 = 888;
+    const DEATH_PERCEPTION: u32 = 893;
+    const SOUL_BARBS: u32 = 894;
+    // Synthetic Scourge skills for the entry rule test.
+    const DESERT_SHROUD: u32 = 40_001;
+    const MANIFEST_SAND_SHADE: u32 = 40_002;
+
+    fn self_boon(boon: &str, duration_ms: u32) -> StatusOperation {
+        StatusOperation {
+            operation_type: OperationType::AppliesBoon,
+            target_side: TargetSide::Self_,
+            status_kind: boon.into(),
+            amount_mode: AmountMode::Stacks,
+            amount_value: FactualValue::Resolved(1.0),
+            base_duration_ms: Some(FactualValue::Resolved(duration_ms)),
+            target_scope: TargetScope::Self_,
+            target_count: None,
+            internal_cooldown_ms: None,
+            source_duration_multiplier: None,
+        }
+    }
+
+    /// Speed of Shadows-shaped: Swiftness 10 s on shroud entry.
+    fn speed_of_shadows() -> NormalizedEffect {
+        let mut record = fx::record(
+            SourceType::Trait,
+            SPEED_OF_SHADOWS,
+            "Speed of Shadows",
+            EffectCategory::AppliesBoon,
+            1.0,
+            TriggerRule::OnShroudEnter,
+        );
+        record.status_operation = Some(self_boon("Swiftness", 10_000));
+        record
+    }
+
+    /// An exit-shaped record: Fury 5 s when the shroud ends.
+    fn fury_on_exit() -> NormalizedEffect {
+        let mut record = fx::record(
+            SourceType::Trait,
+            SOUL_BARBS,
+            "Fury on exit",
+            EffectCategory::AppliesBoon,
+            1.0,
+            TriggerRule::OnShroudExit,
+        );
+        record.status_operation = Some(self_boon("Fury", 5_000));
+        record
+    }
+
+    /// Death Perception's in-shroud half: +15 % critical damage while in shroud.
+    fn death_perception_in_shroud() -> NormalizedEffect {
+        let mut record = fx::record(
+            SourceType::Trait,
+            DEATH_PERCEPTION,
+            "Death Perception",
+            EffectCategory::TriggeredEffect,
+            15.0,
+            TriggerRule::Conditional,
+        );
+        record.inner_category = Some(EffectCategory::CritDamagePct);
+        record.prerequisite = Some(Prerequisite {
+            in_shroud: Some(true),
+            ..Default::default()
+        });
+        record
+    }
+
+    /// A strike burst on entry (coefficient form), so totals move.
+    fn entry_burst() -> NormalizedEffect {
+        fx::record(
+            SourceType::Trait,
+            SOUL_BARBS,
+            "Soul Barbs",
+            EffectCategory::StrikeDamagePct,
+            0.5,
+            TriggerRule::OnShroudEnter,
+        )
+    }
+
+    /// The fixture with the engine's resource rules on an open profile, the
+    /// given records loaded, trace on. Returns the report and the names of
+    /// the buffs still on the player when the fight ends.
+    pub(super) fn open_with(
+        opener: &[u32],
+        effects: &[&NormalizedEffect],
+        duration_ms: u32,
+        enemy_events: Vec<EnemyEvent>,
+    ) -> (WvwCombatReport, Vec<String>) {
+        open_with_skills(None, opener, effects, duration_ms, enemy_events)
+    }
+
+    /// `open_with` on `skills` when given (the fixture's prepared bar plus
+    /// whatever the test appends); the resource rules stay the engine's.
+    fn open_with_skills(
+        skills: Option<Vec<RotationSkill>>,
+        opener: &[u32],
+        effects: &[&NormalizedEffect],
+        duration_ms: u32,
+        enemy_events: Vec<EnemyEvent>,
+    ) -> (WvwCombatReport, Vec<String>) {
+        let db = fx::db();
+        let build = fx::build();
+        let (ctx, _) = fx::scenario();
+        let p = prepared();
+        let (rules, complete) = engine::wvw_resource_rules(
+            &build,
+            &p.skills,
+            &db,
+            "Necromancer",
+            &ctx,
+            p.params.max_health,
+        );
+        let skills = skills.unwrap_or_else(|| p.skills.clone());
+        let mut timeline = Timeline::new(
+            &skills,
+            &p.params,
+            open_profile(duration_ms, enemy_events),
+            still_enemy(),
+            effects,
+            &rules,
+            complete,
+            Vec::new(),
+        );
+        timeline.opener = opener;
+        timeline.trace_enabled = true;
+        timeline.trace_loaded_unmodeled();
+        timeline.run();
+        let buffs = timeline.buffs.iter().map(|b| b.name.clone()).collect();
+        (timeline.report(), buffs)
+    }
+
+    /// US1 positive control: the entry record fires exactly once, at the
+    /// entry instant, and its boon is on the player.
+    #[test]
+    fn necro_shroud_enter_fires_once_at_entry() {
+        let record = speed_of_shadows();
+        let (report, buffs) = open_with(&fx::opener(), &[&record], 8_000, vec![]);
+        let entry = events(&report, TraceKind::ShroudEntered, "Reaper's Shroud")
+            .first()
+            .map(|e| e.t_ms)
+            .expect("the opener enters shroud");
+        let fired = events(&report, TraceKind::TraitFired, "Speed of Shadows");
+        assert_eq!(
+            fired.len(),
+            1,
+            "the entry record fires once at the entry; trace: {:?}",
+            report.trace
+        );
+        assert_eq!(fired[0].t_ms, entry, "fires at the entry instant");
+        assert!(fired[0].detail.ends_with("at entry"), "{}", fired[0].detail);
+        assert!(
+            buffs.iter().any(|b| b == "Swiftness"),
+            "Swiftness on the player: {buffs:?}"
+        );
+        assert_eq!(report.trait_fire_counts.get("Speed of Shadows"), Some(&1));
+        assert!(
+            !report
+                .unmodeled_sources
+                .iter()
+                .any(|s| s.starts_with("Speed of Shadows")),
+            "a fired record is off the coverage line: {:?}",
+            report.unmodeled_sources
+        );
+    }
+
+    /// US1: the exit record fires once for each way the shroud can end.
+    #[test]
+    fn necro_shroud_exit_fires_for_every_why() {
+        let record = fury_on_exit();
+
+        // The builder does not put the flip skill on the bar; the exit rule
+        // for it exists (engine::wvw_resource_rules), so append the skill.
+        let p = prepared();
+        let mut exit = p
+            .skills
+            .iter()
+            .find(|s| s.skill_id == fx::REAPER_SHROUD)
+            .expect("entry skill")
+            .clone();
+        exit.skill_id = fx::EXIT_SHROUD;
+        exit.name = "Exit Reaper's Shroud".into();
+        exit.weapon_set = super::super::SHROUD_SET;
+        exit.cooldown_ms = 0;
+        exit.effects.clear();
+        let mut skills = p.skills.clone();
+        skills.push(exit);
+        let (by_skill, _) = open_with_skills(
+            Some(skills),
+            &[
+                fx::GRAVEDIGGER,
+                fx::DEATH_SPIRAL,
+                fx::WELL_OF_SUFFERING,
+                fx::REAPER_SHROUD,
+                fx::EXIT_SHROUD,
+            ],
+            &[&record],
+            8_000,
+            vec![],
+        );
+        let fired = events(&by_skill, TraceKind::TraitFired, "Fury on exit");
+        assert_eq!(fired.len(), 1, "exit by skill: {:?}", by_skill.trace);
+        assert!(
+            fired[0].detail.contains("at exit (exit skill)"),
+            "{}",
+            fired[0].detail
+        );
+
+        let (by_drain, _) = open_with(&fx::opener(), &[&record], 15_000, vec![]);
+        let fired = events(&by_drain, TraceKind::TraitFired, "Fury on exit");
+        let exited = events(&by_drain, TraceKind::ShroudExited, "Reaper's Shroud");
+        assert_eq!(fired.len(), 1, "exit by drain: {:?}", by_drain.trace);
+        assert!(fired[0].detail.contains("at exit (life force 0)"));
+        assert_eq!(fired[0].t_ms, exited[0].t_ms, "fires at the exit instant");
+
+        let (by_damage, _) = open_with(
+            &fx::opener(),
+            &[&record],
+            6_000,
+            vec![EnemyEvent {
+                at_ms: 3_000,
+                kind: EnemyEventKind::Strike {
+                    damage: 6_000.0,
+                    unblockable: true,
+                },
+            }],
+        );
+        let fired = events(&by_damage, TraceKind::TraitFired, "Fury on exit");
+        let exited = events(&by_damage, TraceKind::ShroudExited, "Reaper's Shroud");
+        assert_eq!(fired.len(), 1, "exit by damage: {:?}", by_damage.trace);
+        assert_eq!(fired[0].t_ms, exited[0].t_ms);
+        assert!(
+            exited[0].t_ms <= 3_100,
+            "the strike empties the pool before the drain would: {exited:?}"
+        );
+    }
+
+    /// US1: an in-shroud conditional raises shroud-skill strikes only, and
+    /// the shroud-bonus traces bracket the shroud.
+    #[test]
+    fn necro_in_shroud_bonus_active_only_inside() {
+        let record = death_perception_in_shroud();
+        let (with, _) = open_with(&fx::opener(), &[&record], 15_000, vec![]);
+        let (without, _) = open_with(&fx::opener(), &[], 15_000, vec![]);
+        assert_eq!(
+            landed(&with, "Gravedigger"),
+            landed(&without, "Gravedigger"),
+            "outside shroud nothing changes"
+        );
+        let inside = |report: &WvwCombatReport| -> f64 {
+            landed(report, "Life Rend")
+                .iter()
+                .chain(landed(report, "Soul Spiral").iter())
+                .sum()
+        };
+        let (bonus, plain) = (inside(&with), inside(&without));
+        assert!(plain > 0.0, "shroud skills land: {:?}", without.trace);
+        assert!(
+            bonus > plain * 1.01,
+            "shroud strikes rise with the bonus: {bonus} vs {plain}"
+        );
+        let on = events(&with, TraceKind::ShroudBonusActive, "Death Perception");
+        let off = events(&with, TraceKind::ShroudBonusEnded, "Death Perception");
+        let entered = events(&with, TraceKind::ShroudEntered, "Reaper's Shroud");
+        let exited = events(&with, TraceKind::ShroudExited, "Reaper's Shroud");
+        assert_eq!(on.len(), 1, "{:?}", with.trace);
+        assert_eq!(off.len(), 1, "{:?}", with.trace);
+        assert_eq!(on[0].t_ms, entered[0].t_ms);
+        assert_eq!(off[0].t_ms, exited[0].t_ms);
+        assert_eq!(on[0].detail, "×1.15 crit damage");
+        assert!(
+            !with
+                .unmodeled_sources
+                .iter()
+                .any(|s| s.starts_with("Death Perception")),
+            "{:?}",
+            with.unmodeled_sources
+        );
+    }
+
+    /// US1 (Scourge rule): Desert Shroud is the entry; Manifest Sand Shade
+    /// costs life force but is not a shroud, so entry records ignore it.
+    #[test]
+    fn necro_desert_shroud_is_the_scourge_entry() {
+        let db = fx::db();
+        let build = fx::build();
+        let (ctx, _) = fx::scenario();
+        let p = prepared();
+        let (rules, _) = engine::wvw_resource_rules(
+            &build,
+            &p.skills,
+            &db,
+            "Necromancer",
+            &ctx,
+            p.params.max_health,
+        );
+        let template = p
+            .skills
+            .iter()
+            .find(|s| s.skill_id == fx::REAPER_SHROUD)
+            .expect("the fixture's entry skill")
+            .clone();
+        let mut desert = template.clone();
+        desert.skill_id = DESERT_SHROUD;
+        desert.name = "Desert Shroud".into();
+        let mut shade = template;
+        shade.skill_id = MANIFEST_SAND_SHADE;
+        shade.name = "Manifest Sand Shade".into();
+        let skills = vec![shade, desert];
+        let mut entry_rule = rules
+            .iter()
+            .find(|r| r.skill_id == fx::REAPER_SHROUD)
+            .expect("the entry rule")
+            .clone();
+        entry_rule.skill_id = DESERT_SHROUD;
+        entry_rule.entry_floor = 0.0;
+        entry_rule.cost = 0.0;
+        let shade_rule = SkillResourceRule {
+            skill_id: MANIFEST_SAND_SHADE,
+            kind: ResourceKind::LifeForce,
+            ..Default::default()
+        };
+        let rules = vec![shade_rule, entry_rule];
+        let record = speed_of_shadows();
+        let mut timeline = Timeline::new(
+            &skills,
+            &p.params,
+            open_profile(4_000, vec![]),
+            still_enemy(),
+            &[&record],
+            &rules,
+            true,
+            Vec::new(),
+        );
+        timeline.opener = &[MANIFEST_SAND_SHADE, DESERT_SHROUD];
+        timeline.trace_enabled = true;
+        timeline.run();
+        let report = timeline.report();
+        assert!(
+            events(&report, TraceKind::ShroudEntered, "Manifest Sand Shade").is_empty(),
+            "the shade is not an entry: {:?}",
+            report.trace
+        );
+        let entered = events(&report, TraceKind::ShroudEntered, "Desert Shroud");
+        assert_eq!(entered.len(), 1, "{:?}", report.trace);
+        let fired = events(&report, TraceKind::TraitFired, "Speed of Shadows");
+        assert_eq!(fired.len(), 1, "{:?}", report.trace);
+        assert_eq!(fired[0].t_ms, entered[0].t_ms);
+        assert!(fired[0].t_ms > 0, "the shade cast resolved first");
+    }
+
+    /// US1: removing the trait record changes the totals.
+    #[test]
+    fn necro_removed_trait_changes_results() {
+        let record = entry_burst();
+        let (with, _) = open_with(&fx::opener(), &[&record], 8_000, vec![]);
+        let (without, _) = open_with(&fx::opener(), &[], 8_000, vec![]);
+        assert_eq!(events(&with, TraceKind::TraitFired, "Soul Barbs").len(), 1);
+        assert!(events(&without, TraceKind::TraitFired, "Soul Barbs").is_empty());
+        assert!(
+            with.total_damage > without.total_damage,
+            "{} vs {}",
+            with.total_damage,
+            without.total_damage
+        );
+    }
+
+    /// US1: the same records, the same fight, ten times.
+    #[test]
+    fn necro_results_repeat_identically() {
+        let records = [
+            speed_of_shadows(),
+            death_perception_in_shroud(),
+            entry_burst(),
+        ];
+        let refs: Vec<&NormalizedEffect> = records.iter().collect();
+        let (first, _) = open_with(&fx::opener(), &refs, 10_000, vec![]);
+        for _ in 0..9 {
+            let (again, _) = open_with(&fx::opener(), &refs, 10_000, vec![]);
+            assert_eq!(again.total_damage, first.total_damage);
+            assert_eq!(again.trace, first.trace);
+            assert_eq!(again.coverage, first.coverage);
+            assert_eq!(again.trait_fire_counts, first.trait_fire_counts);
+        }
+    }
+
+    /// Spec edge case: a build that cannot enter shroud leaves the entry
+    /// record on the coverage line with the shroud-floor reason.
+    #[test]
+    fn necro_shroud_trigger_without_shroud_floor_never_fires() {
+        let record = speed_of_shadows();
+        let (report, _) = open_with(&[fx::REAPER_SHROUD], &[&record], 1_000, vec![]);
+        assert!(events(&report, TraceKind::TraitFired, "Speed of Shadows").is_empty());
+        assert!(
+            !report.shroud_refusals.is_empty(),
+            "the entry was refused: {:?}",
+            report.trace
+        );
+        assert!(
+            report
+                .unmodeled_sources
+                .iter()
+                .any(|s| s == "Speed of Shadows (shroud never entered)"),
+            "{:?}",
+            report.unmodeled_sources
+        );
+        assert!(report
+            .coverage
+            .iter()
+            .any(|e| { e.name == "Speed of Shadows" && e.class == ReasonClass::NoFiringSite }));
     }
 }

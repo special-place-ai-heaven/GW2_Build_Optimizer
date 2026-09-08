@@ -56,6 +56,37 @@ With the mechanism on: the fixture's line drops every weapon skill and every fix
 
 ## shroud_enter
 
+### necro_shroud_enter_fires_once_at_entry
+
+Before the entry site existed (loader still refused `OnShroudEnter` as `no firing site`; `309d769` plus the Phase 4 test, run 2026-09-08):
+
+```
+thread 'rotation::wvw_timeline::necro_experiments::necro_shroud_enter_fires_once_at_entry' (791960) panicked at crates\optimizer\src\rotation\wvw_timeline.rs:6785:9:
+assertion `left == right` failed: the entry record fires once at the entry; trace: [TraceEvent { t_ms: 0, kind: ProcUnmodeled, source: "Speed of Shadows (on-shroud-enter)", detail: "no firing site" }, TraceEvent { t_ms: 400, kind: HitLanded, source: "Gravedigger", detail: "1120.5" }, TraceEvent { t_ms: 750, kind: HitLanded, source: "Gravedigger", detail: "1120.5" }, TraceEvent { t_ms: 750, kind: LifeForceGained, source: "Gravedigger", detail: "8% → 8%" }, TraceEvent { t_ms: 1250, kind: HitLanded, source: "Death Spiral", detail: "342.4" }, TraceEvent { t_ms: 1550, kind: HitLanded, source: "Death Spiral", detail: "342.4" }, TraceEvent { t_ms: 1800, kind: HitLanded, source: "Death Spiral", de
+  left: 0
+ right: 1
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1176 filtered out; finished in 0.01s
+```
+
+Disabled again after the edit with `python docs/audit/disable_and_run.py shroud_enter` (the `OnShroudEnter` call at the end of `enter_shroud` replaced by a no-op), 2026-09-08:
+
+```
+### shroud_enter
+file: crates/optimizer/src/rotation/wvw_timeline.rs
+disabled: self.trigger_procs(TriggerRule::OnShroudEnter, Some(skill_id), false, 1.0);
+test: necro_shroud_enter_fires_once_at_entry
+panicked at crates\optimizer\src\rotation\wvw_timeline.rs:6802:9:
+assertion `left == right` failed: the entry record fires once at the entry; trace: [TraceEvent { t_ms: 400, kind: HitLanded, source: "Gravedigger", detail: "1120.5" }, TraceEvent { t_ms: 750, kind: HitLanded, source: "Gravedigger", detail: "1120.5" }, TraceEvent { t_ms: 750, kind: LifeForceGained, source: "Gravedigger", detail: "8% → 8%" }, TraceEvent { t_ms: 1250, kind: HitLanded, source: "Death Spiral", detail: "342.4" }, TraceEvent { t_ms: 1550, kind: HitLanded, source: "Death Spiral", detail: "342.4" }, TraceEvent { t_ms: 1800, kind: HitLanded, source: "Death Spiral", detail: "342.4" }, 
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1176 filtered out; finished in 0.01s
+error: test failed, to rerun pass `-p gw2-optimizer --lib`
+restored: byte-identical
+```
+
+With the site on: one `TraitFired` at the `ShroudEntered` tick, `AppliesBoon ×1.00 at entry`, Swiftness on the player, `trait_fire_counts["Speed of Shadows"] == 1`, the trait off the coverage line. `necro_shroud_exit_fires_for_every_why` (exit skill, drain, damage: one fire each, `at exit (exit skill)` / `at exit (life force 0)`), `necro_in_shroud_bonus_active_only_inside` (`×1.15 crit damage` bracketed by `ShroudBonusActive`/`Ended` at the entry and exit ticks; Gravedigger unchanged, shroud strikes higher), `necro_desert_shroud_is_the_scourge_entry`, `necro_removed_trait_changes_results`, `necro_results_repeat_identically` and `necro_shroud_trigger_without_shroud_floor_never_fires` (`Speed of Shadows (shroud never entered)`, class `NoFiringSite`) pass; `reaper_*` unchanged (1 172 passed).
+
 ## prereq
 
 ## scope

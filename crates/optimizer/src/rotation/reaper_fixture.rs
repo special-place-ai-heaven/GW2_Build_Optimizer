@@ -712,7 +712,8 @@ fn unknown_uptime() -> UptimeModel {
     }
 }
 
-fn record(
+/// A bare record for test-local fixtures (Sprint 3 experiments build on it).
+pub fn record(
     source_type: SourceType,
     source_id: u32,
     source_name: &str,
