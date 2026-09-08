@@ -204,7 +204,11 @@ fn render_focus_chat(ui: &Ui, state: &mut AddonState) {
 
 /// Top status bar: API health indicator + loading banner + error bar.
 fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
-    // Draw subtle background for the status row
+    // Draw subtle background for the status row, sized to the text it
+    // holds so the label sits centred in it at every font and UI scale
+    // (a fixed 18 px strip left the text hanging below it, 2026-09-08).
+    let line_h = ui.text_line_height();
+    let row_h = line_h + 4.0;
     {
         let start = ui.cursor_screen_pos();
         let width = ui.content_region_avail()[0];
@@ -212,7 +216,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
         draw_list
             .add_rect(
                 [start[0] - 1.0, start[1]],
-                [start[0] + width + 1.0, start[1] + 18.0],
+                [start[0] + width + 1.0, start[1] + row_h],
                 theme::with_alpha(theme::pal().frame_bg_hovered, 0.95),
             )
             .filled(true)
@@ -231,11 +235,12 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
     {
         let p = ui.cursor_screen_pos();
         ui.get_window_draw_list()
-            .add_circle([p[0] + 8.0, p[1] + 8.0], 4.0, color)
+            .add_circle([p[0] + 8.0, p[1] + row_h * 0.5], 4.0, color)
             .filled(true)
             .build();
+        ui.set_cursor_screen_pos([p[0], p[1] + 2.0]);
     }
-    ui.dummy([16.0, 16.0]);
+    ui.dummy([16.0, line_h]);
     ui.same_line();
     ui.text_colored(color, label);
     if ui.is_item_hovered() {
