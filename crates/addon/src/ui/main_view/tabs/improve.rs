@@ -95,18 +95,10 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 ui.spacing();
             }
 
-            if let Some(spec_name) = locked_spec_name.as_deref() {
-                ui.text_colored(theme::OPTIMIZED, tf("fmt.locked", &[("name", spec_name)]));
-                ui.same_line();
-                if ui.small_button(format!("{}##improve", t("btn.unlock"))) {
-                    state.main.build_locks.specs[2] = None;
-                }
-                ui.same_line_with_spacing(0.0, 12.0);
-            }
-            crate::ui::comparison::render_source_link(
-                ui,
-                &state.main.comparison.suggestions[selected],
-            );
+            // One horizontal row, stable across tabs: the pane pills and the
+            // view toggle first, then the lock, and last the site link, which
+            // only a published tab has. Whatever comes and goes sits at the
+            // end so nothing before it moves (in-game 2026-09-08).
             crate::ui::comparison::render_result_pane_tabs(
                 ui,
                 &mut state.main.comparison.result_pane,
@@ -118,6 +110,18 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                     &mut state.main.comparison.show_optimized,
                 );
             }
+            if let Some(spec_name) = locked_spec_name.as_deref() {
+                ui.same_line_with_spacing(0.0, 16.0);
+                ui.text_colored(theme::OPTIMIZED, tf("fmt.locked", &[("name", spec_name)]));
+                ui.same_line();
+                if ui.small_button(format!("{}##improve", t("btn.unlock"))) {
+                    state.main.build_locks.specs[2] = None;
+                }
+            }
+            crate::ui::comparison::render_source_link(
+                ui,
+                &state.main.comparison.suggestions[selected],
+            );
             ui.spacing();
 
             let scroll_height = (ui.content_region_avail()[1] - footer).max(64.0);
