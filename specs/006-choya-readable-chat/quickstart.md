@@ -23,3 +23,7 @@ Expected: every new test green; the Sprint 2 experiments and `pve_output_unchang
 6. **Log.** Open `addons/Nexus/Nexus.log`. Expected: one `Choya <step>: … in Ns` line per step of that request.
 
 Report each as pass or fail with the text seen. The DLL stays local until the Sprint 1 release condition holds.
+
+## Baseline 2026-09-08 (before 006 code)
+
+`cargo test --workspace`: addon 85 passed (7 ignored), core 391 (2 ignored), gw2api 111, optimizer 1154 (5 ignored); clippy `-D warnings` green at `20db4ff`.
