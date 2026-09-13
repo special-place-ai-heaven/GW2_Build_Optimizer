@@ -161,6 +161,10 @@ pub struct Gw2Client {
     api_key: Option<String>,
     bucket: Mutex<TokenBucket>,
     lang: Option<String>,
+    /// Override for the API root. `None` uses [`BASE_URL`]. Tests point this at
+    /// a mockito loopback server so relative endpoints (`items`, `build`, …)
+    /// resolve locally.
+    api_root: Option<String>,
     /// Shared cancellation flag. Every interruptible wait this client performs
     /// observes it, so setting it from another thread aborts an in-flight
     /// retry ladder or rate-limit wait within `CANCEL_POLL`. It is deliberately
@@ -342,6 +346,7 @@ impl Gw2Client {
             api_key,
             bucket: Mutex::new(TokenBucket::new()),
             lang: None,
+            api_root: None,
             cancel: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -360,6 +365,14 @@ impl Gw2Client {
             "de" | "es" | "fr" | "zh" => Some(c.to_string()),
             _ => None,
         });
+        self
+    }
+
+    /// Point relative `/v2/...` paths at `root` (no trailing slash). Used by
+    /// mockito tests and FOLD3 fetch-count instrumentation.
+    pub fn with_api_root(mut self, root: impl Into<String>) -> Self {
+        let root = root.into().trim_end_matches('/').to_string();
+        self.api_root = Some(root);
         self
     }
 
@@ -417,7 +430,8 @@ impl Gw2Client {
         let base_url = if endpoint.starts_with("http") {
             endpoint.to_string()
         } else {
-            format!("{}/{}", BASE_URL, endpoint.trim_start_matches('/'))
+            let root = self.api_root.as_deref().unwrap_or(BASE_URL);
+            format!("{}/{}", root, endpoint.trim_start_matches('/'))
         };
         let url_path = endpoint.to_string();
 
@@ -1186,6 +1200,7 @@ mod tests {
             api_key: None,
             bucket: Mutex::new(TokenBucket::new()),
             lang: None,
+            api_root: Some(server.url()),
             cancel: Arc::new(AtomicBool::new(false)),
         };
         (server, client)

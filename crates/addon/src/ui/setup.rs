@@ -626,6 +626,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                     &client,
                                     &cache,
                                     || token_inner.is_cancelled(),
+                                    gw2_api::download::RefreshMode::Default,
                                     |progress| {
                                         if token_inner.is_cancelled() {
                                             return;
