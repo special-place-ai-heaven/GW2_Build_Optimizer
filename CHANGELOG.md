@@ -2,6 +2,17 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.10 - 2026-09-13
+
+Engineer trait catalogue: every Engineer trait is classified; the coverage table's Engineer NoRecord column is 0.
+
+### Engineer trait triggers
+
+- The Engineer's 108 traits are catalogued: every trait is executed from its facts, executed from a dated wiki record, or classified with the mechanic it still needs (toolbelt, kits, gadgets, turrets, gyros, heat, photon forge, mech, morph, evolve, explosion, disable trigger, dodge, trait skill, and the rest).
+- New wiki records fire on existing sites: on-boon-applied swiftness (Invigorating Speed vigor) and might (Boiling Point fury), on-condition-removed (Comeback Cure regeneration), elixir skill use (HGH ally might), heal skill use (Reconstruction Enclosure ally protection, Cleansing Synergy ally cleanse and regeneration), on-condition-applied bleeding (Sanguine Array might), on-crit (Incendiary Powder burning, Serrated Steel bleeding), tool-belt skill use (Optimized Activation vigor, Mechanized Deployment cleanse), stance skill use (Stainless Steel condition convert), and conditional foe-health gates (Heavy Metal crit chance and crit damage). Trigger kinds reused from prior professions; no new trigger enum variants.
+- Honest NeedsMechanic names cover toolbelt, kits, gadgets, turrets, gyros, heat / photon forge, mech, morph / evolve, explosion, disable trigger, dodge, trait skill, barrier, endurance, incoming healing, percent heal, weapon-scoped shield, boon grant, movement skill / superspeed, and the elite-line unlocks.
+- `SHIPPED_PROFESSIONS` now includes Engineer; `docs/audit/trait-coverage.md` regenerated with Engineer NoRecord 0.
+
 ## 1.14.9 - 2026-09-13
 
 Guardian trait catalogue: every Guardian trait is classified; the coverage table's Guardian NoRecord column is 0.
