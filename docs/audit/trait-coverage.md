@@ -5,7 +5,7 @@
 | Elementalist | 108 | 29 | 12 | 0 | 0 | 67 | 0 | 0 |
 | Engineer | 108 | 32 | 13 | 0 | 0 | 63 | 0 | 0 |
 | Guardian | 108 | 35 | 12 | 0 | 0 | 61 | 0 | 0 |
-| Mesmer | 108 | 22 | 0 | 1 | 0 | 0 | 85 | 0 |
+| Mesmer | 108 | 22 | 6 | 1 | 0 | 79 | 0 | 0 |
 | Necromancer | 108 | 2 | 27 | 20 | 1 | 56 | 0 | 2 |
 | Ranger | 108 | 42 | 6 | 0 | 0 | 60 | 0 | 0 |
 | Revenant | 108 | 36 | 0 | 0 | 0 | 0 | 72 | 0 |
@@ -355,112 +355,112 @@
 
 | Line | Id | Trait | State | Source |
 |---|---|---|---|---|
-| Chaos | 666 | Metaphysical Rejuvenation | NoRecord |  |
-| Chaos | 670 | Method of Madness | NoRecord |  |
-| Chaos | 675 | Illusionary Defense | NoRecord |  |
-| Chaos | 677 | Master of Manipulation | NoRecord |  |
-| Chaos | 667 | Illusionary Membrane | NoRecord |  |
-| Chaos | 673 | Auspicious Anguish | NoRecord |  |
-| Chaos | 668 | Chaotic Transference | NoRecord |  |
-| Chaos | 669 | Chaotic Interruption | NoRecord |  |
+| Chaos | 666 | Metaphysical Rejuvenation | record | https://wiki.guildwars2.com/wiki/Metaphysical_Rejuvenation (read 2026-09-13: Regeneration 4 s in WvW/PvP to nearby allies (5 targets, radius 360) when you use a healing skill; ICD 10 s) |
+| Chaos | 670 | Method of Madness | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Method_of_Madness (read 2026-09-13: Cast Lesser Chaos Storm when you use a healing skill) |
+| Chaos | 675 | Illusionary Defense | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Illusionary_Defense (read 2026-09-13: Protection to nearby allies when you use Shatter skill 2) |
+| Chaos | 677 | Master of Manipulation | record | https://wiki.guildwars2.com/wiki/Master_of_Manipulation (read 2026-09-13: Aegis 3 s to self and nearby allies (radius 300) when you use a Manipulation skill) |
+| Chaos | 667 | Illusionary Membrane | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Illusionary_Membrane (read 2026-09-13: Chaos aura when you use Shatter skill 2; condition damage while aura active) |
+| Chaos | 673 | Auspicious Anguish | NeedsMechanic: distortion | https://wiki.guildwars2.com/wiki/Auspicious_Anguish (read 2026-09-13: Convert damaging conditions when you gain Distortion or become disabled; disable half also needs disable trigger) |
+| Chaos | 668 | Chaotic Transference | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Chaotic_Transference (read 2026-09-13: Gaining chaos aura grants boons to nearby allies) |
+| Chaos | 669 | Chaotic Interruption | NeedsMechanic: interrupt | https://wiki.guildwars2.com/wiki/Chaotic_Interruption (read 2026-09-13: Interrupt recharges a random equipped weapon skill) |
 | Chaos | 1865 | Chaotic Persistence | facts |  |
-| Chaos | 671 | Shaper of Chaos | NoRecord |  |
-| Chaos | 674 | Prismatic Understanding | NoRecord |  |
-| Chaos | 1687 | Bountiful Disillusionment | NoRecord |  |
-| Domination | 685 | Illusion of Vulnerability | NoRecord |  |
-| Domination | 686 | Bountiful Blades | NoRecord |  |
+| Chaos | 671 | Shaper of Chaos | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Shaper_of_Chaos (read 2026-09-13: Detonate existing chaos aura for boons and foe conditions) |
+| Chaos | 674 | Prismatic Understanding | NeedsMechanic: stealth | https://wiki.guildwars2.com/wiki/Prismatic_Understanding (read 2026-09-13: Stealth duration and shatter-4 stealth; regen on enter / protection and resolution on exit) |
+| Chaos | 1687 | Bountiful Disillusionment | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Bountiful_Disillusionment (read 2026-09-13: Stability on Shatter; additional ally boon per Shatter skill) |
+| Domination | 685 | Illusion of Vulnerability | NeedsMechanic: interrupt | https://wiki.guildwars2.com/wiki/Illusion_of_Vulnerability (read 2026-09-13: Vulnerability when you interrupt a foe) |
+| Domination | 686 | Bountiful Blades | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Bountiful_Blades (read 2026-09-13: Greatsword / Phantasmal Berserker summon and bounce improvements) |
 | Domination | 682 | Empowered Illusions | facts |  |
-| Domination | 687 | Rending Shatter | NoRecord |  |
-| Domination | 694 | Dazzling | NoRecord |  |
-| Domination | 693 | Shattered Concentration | NoRecord |  |
+| Domination | 687 | Rending Shatter | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Rending_Shatter (read 2026-09-13: Shatter skills inflict vulnerability on hit) |
+| Domination | 694 | Dazzling | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Dazzling (read 2026-09-13: Disabling a foe also applies vulnerability) |
+| Domination | 693 | Shattered Concentration | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Shattered_Concentration (read 2026-09-13: Shatter skills remove a boon on hit) |
 | Domination | 713 | Egotism | facts |  |
-| Domination | 712 | Furious Interruption | NoRecord |  |
+| Domination | 712 | Furious Interruption | NeedsMechanic: interrupt | https://wiki.guildwars2.com/wiki/Furious_Interruption (read 2026-09-13: Quickness when you interrupt a foe) |
 | Domination | 1941 | Fragility | facts |  |
 | Domination | 681 | Vicious Expression | facts+record | https://wiki.guildwars2.com/wiki/Vicious_Expression |
 | Domination | 680 | Mental Anguish | facts |  |
-| Domination | 1688 | Power Block | NoRecord |  |
-| Dueling | 706 | Critical Infusion | NoRecord |  |
-| Dueling | 701 | Phantasmal Fury | NoRecord |  |
-| Dueling | 705 | Mental Gymnastics | NoRecord |  |
-| Dueling | 700 | Duelist's Discipline | NoRecord |  |
-| Dueling | 710 | Sharper Images | NoRecord |  |
-| Dueling | 1889 | Blinding Dissipation | NoRecord |  |
-| Dueling | 1960 | Wandering Mind | NoRecord |  |
-| Dueling | 708 | Fencer's Finesse | NoRecord |  |
-| Dueling | 707 | Master Fencer | NoRecord |  |
+| Domination | 1688 | Power Block | NeedsMechanic: interrupt | https://wiki.guildwars2.com/wiki/Power_Block (read 2026-09-13: Interrupts deal damage, inflict weakness, and grant a damage increase) |
+| Dueling | 706 | Critical Infusion | record | https://wiki.guildwars2.com/wiki/Critical_Infusion (read 2026-09-13: Vigor 3 s in WvW/PvP when you critically strike; ICD 10 s; mesmer own crits only, not illusions) |
+| Dueling | 701 | Phantasmal Fury | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Phantasmal_Fury (read 2026-09-13: Your phantasms have fury) |
+| Dueling | 705 | Mental Gymnastics | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Mental_Gymnastics (read 2026-09-13: Vigor when you successfully evade an attack) |
+| Dueling | 700 | Duelist's Discipline | NeedsMechanic: interrupt | https://wiki.guildwars2.com/wiki/Duelist%27s_Discipline (read 2026-09-13: Interrupt recharges pistol skills; pistol bleed chance is weapon-scoped / illusions) |
+| Dueling | 710 | Sharper Images | NeedsMechanic: clones | https://wiki.guildwars2.com/wiki/Sharper_Images (read 2026-09-13: Illusions inflict bleeding on critical hits) |
+| Dueling | 1889 | Blinding Dissipation | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Blinding_Dissipation (read 2026-09-13: Shatter skill 2 inflicts blindness) |
+| Dueling | 1960 | Wandering Mind | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Wandering_Mind (read 2026-09-13: Remove a nondamaging condition and gain swiftness on evade) |
+| Dueling | 708 | Fencer's Finesse | NeedsMechanic: weapon-scoped | https://wiki.guildwars2.com/wiki/Fencer%27s_Finesse (read 2026-09-13: Ferocity stacks and recharge on one-handed sword / spear strikes by you or illusions) |
+| Dueling | 707 | Master Fencer | record | https://wiki.guildwars2.com/wiki/Master_Fencer (read 2026-09-13: Fury 4 s to nearby allies (5 targets, radius 360) on crit; ICD 8 s; personal fury 8 s noted, ally duration recorded) |
 | Dueling | 692 | Superiority Complex | facts |  |
-| Dueling | 1950 | Ineptitude | NoRecord |  |
-| Dueling | 704 | Deceptive Evasion | NoRecord |  |
-| Illusions | 734 | Cry of Pain | NoRecord |  |
-| Illusions | 721 | Shatter Storm | NoRecord |  |
-| Illusions | 1869 | Persistence of Memory | NoRecord |  |
-| Illusions | 691 | The Pledge | NoRecord |  |
-| Illusions | 723 | Compounding Power | NoRecord |  |
-| Illusions | 722 | Escape Artist | NoRecord |  |
-| Illusions | 729 | Phantasmal Haste | NoRecord |  |
-| Illusions | 1690 | Maim the Disillusioned | NoRecord |  |
-| Illusions | 731 | Master of Misdirection | NoRecord |  |
-| Illusions | 733 | Phantasmal Force | NoRecord |  |
-| Illusions | 2035 | Master of Fragmentation | NoRecord |  |
-| Illusions | 753 | Malicious Sorcery | NoRecord |  |
-| Inspiration | 757 | Mender's Purity | NoRecord |  |
-| Inspiration | 756 | Medic's Feedback | NoRecord |  |
+| Dueling | 1950 | Ineptitude | record | https://wiki.guildwars2.com/wiki/Ineptitude (read 2026-09-13: 2 Confusion 2 s in WvW/PvP when you blind a foe; ICD 3 s; interrupt-inflicts-blind half is NeedsMechanic interrupt) |
+| Dueling | 704 | Deceptive Evasion | NeedsMechanic: clones | https://wiki.guildwars2.com/wiki/Deceptive_Evasion (read 2026-09-13: Create a clone when you dodge) |
+| Illusions | 734 | Cry of Pain | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Cry_of_Pain (read 2026-09-13: Shatter skill 2 inflicts more confusion stacks/duration) |
+| Illusions | 721 | Shatter Storm | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Shatter_Storm (read 2026-09-13: Shatter skill 1 becomes an ammo skill) |
+| Illusions | 1869 | Persistence of Memory | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Persistence_of_Memory (read 2026-09-13: When a phantasm becomes a clone, it transfers its boons to you) |
+| Illusions | 691 | The Pledge | NeedsMechanic: weapon-scoped | https://wiki.guildwars2.com/wiki/The_Pledge (read 2026-09-13: Torch flame bursts inflict additional burning) |
+| Illusions | 723 | Compounding Power | NeedsMechanic: clones | https://wiki.guildwars2.com/wiki/Compounding_Power (read 2026-09-13: Creating an illusion increases outgoing strike and condition damage; Virtuoso blades) |
+| Illusions | 722 | Escape Artist | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Escape_Artist (read 2026-09-13: Grant distortion when a phantasm is created) |
+| Illusions | 729 | Phantasmal Haste | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Phantasmal_Haste (read 2026-09-13: Phantasms spawn with quickness; gain quickness when you create a phantasm) |
+| Illusions | 1690 | Maim the Disillusioned | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Maim_the_Disillusioned (read 2026-09-13: Shatter skills inflict torment on hit) |
+| Illusions | 731 | Master of Misdirection | NeedsMechanic: recharge | https://wiki.guildwars2.com/wiki/Master_of_Misdirection (read 2026-09-13: Shatter skills gain recharge reduction) |
+| Illusions | 733 | Phantasmal Force | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Phantasmal_Force (read 2026-09-13: Phantasm strike scales with might; might when phantasms become clones) |
+| Illusions | 2035 | Master of Fragmentation | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Master_of_Fragmentation (read 2026-09-13: Your Shatter skills are improved) |
+| Illusions | 753 | Malicious Sorcery | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Malicious_Sorcery (read 2026-09-13: Confusion duration increase plus confusion on dodge; duration half is condition duration) |
+| Inspiration | 757 | Mender's Purity | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Mender%27s_Purity (read 2026-09-13: Cast Lesser Power Cleanse when you use a healing skill) |
+| Inspiration | 756 | Medic's Feedback | NeedsMechanic: revive | https://wiki.guildwars2.com/wiki/Medic%27s_Feedback (read 2026-09-13: Cast Feedback while reviving; Feedback revives allies inside its dome) |
 | Inspiration | 738 | Restorative Mantras | facts |  |
-| Inspiration | 744 | Sympathetic Visage | NoRecord |  |
-| Inspiration | 1852 | Inspiring Distortion | NoRecord |  |
-| Inspiration | 751 | Warden's Feedback | NoRecord |  |
-| Inspiration | 740 | Ego Restoration | NoRecord |  |
-| Inspiration | 1980 | Temporal Enchanter | NoRecord |  |
+| Inspiration | 744 | Sympathetic Visage | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Sympathetic_Visage (read 2026-09-13: Phantasms take your conditions from you when summoned) |
+| Inspiration | 1852 | Inspiring Distortion | NeedsMechanic: distortion | https://wiki.guildwars2.com/wiki/Inspiring_Distortion (read 2026-09-13: Aegis to nearby allies when you gain distortion or use Shatter skill 4) |
+| Inspiration | 751 | Warden's Feedback | NeedsMechanic: weapon-scoped | https://wiki.guildwars2.com/wiki/Warden%27s_Feedback (read 2026-09-13: Focus skills reflect projectiles; reduces focus recharge) |
+| Inspiration | 740 | Ego Restoration | NeedsMechanic: clones | https://wiki.guildwars2.com/wiki/Ego_Restoration (read 2026-09-13: Create a clone when you use a healing skill) |
+| Inspiration | 1980 | Temporal Enchanter | record | https://wiki.guildwars2.com/wiki/Temporal_Enchanter (read 2026-09-13: Resistance 3 s to nearby allies (5 targets) when you cast a glamour; superspeed 2 s WvW half is NeedsMechanic movement skill) |
 | Inspiration | 1915 | Illusionary Inspiration | facts |  |
-| Inspiration | 2005 | Mental Defense | NoRecord |  |
+| Inspiration | 2005 | Mental Defense | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Mental_Defense (read 2026-09-13: Shatter skill 4 grants boons and breaks allies out of stuns) |
 | Inspiration | 1866 | Restorative Illusions | facts |  |
-| Inspiration | 752 | Blurred Inscriptions | NoRecord |  |
-| Chronomancer | 2030 | Time Splitter | NoRecord |  |
-| Chronomancer | 1838 | Delayed Reactions | NoRecord |  |
+| Inspiration | 752 | Blurred Inscriptions | NeedsMechanic: signets | https://wiki.guildwars2.com/wiki/Blurred_Inscriptions (read 2026-09-13: Signets improved; activating a signet grants distortion) |
+| Chronomancer | 2030 | Time Splitter | NeedsMechanic: continuum split | https://wiki.guildwars2.com/wiki/Time_Splitter (read 2026-09-13: Unlocks chronomancer shatter skills and Wells (Continuum Split line)) |
+| Chronomancer | 1838 | Delayed Reactions | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Delayed_Reactions (read 2026-09-13: Disabling a foe slows them) |
 | Chronomancer | 1995 | Time Catches Up | facts |  |
 | Chronomancer | 1987 | All's Well That Ends Well | facts |  |
 | Chronomancer | 1927 | Flow of Time | facts |  |
 | Chronomancer | 2009 | Danger Time | facts |  |
-| Chronomancer | 1913 | Illusionary Reversion | NoRecord |  |
+| Chronomancer | 1913 | Illusionary Reversion | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Illusionary_Reversion (read 2026-09-13: Shatter skills generate a clone and grant alacrity with enough clones) |
 | Chronomancer | 1978 | Time Bomb | facts |  |
-| Chronomancer | 1859 | Time Marches On | NoRecord |  |
-| Chronomancer | 1942 | Stretched Time | NoRecord |  |
-| Chronomancer | 2022 | Seize the Moment | NoRecord |  |
-| Chronomancer | 1890 | Chronophantasma | NoRecord |  |
-| Mirage | 2150 | Mirage Cloak | NoRecord |  |
-| Mirage | 2141 | Self-Deception | NoRecord |  |
-| Mirage | 2082 | Renewing Oasis | NoRecord |  |
-| Mirage | 2110 | Riddle of Sand | NoRecord |  |
+| Chronomancer | 1859 | Time Marches On | NeedsMechanic: alacrity | https://wiki.guildwars2.com/wiki/Time_Marches_On (read 2026-09-13: Move 25% faster; alacrity applied to you is stronger) |
+| Chronomancer | 1942 | Stretched Time | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Stretched_Time (read 2026-09-13: Ally boons per clone shattered; boons when you summon a phantasm) |
+| Chronomancer | 2022 | Seize the Moment | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Seize_the_Moment (read 2026-09-13: Ally quickness per clone shattered; quickness when you summon a phantasm) |
+| Chronomancer | 1890 | Chronophantasma | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Chronophantasma (read 2026-09-13: First phantasm-to-clone transition resummons the phantasm) |
+| Mirage | 2150 | Mirage Cloak | NeedsMechanic: mirage cloak | https://wiki.guildwars2.com/wiki/Mirage_Cloak (read 2026-09-13: Mirage Cloak instead of dodge; Ambush and Deception access) |
+| Mirage | 2141 | Self-Deception | NeedsMechanic: deceptions | https://wiki.guildwars2.com/wiki/Self-Deception (read 2026-09-13: Deception skills create a clone if any other clones are active) |
+| Mirage | 2082 | Renewing Oasis | NeedsMechanic: mirage cloak | https://wiki.guildwars2.com/wiki/Renewing_Oasis (read 2026-09-13: Regeneration when you gain Mirage Cloak; incoming damaging condition duration while regenerating) |
+| Mirage | 2110 | Riddle of Sand | NeedsMechanic: ambush | https://wiki.guildwars2.com/wiki/Riddle_of_Sand (read 2026-09-13: First Ambush in combat applies confusion; refreshes on Shatter) |
 | Mirage | 2069 | Nomad's Endurance | facts |  |
-| Mirage | 2178 | Desert Distortion | NoRecord |  |
-| Mirage | 2174 | Mirage Mantle | NoRecord |  |
-| Mirage | 2098 | Phantom Pain | NoRecord |  |
-| Mirage | 2117 | Speed of Sand | NoRecord |  |
-| Mirage | 2070 | Infinite Horizon | NoRecord |  |
-| Mirage | 2113 | Elusive Mind | NoRecord |  |
-| Mirage | 2169 | Dune Cloak | NoRecord |  |
-| Troubadour | 2386 | Wandering Minstrel | NoRecord |  |
-| Troubadour | 2427 | Mayhem | NoRecord |  |
+| Mirage | 2178 | Desert Distortion | NeedsMechanic: distortion | https://wiki.guildwars2.com/wiki/Desert_Distortion (read 2026-09-13: Illusions shattered by Distortion become Mirage Mirrors; Ambush on self-distortion) |
+| Mirage | 2174 | Mirage Mantle | NeedsMechanic: ambush | https://wiki.guildwars2.com/wiki/Mirage_Mantle (read 2026-09-13: Ambush skills grant boons to nearby allies) |
+| Mirage | 2098 | Phantom Pain | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Phantom_Pain (read 2026-09-13: Damage increase when you use a Shatter, scaling per clone shattered) |
+| Mirage | 2117 | Speed of Sand | NeedsMechanic: mirage cloak | https://wiki.guildwars2.com/wiki/Speed_of_Sand (read 2026-09-13: Mirage Cloak increases movement speed) |
+| Mirage | 2070 | Infinite Horizon | NeedsMechanic: mirage cloak | https://wiki.guildwars2.com/wiki/Infinite_Horizon (read 2026-09-13: When you gain Mirage Cloak, your illusions also gain it) |
+| Mirage | 2113 | Elusive Mind | NeedsMechanic: mirage cloak | https://wiki.guildwars2.com/wiki/Elusive_Mind (read 2026-09-13: Lose conditions when you gain Mirage Cloak) |
+| Mirage | 2169 | Dune Cloak | NeedsMechanic: mirage cloak | https://wiki.guildwars2.com/wiki/Dune_Cloak (read 2026-09-13: Shatter grants Mirage Cloak with enough clones; Mirage Cloak recharges Mind Wrack and Cry of Frustration) |
+| Troubadour | 2386 | Wandering Minstrel | NeedsMechanic: instruments | https://wiki.guildwars2.com/wiki/Wandering_Minstrel (read 2026-09-13: Notes instead of illusions; instrument skills and Tales access) |
+| Troubadour | 2427 | Mayhem | NeedsMechanic: instruments | https://wiki.guildwars2.com/wiki/Mayhem (read 2026-09-13: Flustering Flute torment; dodge reduces Flustering Flute recharge) |
 | Troubadour | 2326 | Raconteur | facts |  |
-| Troubadour | 2432 | Syncopate | NoRecord |  |
-| Troubadour | 2424 | Symphonic Resonance | NoRecord |  |
+| Troubadour | 2432 | Syncopate | NeedsMechanic: instruments | https://wiki.guildwars2.com/wiki/Syncopate (read 2026-09-13: Deafening Drum extra wave; damage to enemies you disable) |
+| Troubadour | 2424 | Symphonic Resonance | NeedsMechanic: instruments | https://wiki.guildwars2.com/wiki/Symphonic_Resonance (read 2026-09-13: Instruments provide bonuses while playing in the background) |
 | Troubadour | 2343 | Shredding | facts |  |
-| Troubadour | 2367 | Life of the Party | NoRecord |  |
-| Troubadour | 2422 | Love Song | NoRecord |  |
-| Troubadour | 2374 | Harmonize | NoRecord |  |
-| Troubadour | 2353 | Fortissimo | NoRecord |  |
-| Troubadour | 2414 | Call and Response | NoRecord |  |
-| Troubadour | 2441 | Altered Chord | NoRecord |  |
-| Virtuoso | 2216 | Psychic Blades | NoRecord |  |
-| Virtuoso | 2212 | Bladeturn Refrain | NoRecord |  |
+| Troubadour | 2367 | Life of the Party | NeedsMechanic: instruments | https://wiki.guildwars2.com/wiki/Life_of_the_Party (read 2026-09-13: Lively Lute and Crescendo grant boons to affected allies) |
+| Troubadour | 2422 | Love Song | NeedsMechanic: instruments | https://wiki.guildwars2.com/wiki/Love_Song (read 2026-09-13: Harmonious Harp distortion duration; strike damage reduction while harp plays) |
+| Troubadour | 2374 | Harmonize | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Harmonize (read 2026-09-13: Gain a note when you use a phantasm skill) |
+| Troubadour | 2353 | Fortissimo | NeedsMechanic: instruments | https://wiki.guildwars2.com/wiki/Fortissimo (read 2026-09-13: Notes after Crescendo; attributes per instrument playing) |
+| Troubadour | 2414 | Call and Response | NeedsMechanic: instruments | https://wiki.guildwars2.com/wiki/Call_and_Response (read 2026-09-13: Instrument above note threshold creates an afterimage) |
+| Troubadour | 2441 | Altered Chord | NeedsMechanic: instruments | https://wiki.guildwars2.com/wiki/Altered_Chord (read 2026-09-13: Crescendo spotlights last instrument; playing recharges Crescendo) |
+| Virtuoso | 2216 | Psychic Blades | NeedsMechanic: blades | https://wiki.guildwars2.com/wiki/Psychic_Blades (read 2026-09-13: Stock blades instead of clones; Bladesongs replace shatters) |
+| Virtuoso | 2212 | Bladeturn Refrain | NeedsMechanic: bladesong | https://wiki.guildwars2.com/wiki/Bladeturn_Refrain (read 2026-09-13: Bladesongs grant aegis) |
 | Virtuoso | 2208 | Mental Focus | facts |  |
-| Virtuoso | 2202 | Jagged Mind | NoRecord |  |
-| Virtuoso | 2204 | Deadly Blades | NoRecord |  |
-| Virtuoso | 2215 | Duelist's Reversal | NoRecord |  |
-| Virtuoso | 2205 | Phantasmal Blades | NoRecord |  |
+| Virtuoso | 2202 | Jagged Mind | NeedsMechanic: blades | https://wiki.guildwars2.com/wiki/Jagged_Mind (read 2026-09-13: Blade attacks bleed on crit; percent of condition damage heals you) |
+| Virtuoso | 2204 | Deadly Blades | NeedsMechanic: blades | https://wiki.guildwars2.com/wiki/Deadly_Blades (read 2026-09-13: Blades inflict vulnerability on crit; damage after Bladesong) |
+| Virtuoso | 2215 | Duelist's Reversal | NeedsMechanic: block | https://wiki.guildwars2.com/wiki/Duelist%27s_Reversal (read 2026-09-13: Blocking or dodging an attack grants boons) |
+| Virtuoso | 2205 | Phantasmal Blades | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Phantasmal_Blades (read 2026-09-13: Completed phantasm attacks launch a blade and grant fury on expire) |
 | Virtuoso | 2207 | Sharpening Sorrow | facts |  |
 | Virtuoso | 2193 | Quiet Intensity | facts |  |
-| Virtuoso | 2211 | Psychic Riposte | NoRecord |  |
+| Virtuoso | 2211 | Psychic Riposte | NeedsMechanic: blades | https://wiki.guildwars2.com/wiki/Psychic_Riposte (read 2026-09-13: Blocking/evading stocks blades; dodging stocks a blade) |
 | Virtuoso | 2206 | Infinite Forge | facts |  |
 | Virtuoso | 2223 | Bloodsong | facts |  |
 
