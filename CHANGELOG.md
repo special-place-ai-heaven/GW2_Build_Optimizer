@@ -2,6 +2,16 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.15 - 2026-09-13
+
+Live foe TargetState ledger and deferred vs-target resolve (Success [5]). SCHEMA CHANGE = N.
+
+### Target-state modifiers
+
+- Shared TargetState / TimedFoeCondition in combat_model seeds from EnemyDummy {protection, stability, hp} and carries live disable + foe conditions for flow sim and WvW timeline.
+- Vulnerability (+1%/stack, cap 25) and deferred vs-target / vs-disabled / PerFoeStack percents resolve at skill land against live TargetState — never folded into static DamageModifiers strike/condi buckets or calculate_validated_stats.
+- search_rank stays [i64; 9].
+
 ## 1.14.14 - 2026-09-13
 
 Revenant elite swaps now carry legends through `retarget_after_elite_swap`. SCHEMA CHANGE = N.
