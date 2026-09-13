@@ -320,8 +320,8 @@ struct ScheduledStrike {
 
 struct SimState {
     /// E0: shared TriggerBus + Endurance/Dodge types with wvw_timeline.
-    /// Live try_dodge / OnDodge wiring is WvW-only today; flow tick hookup is follow-up.
-    #[allow(dead_code)]
+    /// OnDisableFoe is wired here (E1 landed-disable emit). Live try_dodge / OnDodge
+    /// remains WvW-only today; flow dodge tick hookup is follow-up.
     trigger_bus: super::trigger_bus::TriggerBus,
     #[allow(dead_code)]
     endurance: super::trigger_bus::EndurancePool,
@@ -819,16 +819,14 @@ impl SimState {
                 }
                 SkillEffect::CrowdControl { duration_ms, .. } => {
                     // Non-overlapping disabled time; nothing lands through
-                    // Stability. Same accounting as the WvW timeline.
-                    if !self.target.stability {
-                        let previous_end = self.target.disabled_until_ms.max(self.current_time_ms);
-                        let new_end = self
-                            .target
-                            .disabled_until_ms
-                            .max(self.current_time_ms.saturating_add(*duration_ms));
-                        self.control_ms += new_end.saturating_sub(previous_end) as f64;
-                        self.target.disabled_until_ms = new_end;
-                    }
+                    // Stability. Same landed-disable emit as the WvW timeline.
+                    let added = super::trigger_bus::land_foe_disable(
+                        &mut self.target,
+                        &mut self.trigger_bus,
+                        self.current_time_ms,
+                        *duration_ms,
+                    );
+                    self.control_ms += added as f64;
                 }
                 SkillEffect::ConvertConditions
                 | SkillEffect::Cover { .. }
@@ -969,16 +967,16 @@ impl SimState {
             }
             ComboOutcomeEffect::CrowdControl { duration_ms } => {
                 let duration = ((duration_ms as f64) * scale).round() as u32;
-                if duration == 0 || self.target.stability {
+                if duration == 0 {
                     return;
                 }
-                let previous_end = self.target.disabled_until_ms.max(self.current_time_ms);
-                let new_end = self
-                    .target
-                    .disabled_until_ms
-                    .max(self.current_time_ms.saturating_add(duration));
-                self.control_ms += new_end.saturating_sub(previous_end) as f64;
-                self.target.disabled_until_ms = new_end;
+                let added = super::trigger_bus::land_foe_disable(
+                    &mut self.target,
+                    &mut self.trigger_bus,
+                    self.current_time_ms,
+                    duration,
+                );
+                self.control_ms += added as f64;
             }
             ComboOutcomeEffect::Unmodeled { .. } => {}
         }
@@ -2957,6 +2955,51 @@ mod tests {
         // Same types the timeline holds — not a second dodge path.
         let _also: TriggerBus = TriggerBus::new();
         let _also_pool: EndurancePool = EndurancePool::new_full();
+    }
+
+    /// E1 Kent: flow CrowdControl that lands emits OnDisableFoe; Stability does not.
+    #[test]
+    fn kent_e1_flow_landed_disable_emits_on_disable_foe() {
+        use super::super::trigger_bus::BusEvent;
+
+        let skills = vec![auto_attack(), stun_skill()];
+        let mut params = SimParams::basic(2_000.0, 0.0, 1_000.0);
+        params.intent = Some(OptimizationWeights {
+            power: 0.2,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+            control: 1.0,
+        });
+
+        let mut open = SimState::new(
+            &skills,
+            10_000,
+            TargetState::from_seed(EnemyDummy::open()),
+            params.clone(),
+        );
+        open.run();
+        let landed = open.trigger_bus.count(BusEvent::OnDisableFoe);
+        assert!(
+            landed >= 1,
+            "flow must emit OnDisableFoe when a disable lands; got {landed}"
+        );
+        assert!(
+            open.target.disabled_until_ms > 0,
+            "landed disable must extend TargetState.disabled_until_ms"
+        );
+
+        let mut stab = EnemyDummy::open();
+        stab.stability = true;
+        let mut blocked = SimState::new(&skills, 10_000, TargetState::from_seed(stab), params);
+        blocked.run();
+        assert_eq!(
+            blocked.trigger_bus.count(BusEvent::OnDisableFoe),
+            0,
+            "Stability must block flow OnDisableFoe emit"
+        );
+        assert_eq!(blocked.target.disabled_until_ms, 0);
     }
 
     fn phase4_combo_skill(
