@@ -921,6 +921,28 @@ pub struct DownloadState {
     pub inner_total: usize,
     pub done: bool,
     pub error: Option<String>,
+    /// Hopper items-catalog path from [`gw2_api::download::items_fill_kind`].
+    /// `None` keeps normal refresh/Verify copy.
+    pub items_fill_kind: Option<gw2_api::download::ItemsFillKind>,
+}
+
+/// i18n key for an items fill mode shown during download/setup progress.
+pub fn items_fill_i18n_key(kind: gw2_api::download::ItemsFillKind) -> &'static str {
+    use gw2_api::download::ItemsFillKind::*;
+    match kind {
+        FirstFill => "status.items_first_fill",
+        Resume => "status.items_resume",
+        SameBuildSkip => "status.items_same_build_skip",
+    }
+}
+
+/// Probe live build + cache for Hopper fill-mode UI (presentation only).
+pub fn probe_items_fill_kind(
+    client: &gw2_api::client::Gw2Client,
+    cache: &gw2_api::cache::DataCache,
+) -> Option<gw2_api::download::ItemsFillKind> {
+    let build = client.get_build_number().ok()?;
+    gw2_api::download::items_fill_kind(cache, build, gw2_api::download::RefreshMode::Default)
 }
 
 impl DownloadState {
@@ -2328,6 +2350,20 @@ mod tests {
         assert!(mid > start);
         assert!(mid < 1.0);
         assert!((download_fraction(13, 13, 17232, 17232, false) - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn items_fill_i18n_keys_cover_all_modes() {
+        use gw2_api::download::ItemsFillKind::*;
+        assert_eq!(items_fill_i18n_key(FirstFill), "status.items_first_fill");
+        assert_eq!(items_fill_i18n_key(Resume), "status.items_resume");
+        assert_eq!(
+            items_fill_i18n_key(SameBuildSkip),
+            "status.items_same_build_skip"
+        );
+        assert!(!gw2_core::i18n::t(items_fill_i18n_key(FirstFill)).is_empty());
+        assert!(!gw2_core::i18n::t(items_fill_i18n_key(Resume)).is_empty());
+        assert!(!gw2_core::i18n::t(items_fill_i18n_key(SameBuildSkip)).is_empty());
     }
 }
 
