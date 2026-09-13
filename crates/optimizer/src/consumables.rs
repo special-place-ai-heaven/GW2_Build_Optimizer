@@ -1,0 +1,1061 @@
+//! Phase 2 PR-C: food (Nourishment) and utility (Enhancement) consumables.
+//!
+//! Ownership matches rune/relic: [`ValidatedBuild::food`] / [`ValidatedBuild::utility`]
+//! are `Option<ValidatedItem>`. The catalog lives on [`GameDb`] (`nourishments_for` /
+//! `enhancements_for`) and is filtered by `game_types` for the active mode. There is
+//! no new service and no search-neighbor / beam dimension.
+//!
+//! Static standing stats and proven static percent multipliers fold into
+//! [`crate::engine::calculate_validated_stats`]. Timing, chance, on-hit, on-crit,
+//! health-gated, and other ordered/sim-state effects are catalogued as skipped
+//! (see [`NON_STATIC_SKIPPED`]) and never enter the stat sheet.
+//!
+//! After a kit is complete, [`assign_best_consumables`] is the cheap inner argmax
+//! on the evaluate path. Chosen ids are written onto the candidate so the winner
+//! serializes them. Locked food/utility are never overwritten.
+
+use gw2_api::models::Item;
+use gw2_core::types::{BuildLocks, GameMode};
+
+use crate::balance::BalanceContext;
+use crate::combat::{self, DamageModifiers};
+use crate::engine;
+use crate::gamedb::GameDb;
+use crate::scenario::ScenarioSpec;
+use crate::scoring::{self, OptimizationWeights};
+use crate::stats::StatBlock;
+use crate::validation::{ValidatedBuild, ValidatedItem};
+
+/// Non-static catalogued effects this phase documents and skips.
+///
+/// These appear on real Nourishment / Enhancement tooltips. They are not
+/// standing attribute or unconditional percent bonuses, so they are not
+/// folded into `calculate_validated_stats` and they do not move the inner
+/// argmax except by being absent from the cheap score.
+pub const NON_STATIC_SKIPPED: &[&str] = &[
+    "chance-based procs (N percent chance to ...)",
+    "on-crit / on-dodge / on-kill / on-weapon-swap / when-you / after-you triggers",
+    "health-gated bonuses (below / while under / above a health threshold)",
+    "duration-limited bursts that are not a standing Hero-panel bonus",
+    "combo-field, finisher, leap, and other ordered/sim-state effects",
+    "infusions (Phase 2 infusion reconnect is out of PR-C scope)",
+];
+
+/// Standing Nourishment / Enhancement rows the catalog will consider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsumableKind {
+    Nourishment,
+    Enhancement,
+}
+
+/// Is this item a Nourishment (food) or Enhancement (utility consumable)?
+pub fn kind_of(item: &Item) -> Option<ConsumableKind> {
+    if item.item_type != "Consumable" {
+        return None;
+    }
+    let detail = item
+        .details
+        .as_ref()
+        .and_then(|d| d.detail_type.as_deref())?;
+    if eq_ignore(detail, "Food") || eq_ignore(detail, "Nourishment") {
+        Some(ConsumableKind::Nourishment)
+    } else if eq_ignore(detail, "Utility") || eq_ignore(detail, "Enhancement") {
+        Some(ConsumableKind::Enhancement)
+    } else {
+        None
+    }
+}
+
+/// `game_types` legality for the active mode. Empty `game_types` (test fixtures)
+/// is legal in every mode; live API rows always carry the list.
+pub fn item_legal_for_mode(item: &Item, mode: &GameMode) -> bool {
+    if item.game_types.is_empty() {
+        return true;
+    }
+    let token = match mode {
+        GameMode::PvE => "pve",
+        GameMode::PvP => "pvp",
+        GameMode::WvW => "wvw",
+    };
+    item.game_types
+        .iter()
+        .any(|entry| entry.eq_ignore_ascii_case(token))
+}
+
+fn eq_ignore(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+/// Standing flat attributes from infix rows and `+N Attribute` prose.
+///
+/// Triggered / chance / health-gated sentences are ignored. Percent clauses
+/// are not applied here — see [`fold_static_modifiers`].
+pub fn static_stat_bonus(item: &Item) -> StatBlock {
+    let mut stats = StatBlock::default();
+    if let Some(details) = item.details.as_ref() {
+        if let Some(infix) = details.infix_upgrade.as_ref() {
+            for attr in &infix.attributes {
+                apply_named_stat(&mut stats, &attr.attribute, attr.modifier as f64);
+            }
+            if let Some(desc) = infix.buff.as_ref().and_then(|b| b.description.as_deref()) {
+                apply_stat_prose(&mut stats, desc);
+            }
+        }
+    }
+    if let Some(desc) = item.description.as_deref() {
+        apply_stat_prose(&mut stats, desc);
+    }
+    stats
+}
+
+fn apply_named_stat(stats: &mut StatBlock, raw: &str, value: f64) {
+    let key = normalize_attr_name(raw);
+    stats.add(&key, value);
+}
+
+fn normalize_attr_name(raw: &str) -> String {
+    match raw.trim() {
+        "Power" => "Power".into(),
+        "Precision" => "Precision".into(),
+        "Toughness" => "Toughness".into(),
+        "Vitality" => "Vitality".into(),
+        "Ferocity" | "CritDamage" => "Ferocity".into(),
+        "Condition Damage" | "ConditionDamage" => "ConditionDamage".into(),
+        "Expertise" | "ConditionDuration" => "Expertise".into(),
+        "Concentration" | "BoonDuration" => "Concentration".into(),
+        "Healing Power" | "Healing" | "HealingPower" => "Healing".into(),
+        other => other.to_string(),
+    }
+}
+
+/// Pull every `+N Attribute` standing bonus out of tooltip prose.
+fn apply_stat_prose(stats: &mut StatBlock, text: &str) {
+    let mut i = 0;
+    let chars: Vec<char> = text.chars().collect();
+    while i < chars.len() {
+        if chars[i] == '+' || chars[i].is_ascii_digit() {
+            let start = i;
+            if chars[i] == '+' {
+                i += 1;
+            }
+            let num_start = i;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+            if i == num_start {
+                i = start + 1;
+                continue;
+            }
+            if i < chars.len() && chars[i] == '%' {
+                i += 1;
+                continue;
+            }
+            while i < chars.len() && chars[i].is_whitespace() {
+                i += 1;
+            }
+            let name_start = i;
+            while i < chars.len() && (chars[i].is_ascii_alphabetic() || chars[i] == ' ') {
+                i += 1;
+            }
+            let name: String = chars[name_start..i].iter().collect();
+            let name = name.trim();
+            if let Some(key) = known_attr(name) {
+                let num: String = chars[num_start..name_start].iter().collect();
+                if let Ok(value) = num.trim().parse::<f64>() {
+                    apply_named_stat(stats, key, value);
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+}
+
+fn known_attr(name: &str) -> Option<&'static str> {
+    match name {
+        "Power" => Some("Power"),
+        "Precision" => Some("Precision"),
+        "Toughness" => Some("Toughness"),
+        "Vitality" => Some("Vitality"),
+        "Ferocity" => Some("Ferocity"),
+        "Condition Damage" | "ConditionDamage" => Some("ConditionDamage"),
+        "Expertise" => Some("Expertise"),
+        "Concentration" => Some("Concentration"),
+        "Healing Power" | "Healing" => Some("Healing"),
+        _ => None,
+    }
+}
+
+/// True when tooltip prose is a triggered / chance / gated effect, not a
+/// standing Hero-panel bonus. Used to skip percent folding.
+pub fn consumable_text_is_non_static(text: &str) -> bool {
+    let t = text.to_lowercase();
+    combat::upgrade_unreliable(&t)
+        || t.contains("chance")
+        || t.contains("when you")
+        || t.contains("when the")
+        || t.contains("after you")
+        || t.contains("after using")
+        || t.contains("upon ")
+        || t.contains("on crit")
+        || t.contains("on dodge")
+        || t.contains("on evade")
+        || t.contains("on kill")
+        || t.contains("on weapon swap")
+        || t.contains("below ")
+        || t.contains("while under")
+        || t.contains("combo")
+        || t.contains("finisher")
+}
+
+/// Fold proven static percent multipliers from a consumable into `mods`.
+///
+/// Reuses the upgrade-text parser (same standing `+N% damage` path as runes)
+/// only when the tooltip is not a non-static effect. Unparsed / triggered
+/// clauses stay out of the sheet.
+pub fn fold_static_modifiers(mods: &mut DamageModifiers, item: &Item) {
+    let mut texts: Vec<&str> = Vec::new();
+    if let Some(desc) = combat::item_buff_description(item) {
+        texts.push(desc);
+    }
+    if let Some(desc) = item.description.as_deref() {
+        texts.push(desc);
+    }
+    for text in texts {
+        if consumable_text_is_non_static(text) {
+            continue;
+        }
+        combat::apply_upgrade_text(mods, text);
+    }
+}
+
+/// Does this row contribute a standing stat or a standing percent?
+pub fn has_static_effect(item: &Item) -> bool {
+    if !static_stat_bonus(item).is_zero() {
+        return true;
+    }
+    let mut mods = DamageModifiers::default();
+    fold_static_modifiers(&mut mods, item);
+    !mods.strike_pct.is_empty()
+        || !mods.strike_add_pct.is_empty()
+        || !mods.condition_pct.is_empty()
+        || !mods.condition_add_pct.is_empty()
+        || !mods.crit_damage_pct.is_empty()
+        || !mods.condi_duration_pct.is_empty()
+        || !mods.boon_duration_pct.is_empty()
+        || !mods.healing_pct.is_empty()
+        || !mods.crit_chance_pct.is_empty()
+        || !mods.specific_condi.is_empty()
+}
+
+fn item_to_validated(item: &Item) -> ValidatedItem {
+    ValidatedItem {
+        id: item.id,
+        name: item.name.clone(),
+    }
+}
+
+fn locked_item(db: &GameDb, id: u32) -> Option<ValidatedItem> {
+    db.items.get(&id).map(item_to_validated).or_else(|| {
+        Some(ValidatedItem {
+            id,
+            name: format!("locked-{id}"),
+        })
+    })
+}
+
+/// Cheap inner argmax: pick legal food x utility (or none) after the kit is
+/// complete, write the ids onto `validated`, honor locks.
+///
+/// Scoring uses standing stats + static percents only — the same numbers
+/// `calculate_validated_stats` will fold — via closed-form combat / realized
+/// axes. No rotation, no neighbor operator, no search_rank key change.
+pub fn assign_best_consumables(
+    validated: &mut ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+    locks: &BuildLocks,
+) {
+    if let Some(id) = locks.food {
+        validated.food = locked_item(db, id);
+    }
+    if let Some(id) = locks.utility {
+        validated.utility = locked_item(db, id);
+    }
+
+    let food_locked = locks.food.is_some();
+    let util_locked = locks.utility.is_some();
+    if food_locked && util_locked {
+        return;
+    }
+
+    let foods = if food_locked {
+        Vec::new()
+    } else {
+        db.nourishments_for(&ctx.game_mode)
+            .into_iter()
+            .filter(|item| has_static_effect(item))
+            .collect::<Vec<_>>()
+    };
+    let utils = if util_locked {
+        Vec::new()
+    } else {
+        db.enhancements_for(&ctx.game_mode)
+            .into_iter()
+            .filter(|item| has_static_effect(item))
+            .collect::<Vec<_>>()
+    };
+
+    if foods.is_empty() && utils.is_empty() {
+        if !food_locked {
+            validated.food = None;
+        }
+        if !util_locked {
+            validated.utility = None;
+        }
+        return;
+    }
+
+    // One-sided locks must pin the locked id as Some(&Item) so scoring
+    // includes its contribution (None would treat the lock as zero).
+    let food_choices: Vec<Option<&Item>> = if food_locked {
+        vec![validated.food.as_ref().and_then(|v| db.items.get(&v.id))]
+    } else {
+        let mut v: Vec<Option<&Item>> = Vec::with_capacity(foods.len() + 1);
+        v.push(None);
+        v.extend(foods.iter().copied().map(Some));
+        v
+    };
+    let util_choices: Vec<Option<&Item>> = if util_locked {
+        vec![validated.utility.as_ref().and_then(|v| db.items.get(&v.id))]
+    } else {
+        let mut v: Vec<Option<&Item>> = Vec::with_capacity(utils.len() + 1);
+        v.push(None);
+        v.extend(utils.iter().copied().map(Some));
+        v
+    };
+
+    let product = food_choices.len().saturating_mul(util_choices.len());
+    if product <= 64 {
+        let (food, utility) = joint_argmax(
+            validated,
+            &food_choices,
+            &util_choices,
+            db,
+            profession_name,
+            weights,
+            ctx,
+            scenario,
+        );
+        if !food_locked {
+            validated.food = food.map(item_to_validated);
+        }
+        if !util_locked {
+            validated.utility = utility.map(item_to_validated);
+        }
+        return;
+    }
+
+    // Large catalog: independent passes stay additive and cheap.
+    // Approximation: food is chosen without free utilities (or with a pinned
+    // locked utility), then utility is chosen with the selected food pinned.
+    // Cross terms between free food and free utility are not jointly optimized.
+    if !food_locked {
+        let pinned_utils = [if util_locked {
+            validated.utility.as_ref().and_then(|v| db.items.get(&v.id))
+        } else {
+            None
+        }];
+        let (food, _) = joint_argmax(
+            validated,
+            &food_choices,
+            &pinned_utils,
+            db,
+            profession_name,
+            weights,
+            ctx,
+            scenario,
+        );
+        validated.food = food.map(item_to_validated);
+    }
+    if !util_locked {
+        let pinned_food = [validated.food.as_ref().and_then(|v| db.items.get(&v.id))];
+        let (_, utility) = joint_argmax(
+            validated,
+            &pinned_food,
+            &util_choices,
+            db,
+            profession_name,
+            weights,
+            ctx,
+            scenario,
+        );
+        validated.utility = utility.map(item_to_validated);
+    }
+}
+
+fn joint_argmax<'a>(
+    validated: &ValidatedBuild,
+    foods: &[Option<&'a Item>],
+    utils: &[Option<&'a Item>],
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+) -> (Option<&'a Item>, Option<&'a Item>) {
+    let mut scratch = validated.clone();
+    let mut best_key = cheap_key(&scratch, db, profession_name, weights, ctx, scenario);
+    let mut best: (Option<&Item>, Option<&Item>) = (None, None);
+    for food in foods {
+        for util in utils {
+            scratch.food = food.map(item_to_validated);
+            scratch.utility = util.map(item_to_validated);
+            let key = cheap_key(&scratch, db, profession_name, weights, ctx, scenario);
+            if key > best_key {
+                best_key = key;
+                best = (*food, *util);
+            }
+        }
+    }
+    best
+}
+
+fn cheap_key(
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+) -> (i64, i64, i64) {
+    let (stats, modifiers) = engine::calculate_validated_stats(validated, db, profession_name, ctx);
+    let derived = crate::stats::compute_derived(&stats, profession_name);
+    let buffs = combat::buff_profiles_for_profession(profession_name, ctx);
+    let cond_w = combat::condition_weights_for_profession(profession_name, ctx);
+    let idx = match scenario.combat_tier {
+        crate::scenario::CombatTier::Solo => 0,
+        crate::scenario::CombatTier::Party => 1,
+        crate::scenario::CombatTier::Squad => 2,
+    };
+    let Some(buff) = buffs.get(idx).or_else(|| buffs.first()) else {
+        return (0, 0, 0);
+    };
+    let perf = combat::calculate_combat_performance(
+        &stats,
+        &derived,
+        &modifiers,
+        buff,
+        &cond_w,
+        profession_name,
+        ctx,
+    );
+    let realized = scoring::realized_axes_no_rotation(&perf);
+    let user = scoring::score_realized(&realized, weights);
+    let raw = scoring::raw_realized(&realized, weights);
+    let stat = scoring::raw_direction_score(&perf, weights);
+    (
+        (user * 1_000_000.0).round() as i64,
+        (raw * 1_000_000.0).round() as i64,
+        (stat * 1_000_000.0).round() as i64,
+    )
+}
+
+/// Apply standing consumable stats + static percents onto the validated sheet.
+pub fn fold_into_validated_stats(
+    stats: &mut StatBlock,
+    mods: &mut DamageModifiers,
+    validated: &ValidatedBuild,
+    db: &GameDb,
+) {
+    for item in validated
+        .food
+        .as_ref()
+        .and_then(|v| db.items.get(&v.id))
+        .into_iter()
+        .chain(validated.utility.as_ref().and_then(|v| db.items.get(&v.id)))
+    {
+        *stats += &static_stat_bonus(item);
+        fold_static_modifiers(mods, item);
+    }
+}
+
+/// Test helper: infix-attribute consumable with explicit `game_types`.
+#[cfg(test)]
+pub fn test_consumable(
+    id: u32,
+    name: &str,
+    kind: ConsumableKind,
+    attrs: &[(&str, i32)],
+    game_types: &[&str],
+    description: Option<&str>,
+) -> Item {
+    use gw2_api::models::{InfixAttribute, InfixUpgrade, ItemDetails};
+    let detail_type = match kind {
+        ConsumableKind::Nourishment => "Food",
+        ConsumableKind::Enhancement => "Utility",
+    };
+    Item {
+        id,
+        name: name.to_string(),
+        description: description.map(str::to_string),
+        icon: None,
+        item_type: "Consumable".into(),
+        rarity: "Ascended".into(),
+        level: 80,
+        vendor_value: None,
+        chat_link: None,
+        default_skin: None,
+        flags: Vec::new(),
+        game_types: game_types.iter().map(|s| s.to_string()).collect(),
+        restrictions: Vec::new(),
+        details: Some(ItemDetails {
+            detail_type: Some(detail_type.into()),
+            weight_class: None,
+            defense: None,
+            damage_type: None,
+            min_power: None,
+            max_power: None,
+            suffix: None,
+            bonuses: Vec::new(),
+            infusion_upgrade_flags: Vec::new(),
+            infusion_slots: Vec::new(),
+            attribute_adjustment: None,
+            infix_upgrade: Some(InfixUpgrade {
+                id: None,
+                attributes: attrs
+                    .iter()
+                    .map(|(attr, modifier)| InfixAttribute {
+                        attribute: (*attr).into(),
+                        modifier: *modifier,
+                    })
+                    .collect(),
+                buff: None,
+            }),
+            suffix_item_id: None,
+            secondary_suffix_item_id: None,
+            stat_choices: Vec::new(),
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::validation::ValidatedBuild;
+
+    fn pve_ctx() -> BalanceContext {
+        BalanceContext::pve()
+    }
+
+    fn pve_scenario() -> ScenarioSpec {
+        ScenarioSpec::from_balance_context(&pve_ctx())
+    }
+
+    fn power_weights() -> OptimizationWeights {
+        OptimizationWeights {
+            power: 1.0,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+            control: 0.0,
+        }
+    }
+
+    fn db_with(items: Vec<Item>) -> GameDb {
+        let mut db = GameDb::empty_for_tests();
+        for item in items {
+            db.items_by_type
+                .entry(item.item_type.clone())
+                .or_default()
+                .push(item.id);
+            db.items.insert(item.id, item);
+        }
+        db
+    }
+
+    #[test]
+    fn legality_filters_game_types_and_kind() {
+        let pve_food = test_consumable(
+            1,
+            "Bowl of PvE Stew",
+            ConsumableKind::Nourishment,
+            &[("Power", 100)],
+            &["Pve", "Wvw"],
+            None,
+        );
+        let pvp_food = test_consumable(
+            2,
+            "PvP Omelet",
+            ConsumableKind::Nourishment,
+            &[("Power", 100)],
+            &["Pvp", "PvpLobby"],
+            None,
+        );
+        let util = test_consumable(
+            3,
+            "Sharpening Stone",
+            ConsumableKind::Enhancement,
+            &[("Power", 100)],
+            &["Pve"],
+            None,
+        );
+        let db = db_with(vec![pve_food, pvp_food, util]);
+        let nourish = db.nourishments_for(&GameMode::PvE);
+        let ids: Vec<u32> = nourish.iter().map(|i| i.id).collect();
+        assert_eq!(ids, vec![1], "PvP food must not be legal in PvE: {ids:?}");
+        let enhance = db.enhancements_for(&GameMode::PvE);
+        assert_eq!(enhance.iter().map(|i| i.id).collect::<Vec<_>>(), vec![3]);
+        assert!(db
+            .nourishments_for(&GameMode::PvP)
+            .iter()
+            .any(|i| i.id == 2));
+        assert_eq!(kind_of(&db.items[&1]), Some(ConsumableKind::Nourishment));
+        assert_eq!(kind_of(&db.items[&3]), Some(ConsumableKind::Enhancement));
+    }
+
+    #[test]
+    fn serialization_writes_chosen_ids_onto_the_build() {
+        let food = test_consumable(
+            11,
+            "Bowl of Sweet and Spicy Butternut Squash Soup",
+            ConsumableKind::Nourishment,
+            &[("Power", 100), ("Ferocity", 70)],
+            &["Pve"],
+            None,
+        );
+        let util = test_consumable(
+            12,
+            "Superior Sharpening Stone",
+            ConsumableKind::Enhancement,
+            &[("Power", 100)],
+            &["Pve"],
+            None,
+        );
+        let db = db_with(vec![food, util]);
+        let mut build = ValidatedBuild::default();
+        assign_best_consumables(
+            &mut build,
+            &db,
+            "Warrior",
+            &power_weights(),
+            &pve_ctx(),
+            &pve_scenario(),
+            &BuildLocks::default(),
+        );
+        assert_eq!(
+            build.food.as_ref().map(|i| (i.id, i.name.as_str())),
+            Some((11, "Bowl of Sweet and Spicy Butternut Squash Soup"))
+        );
+        assert_eq!(
+            build.utility.as_ref().map(|i| (i.id, i.name.as_str())),
+            Some((12, "Superior Sharpening Stone"))
+        );
+        let clone = build.clone();
+        assert_eq!(clone.food, build.food);
+        assert_eq!(clone.utility, build.utility);
+    }
+
+    #[test]
+    fn locked_food_and_utility_are_not_overwritten() {
+        let better = test_consumable(
+            21,
+            "Huge Power Stew",
+            ConsumableKind::Nourishment,
+            &[("Power", 1000)],
+            &["Pve"],
+            None,
+        );
+        let worse = test_consumable(
+            22,
+            "Locked Toast",
+            ConsumableKind::Nourishment,
+            &[("Power", 1)],
+            &["Pve"],
+            None,
+        );
+        let util_best = test_consumable(
+            23,
+            "Best Oil",
+            ConsumableKind::Enhancement,
+            &[("Power", 500)],
+            &["Pve"],
+            None,
+        );
+        let util_lock = test_consumable(
+            24,
+            "Locked Oil",
+            ConsumableKind::Enhancement,
+            &[("Power", 1)],
+            &["Pve"],
+            None,
+        );
+        let db = db_with(vec![better, worse, util_best, util_lock]);
+        let mut locks = BuildLocks::default();
+        locks.food = Some(22);
+        locks.utility = Some(24);
+        let mut build = ValidatedBuild::default();
+        assign_best_consumables(
+            &mut build,
+            &db,
+            "Warrior",
+            &power_weights(),
+            &pve_ctx(),
+            &pve_scenario(),
+            &locks,
+        );
+        assert_eq!(build.food.as_ref().map(|i| i.id), Some(22));
+        assert_eq!(build.utility.as_ref().map(|i| i.id), Some(24));
+    }
+
+    #[test]
+    fn rank_and_axes_move_when_consumable_choice_changes() {
+        let power_food = test_consumable(
+            31,
+            "Power Stew",
+            ConsumableKind::Nourishment,
+            &[("Power", 800)],
+            &["Pve"],
+            None,
+        );
+        let tough_food = test_consumable(
+            32,
+            "Tough Stew",
+            ConsumableKind::Nourishment,
+            &[("Toughness", 800)],
+            &["Pve"],
+            None,
+        );
+        let db = db_with(vec![power_food, tough_food]);
+        let ctx = pve_ctx();
+        let scenario = pve_scenario();
+        let weights = power_weights();
+
+        let mut none_build = ValidatedBuild::default();
+        let none_report = crate::referee::evaluate_validated_build(
+            &none_build,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+        );
+
+        let mut power_build = ValidatedBuild::default();
+        power_build.food = Some(ValidatedItem {
+            id: 31,
+            name: "Power Stew".into(),
+        });
+        let power_report = crate::referee::evaluate_validated_build(
+            &power_build,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+        );
+
+        let mut tough_build = ValidatedBuild::default();
+        tough_build.food = Some(ValidatedItem {
+            id: 32,
+            name: "Tough Stew".into(),
+        });
+        let tough_report = crate::referee::evaluate_validated_build(
+            &tough_build,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+        );
+
+        let none_rank = crate::referee::search_rank(&none_report);
+        let power_rank = crate::referee::search_rank(&power_report);
+        let tough_rank = crate::referee::search_rank(&tough_report);
+        assert_ne!(
+            power_rank, none_rank,
+            "power food must move rank/axes vs empty: {power_rank:?} vs {none_rank:?}"
+        );
+        assert_ne!(
+            power_rank, tough_rank,
+            "power vs toughness food must move rank/axes: {power_rank:?} vs {tough_rank:?}"
+        );
+        assert!(
+            power_report.stats.power > none_report.stats.power,
+            "power food must fold into calculate_validated_stats"
+        );
+        // Empty kit: flow realized power stays 0 (no skills). The closed-form
+        // combat / stat-direction axes are what a standing consumable moves.
+        assert_ne!(
+            power_report.stat_direction_score, none_report.stat_direction_score,
+            "stat-direction axis must move with power food"
+        );
+        assert!(
+            power_report.primary_combat.strike_dps_index
+                > none_report.primary_combat.strike_dps_index
+                || power_report.primary_combat.effective_health
+                    != none_report.primary_combat.effective_health,
+            "combat axes must move with consumable choice"
+        );
+        assert!(
+            tough_report.stats.toughness > none_report.stats.toughness,
+            "toughness food must fold into calculate_validated_stats"
+        );
+
+        // Inner solve forced empty/none: empty catalog -> same as no consumables.
+        let empty = GameDb::empty_for_tests();
+        assign_best_consumables(
+            &mut none_build,
+            &empty,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &BuildLocks::default(),
+        );
+        assert!(none_build.food.is_none() && none_build.utility.is_none());
+        let empty_report = crate::referee::evaluate_validated_build(
+            &none_build,
+            &empty,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+        );
+        assert_eq!(
+            crate::referee::search_rank(&empty_report),
+            none_rank,
+            "forced-empty inner solve must match the no-consumable rank"
+        );
+        assert_eq!(empty_report.realized, none_report.realized);
+    }
+
+    #[test]
+    fn non_static_percent_is_skipped() {
+        let item = test_consumable(
+            41,
+            "Proc Oil",
+            ConsumableKind::Enhancement,
+            &[],
+            &["Pve"],
+            Some("30% chance to gain 100 Power when you dodge."),
+        );
+        let mut mods = DamageModifiers::default();
+        fold_static_modifiers(&mut mods, &item);
+        assert!(
+            mods.strike_pct.is_empty() && mods.crit_chance_pct.is_empty(),
+            "triggered chance text must not fold: {mods:?}"
+        );
+        assert!(static_stat_bonus(&item).is_zero());
+        assert!(!has_static_effect(&item));
+    }
+
+    #[test]
+    fn standing_percent_folds() {
+        let item = test_consumable(
+            42,
+            "Force Oil",
+            ConsumableKind::Enhancement,
+            &[],
+            &["Pve"],
+            Some("+5% Damage"),
+        );
+        let mut mods = DamageModifiers::default();
+        fold_static_modifiers(&mut mods, &item);
+        assert!(
+            !mods.strike_pct.is_empty() || !mods.strike_add_pct.is_empty(),
+            "standing +5% Damage must fold: {mods:?}"
+        );
+    }
+
+    /// One-sided food lock must pin the locked item into scoring so the free
+    /// utility pick can change with locked food power (joint product <= 64).
+    #[test]
+    fn one_sided_food_lock_changes_free_utility_pick() {
+        let flat_util = test_consumable(
+            51,
+            "Flat Power Oil",
+            ConsumableKind::Enhancement,
+            &[("Power", 120)],
+            &["Pve"],
+            None,
+        );
+        let pct_util = test_consumable(
+            52,
+            "Percent Damage Oil",
+            ConsumableKind::Enhancement,
+            &[],
+            &["Pve"],
+            Some("+10% Damage"),
+        );
+        let tiny_food = test_consumable(
+            53,
+            "Tiny Locked Toast",
+            ConsumableKind::Nourishment,
+            &[("Power", 1)],
+            &["Pve"],
+            None,
+        );
+        let huge_food = test_consumable(
+            54,
+            "Huge Locked Stew",
+            ConsumableKind::Nourishment,
+            &[("Power", 20_000)],
+            &["Pve"],
+            None,
+        );
+        let db = db_with(vec![flat_util, pct_util, tiny_food, huge_food]);
+        let weights = power_weights();
+        let ctx = pve_ctx();
+        let scenario = pve_scenario();
+
+        let mut locks_tiny = BuildLocks::default();
+        locks_tiny.food = Some(53);
+        let mut build_tiny = ValidatedBuild::default();
+        assign_best_consumables(
+            &mut build_tiny,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks_tiny,
+        );
+        assert_eq!(build_tiny.food.as_ref().map(|i| i.id), Some(53));
+        let tiny_util = build_tiny.utility.as_ref().map(|i| i.id);
+
+        let mut locks_huge = BuildLocks::default();
+        locks_huge.food = Some(54);
+        let mut build_huge = ValidatedBuild::default();
+        assign_best_consumables(
+            &mut build_huge,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks_huge,
+        );
+        assert_eq!(build_huge.food.as_ref().map(|i| i.id), Some(54));
+        let huge_util = build_huge.utility.as_ref().map(|i| i.id);
+
+        assert_eq!(
+            tiny_util,
+            Some(51),
+            "tiny locked food: flat power util should win, got {tiny_util:?}"
+        );
+        assert_eq!(
+            huge_util,
+            Some(52),
+            "huge locked food: percent damage util should win, got {huge_util:?}"
+        );
+        assert_ne!(
+            tiny_util, huge_util,
+            "free-slot util pick must change with locked food power"
+        );
+    }
+
+    /// Large-catalog path (product > 64): locked utility must be pinned while
+    /// choosing food, same interaction as the joint one-sided lock case.
+    #[test]
+    fn large_catalog_one_sided_util_lock_changes_free_food_pick() {
+        let flat_food = test_consumable(
+            61,
+            "Flat Power Stew",
+            ConsumableKind::Nourishment,
+            &[("Power", 120)],
+            &["Pve"],
+            None,
+        );
+        let pct_food = test_consumable(
+            62,
+            "Percent Damage Stew",
+            ConsumableKind::Nourishment,
+            &[],
+            &["Pve"],
+            Some("+10% Damage"),
+        );
+        let tiny_util = test_consumable(
+            63,
+            "Tiny Locked Oil",
+            ConsumableKind::Enhancement,
+            &[("Power", 1)],
+            &["Pve"],
+            None,
+        );
+        let huge_util = test_consumable(
+            64,
+            "Huge Locked Oil",
+            ConsumableKind::Enhancement,
+            &[("Power", 20_000)],
+            &["Pve"],
+            None,
+        );
+        // 70 filler foods => food_choices = 73 (None + flat + pct + 70), util locked
+        // => product = 73 > 64, forcing the independent large-catalog path.
+        let mut items = vec![flat_food, pct_food, tiny_util, huge_util];
+        for i in 0..70 {
+            items.push(test_consumable(
+                1000 + i,
+                &format!("Filler Food {i}"),
+                ConsumableKind::Nourishment,
+                &[("Toughness", 1)],
+                &["Pve"],
+                None,
+            ));
+        }
+        let db = db_with(items);
+        let weights = power_weights();
+        let ctx = pve_ctx();
+        let scenario = pve_scenario();
+
+        let mut locks_tiny = BuildLocks::default();
+        locks_tiny.utility = Some(63);
+        let mut build_tiny = ValidatedBuild::default();
+        assign_best_consumables(
+            &mut build_tiny,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks_tiny,
+        );
+        assert_eq!(build_tiny.utility.as_ref().map(|i| i.id), Some(63));
+        let tiny_food = build_tiny.food.as_ref().map(|i| i.id);
+
+        let mut locks_huge = BuildLocks::default();
+        locks_huge.utility = Some(64);
+        let mut build_huge = ValidatedBuild::default();
+        assign_best_consumables(
+            &mut build_huge,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks_huge,
+        );
+        assert_eq!(build_huge.utility.as_ref().map(|i| i.id), Some(64));
+        let huge_food = build_huge.food.as_ref().map(|i| i.id);
+
+        assert_eq!(
+            tiny_food,
+            Some(61),
+            "tiny locked util: flat power food should win, got {tiny_food:?}"
+        );
+        assert_eq!(
+            huge_food,
+            Some(62),
+            "huge locked util: percent damage food should win, got {huge_food:?}"
+        );
+        assert_ne!(
+            tiny_food, huge_food,
+            "free-slot food pick must change with locked utility power"
+        );
+    }
+}

@@ -229,8 +229,15 @@ pub(crate) fn refine_piece_swaps_within(
     if !budget.claim() {
         return current;
     }
-    let current_report =
-        referee::evaluate_validated_build(&current, db, profession_name, weights, ctx, scenario);
+    let current_report = referee::evaluate_validated_build_solved(
+        &mut current,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+        locks,
+    );
     let mut current_rank = referee::search_rank(&current_report);
 
     for round in 1..=MAX_ROUNDS {
@@ -267,13 +274,14 @@ pub(crate) fn refine_piece_swaps_within(
                         name: itemstat.name.clone(),
                     },
                 );
-                let report = referee::evaluate_validated_build(
-                    &build,
+                let report = referee::evaluate_validated_build_solved(
+                    &mut build,
                     db,
                     profession_name,
                     weights,
                     ctx,
                     scenario,
+                    locks,
                 );
                 let rank = referee::search_rank(&report);
                 if rank > current_rank
@@ -577,13 +585,15 @@ fn repair_seed(
             if is_cancelled() || out_of_time(*eval_count) {
                 break;
             }
-            let report = referee::evaluate_validated_build(
-                &validated,
+            let mut validated = validated;
+            let report = referee::evaluate_validated_build_solved(
+                &mut validated,
                 db,
                 profession_name,
                 weights,
                 ctx,
                 scenario,
+                locks,
             );
             *eval_count += 1;
             // Rank first; on a rank tie prefer the smaller gate shortfall. A
@@ -707,17 +717,19 @@ pub fn optimize_v2_search(
         seed_result.validated = validated;
     }
 
-    let seed_report = referee::evaluate_validated_build(
-        &seed_result.validated,
+    let mut seed_validated = seed_result.validated;
+    let seed_report = referee::evaluate_validated_build_solved(
+        &mut seed_validated,
         db,
         profession_name,
         weights,
         ctx,
         scenario,
+        locks,
     );
 
     let mut beam: Vec<BeamCandidate> = vec![BeamCandidate {
-        validated: seed_result.validated,
+        validated: seed_validated,
         report: seed_report,
     }];
 
@@ -828,13 +840,15 @@ pub fn optimize_v2_search(
                         break;
                     }
                     fn_admitted += 1;
-                    let report = referee::evaluate_validated_build(
-                        &neighbor,
+                    let mut neighbor = neighbor;
+                    let report = referee::evaluate_validated_build_solved(
+                        &mut neighbor,
                         db,
                         profession_name,
                         weights,
                         ctx,
                         scenario,
+                        locks,
                     );
                     eval_count += 1;
                     {
@@ -874,6 +888,8 @@ pub fn optimize_v2_search(
                 && a.validated.rune == b.validated.rune
                 && a.validated.sigils == b.validated.sigils
                 && a.validated.relic == b.validated.relic
+                && a.validated.food == b.validated.food
+                && a.validated.utility == b.validated.utility
                 && a.validated.specializations == b.validated.specializations
                 && a.validated.weapons == b.validated.weapons
                 && a.validated.skills.heal == b.validated.skills.heal
@@ -3268,6 +3284,8 @@ mod tests {
             specs: [None, None, Some(27)],
             trait_locks: HashMap::new(),
             gear_locks: HashMap::new(),
+            food: None,
+            utility: None,
         };
         let none_locked = generate_neighbors(
             &candidate,

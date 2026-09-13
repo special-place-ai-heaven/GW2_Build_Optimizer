@@ -1149,7 +1149,7 @@ pub fn calculate_validated_stats(
 
     // Extract damage modifiers from traits + rune + sigils + relic
     let relic_id = validated.relic.as_ref().map(|r| r.id);
-    let modifiers = combat::extract_damage_modifiers(
+    let mut modifiers = combat::extract_damage_modifiers(
         &all_trait_ids,
         rune_id,
         active_sigil_ids,
@@ -1158,6 +1158,7 @@ pub fn calculate_validated_stats(
         &db.items,
         ctx,
     );
+    crate::consumables::fold_into_validated_stats(&mut full_stats, &mut modifiers, validated, db);
 
     (full_stats, modifiers)
 }
@@ -2356,6 +2357,18 @@ pub fn optimize_deterministic_cancellable(
             .as_ref()
             .map(|r| r.name.as_str())
             .unwrap_or("None");
+        let food_name = result
+            .validated
+            .food
+            .as_ref()
+            .map(|r| r.name.as_str())
+            .unwrap_or("None");
+        let utility_name = result
+            .validated
+            .utility
+            .as_ref()
+            .map(|r| r.name.as_str())
+            .unwrap_or("None");
 
         let set1 = format!(
             "{}{}",
@@ -2419,7 +2432,7 @@ pub fn optimize_deterministic_cancellable(
         let summary = format!(
             "Profession: {}\nGear: {}\nSpecializations:\n{}\nWeapons: Set 1: {} | Set 2: {}\n\
              Skills: Heal: {} | Utilities: {} | Elite: {}\n\
-             Rune: {}\nSigils: {}\nRelic: {}\n\
+             Rune: {}\nSigils: {}\nRelic: {}\nFood: {}\nUtility: {}\n\
              Combat (Solo): Strike DPS {:.0}, Condi DPS {:.0}, Total DPS {:.0}",
             profession_name,
             determined_prefix,
@@ -2432,6 +2445,8 @@ pub fn optimize_deterministic_cancellable(
             rune_name,
             sigil_names.join(", "),
             relic_name,
+            food_name,
+            utility_name,
             result.combat_solo.strike_dps_index,
             result.combat_solo.condition_dps_index,
             result.combat_solo.total_dps_index,
