@@ -778,6 +778,7 @@ pub fn record(
         healing_power_coefficient: None,
         derived_from: Vec::new(),
         coverage: None,
+        cast_skill_id: None,
     }
 }
 

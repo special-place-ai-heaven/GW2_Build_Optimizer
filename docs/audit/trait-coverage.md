@@ -2,15 +2,15 @@
 
 | Profession | Traits | facts | record | facts+record | PassiveNoEffect | NeedsMechanic | NoRecord | UnresolvedValue |
 |---|---|---|---|---|---|---|---|---|
-| Elementalist | 108 | 29 | 12 | 0 | 0 | 67 | 0 | 0 |
+| Elementalist | 108 | 29 | 13 | 0 | 0 | 66 | 0 | 0 |
 | Engineer | 108 | 32 | 13 | 0 | 0 | 63 | 0 | 0 |
-| Guardian | 108 | 35 | 13 | 0 | 0 | 60 | 0 | 0 |
+| Guardian | 108 | 35 | 14 | 0 | 0 | 59 | 0 | 0 |
 | Mesmer | 108 | 22 | 8 | 1 | 0 | 77 | 0 | 0 |
 | Necromancer | 108 | 2 | 27 | 20 | 1 | 56 | 0 | 2 |
 | Ranger | 108 | 42 | 6 | 0 | 0 | 60 | 0 | 0 |
 | Revenant | 108 | 36 | 7 | 0 | 0 | 65 | 0 | 0 |
 | Thief | 108 | 42 | 13 | 0 | 0 | 53 | 0 | 0 |
-| Warrior | 108 | 38 | 16 | 1 | 0 | 53 | 0 | 0 |
+| Warrior | 108 | 38 | 17 | 1 | 0 | 52 | 0 | 0 |
 
 ## Elementalist
 
@@ -35,7 +35,7 @@
 | Arcane | 264 | Elemental Attunement | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Elemental_Attunement (read 2026-09-13: Grant a boon to nearby allies when changing attunements) |
 | Arcane | 265 | Arcane Resurrection | NeedsMechanic: revive | https://wiki.guildwars2.com/wiki/Arcane_Resurrection (read 2026-09-13: Cast Geyser and gain an attunement aura when you begin reviving; Geyser partial revive) |
 | Arcane | 1673 | Elemental Lockdown | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Elemental_Lockdown (read 2026-09-13: Gain an attunement-based boon when you disable a foe) |
-| Arcane | 257 | Final Shielding | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Final_Shielding (read 2026-09-13: Cast Lesser Arcane Shield when you use an elite skill) |
+| Arcane | 257 | Final Shielding | record | https://wiki.guildwars2.com/wiki/Final_Shielding (read 2026-09-13: Cast Lesser Arcane Shield when you use an elite skill; ICD 300 s WvW) |
 | Arcane | 2004 | Elemental Enchantment | facts |  |
 | Arcane | 238 | Evasive Arcana | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Evasive_Arcana (read 2026-09-13: Cast an attunement-based skill when you dodge) |
 | Arcane | 263 | Arcane Lightning | facts |  |
@@ -245,7 +245,7 @@
 | Honor | 564 | Vigorous Precision | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Vigorous_Precision (read 2026-09-13: Vigor at end of dodge roll) |
 | Honor | 1899 | Invigorated Bulwark | NeedsMechanic: block | https://wiki.guildwars2.com/wiki/Invigorated_Bulwark (read 2026-09-13: Healing stacks and mace recharge/boon duration on block) |
 | Honor | 559 | Protective Reviver | NeedsMechanic: revive | https://wiki.guildwars2.com/wiki/Protective_Reviver (read 2026-09-13: Lesser Shield of Absorption on revive start) |
-| Honor | 654 | Protector's Restoration | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Protector%27s_Restoration (read 2026-09-13: Cast Lesser Symbol of Protection on heal skill) |
+| Honor | 654 | Protector's Restoration | record | https://wiki.guildwars2.com/wiki/Protector%27s_Restoration (read 2026-09-13: Cast Lesser Symbol of Protection on heal skill; Protection 1 s pulse) |
 | Honor | 551 | Selfless Daring | facts |  |
 | Honor | 557 | Honorable Staff | facts |  |
 | Honor | 549 | Pure of Heart | facts |  |
@@ -937,7 +937,7 @@
 | Defense | 1488 | Dogged March | NeedsMechanic: incoming condition | https://wiki.guildwars2.com/wiki/Dogged_March (read 2026-09-13: Shorter movement-impairing conditions; regeneration when affected; ICD 10 s) |
 | Defense | 1372 | Cull the Weak | facts |  |
 | Defense | 1348 | Adrenal Health | NeedsMechanic: adrenaline | https://wiki.guildwars2.com/wiki/Adrenal_Health (read 2026-09-13: Heal based on adrenaline spent; Adrenal Health stacks) |
-| Defense | 1368 | Defy Pain | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Defy_Pain (read 2026-09-13: Cast Lesser Endure Pain when you use an elite skill) |
+| Defense | 1368 | Defy Pain | record | https://wiki.guildwars2.com/wiki/Defy_Pain_(warrior_trait) (read 2026-09-13: Cast Lesser Endure Pain when you use an elite skill; Enduring Pain 4 s WvW; ICD 300 s) |
 | Defense | 1379 | Resilient Roll | record | https://wiki.guildwars2.com/wiki/Resilient_Roll (read 2026-09-13: Gain resistance when you dodge) |
 | Defense | 1367 | Merciless Hammer | facts |  |
 | Defense | 1380 | Hardened Armor | record | https://wiki.guildwars2.com/wiki/Hardened_Armor (read 2026-09-13: Resolution 5 s when struck by a critical hit; ICD 15 s; block and damage reduction are NeedsMechanic) |

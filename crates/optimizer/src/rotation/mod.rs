@@ -12,10 +12,12 @@ pub mod prose;
 pub(crate) mod reaper_fixture;
 pub mod simulator;
 pub mod skill_timings;
+pub mod trait_skill;
 pub mod trigger_bus;
 pub mod wvw_timeline;
 
 pub use combo::{ComboEngine, ComboOutcome, ComboOutcomeEffect, ComboSite, SELF_COMBATANT_ID};
+pub use trait_skill::resolve_trait_skill;
 pub use trigger_bus::{
     land_foe_disable, BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST,
 };
