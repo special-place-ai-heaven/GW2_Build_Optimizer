@@ -10,7 +10,7 @@
 | Ranger | 108 | 42 | 6 | 0 | 0 | 60 | 0 | 0 |
 | Revenant | 108 | 36 | 0 | 0 | 0 | 0 | 72 | 0 |
 | Thief | 108 | 42 | 11 | 0 | 0 | 55 | 0 | 0 |
-| Warrior | 108 | 38 | 1 | 1 | 0 | 0 | 68 | 0 |
+| Warrior | 108 | 38 | 15 | 1 | 0 | 54 | 0 | 0 |
 
 ## Elementalist
 
@@ -922,52 +922,52 @@
 |---|---|---|---|---|
 | Arms | 1342 | Furious Burst | facts |  |
 | Arms | 1455 | Wounding Precision | facts |  |
-| Arms | 1344 | Signet Mastery | NoRecord |  |
-| Arms | 1334 | Opportunist | NoRecord |  |
+| Arms | 1344 | Signet Mastery | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Signet_Mastery (read 2026-09-13: Signet of Ferocity stacks on signet use; Lesser Signet of Might below 50% health) |
+| Arms | 1334 | Opportunist | record | https://wiki.guildwars2.com/wiki/Opportunist (read 2026-09-13: Fury 3 s when you immobilize; ICD 1 s; disable and adrenaline are NeedsMechanic) |
 | Arms | 1343 | Deep Strikes | facts |  |
 | Arms | 1315 | Unsuspecting Foe | facts |  |
-| Arms | 1316 | Sundering Burst | NoRecord |  |
+| Arms | 1316 | Sundering Burst | record | https://wiki.guildwars2.com/wiki/Sundering_Burst (read 2026-09-13: Burst hits: vulnerability x5 for 6 s in WvW/PvP; ICD 5 s) |
 | Arms | 1333 | Blademaster | facts |  |
-| Arms | 1337 | Bloodlust | NoRecord |  |
-| Arms | 1336 | Burst Precision | NoRecord |  |
-| Arms | 1346 | Furious | NoRecord |  |
+| Arms | 1337 | Bloodlust | record | https://wiki.guildwars2.com/wiki/Bloodlust (read 2026-09-13: 33% chance on crit: bleeding 1 s in WvW/PvP; duration increase is NeedsMechanic condition duration) |
+| Arms | 1336 | Burst Precision | NeedsMechanic: burst | https://wiki.guildwars2.com/wiki/Burst_Precision (read 2026-09-13: Burst skills +100% crit chance; Burst Precision buff duration by adrenaline spent) |
+| Arms | 1346 | Furious | NeedsMechanic: adrenaline | https://wiki.guildwars2.com/wiki/Furious (read 2026-09-13: Critical hits grant adrenaline and Furious Surge stacking condition damage) |
 | Arms | 1707 | Dual Wielding | facts |  |
-| Defense | 1350 | Thick Skin | NoRecord |  |
-| Defense | 1376 | Shield Master | NoRecord |  |
-| Defense | 1488 | Dogged March | NoRecord |  |
+| Defense | 1350 | Thick Skin | record | https://wiki.guildwars2.com/wiki/Thick_Skin (read 2026-09-13: Protection 3 s when you use a healing skill) |
+| Defense | 1376 | Shield Master | NeedsMechanic: block | https://wiki.guildwars2.com/wiki/Shield_Master (read 2026-09-13: Reflect missiles while blocking; adrenaline on block/reflect) |
+| Defense | 1488 | Dogged March | NeedsMechanic: incoming condition | https://wiki.guildwars2.com/wiki/Dogged_March (read 2026-09-13: Shorter movement-impairing conditions; regeneration when affected; ICD 10 s) |
 | Defense | 1372 | Cull the Weak | facts |  |
-| Defense | 1348 | Adrenal Health | NoRecord |  |
-| Defense | 1368 | Defy Pain | NoRecord |  |
-| Defense | 1379 | Resilient Roll | NoRecord |  |
+| Defense | 1348 | Adrenal Health | NeedsMechanic: adrenaline | https://wiki.guildwars2.com/wiki/Adrenal_Health (read 2026-09-13: Heal based on adrenaline spent; Adrenal Health stacks) |
+| Defense | 1368 | Defy Pain | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Defy_Pain (read 2026-09-13: Cast Lesser Endure Pain when you use an elite skill) |
+| Defense | 1379 | Resilient Roll | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Resilient_Roll (read 2026-09-13: Gain resistance when you dodge) |
 | Defense | 1367 | Merciless Hammer | facts |  |
-| Defense | 1380 | Hardened Armor | NoRecord |  |
+| Defense | 1380 | Hardened Armor | record | https://wiki.guildwars2.com/wiki/Hardened_Armor (read 2026-09-13: Resolution 5 s when struck by a critical hit; ICD 15 s; block and damage reduction are NeedsMechanic) |
 | Defense | 1375 | Last Stand | facts |  |
-| Defense | 1649 | Cleansing Ire | NoRecord |  |
+| Defense | 1649 | Cleansing Ire | record | https://wiki.guildwars2.com/wiki/Cleansing_Ire (read 2026-09-13: Remove 1 condition when you hit with a burst; adrenaline scaling is NeedsMechanic adrenaline) |
 | Defense | 1708 | Stalwart Strength | facts |  |
-| Discipline | 1415 | Versatile Rage | NoRecord |  |
-| Discipline | 1329 | Crack Shot | NoRecord |  |
+| Discipline | 1415 | Versatile Rage | NeedsMechanic: weapon swap | https://wiki.guildwars2.com/wiki/Versatile_Rage (read 2026-09-13: Gain adrenaline on weapon swap) |
+| Discipline | 1329 | Crack Shot | NeedsMechanic: skill replace | https://wiki.guildwars2.com/wiki/Crack_Shot (read 2026-09-13: Longbow/rifle/harpoon gun skill 1 enhanced; recharge reduced) |
 | Discipline | 1413 | Warrior's Sprint | facts |  |
-| Discipline | 1381 | Stalwart Focus | NoRecord |  |
-| Discipline | 1416 | Fast Hands | NoRecord |  |
-| Discipline | 1484 | Doubled Standards | NoRecord |  |
+| Discipline | 1381 | Stalwart Focus | record | https://wiki.guildwars2.com/wiki/Stalwart_Focus (read 2026-09-13: +10% healing to others in WvW/PvP; incoming healing is NeedsMechanic incoming healing) |
+| Discipline | 1416 | Fast Hands | NeedsMechanic: weapon swap | https://wiki.guildwars2.com/wiki/Fast_Hands (read 2026-09-13: Gain swiftness when swapping weapons in combat) |
+| Discipline | 1484 | Doubled Standards | record | https://wiki.guildwars2.com/wiki/Doubled_Standards (read 2026-09-13: Banners grant resolution 5 s to allies when dropped; pulsing boon duration is NeedsMechanic banners) |
 | Discipline | 1489 | Destruction of the Empowered | facts |  |
-| Discipline | 1709 | Brawler's Recovery | NoRecord |  |
-| Discipline | 1417 | Versatile Power | NoRecord |  |
+| Discipline | 1709 | Brawler's Recovery | NeedsMechanic: weapon swap | https://wiki.guildwars2.com/wiki/Brawler%27s_Recovery (read 2026-09-13: Remove conditions when you swap weapons) |
+| Discipline | 1417 | Versatile Power | NeedsMechanic: weapon swap | https://wiki.guildwars2.com/wiki/Versatile_Power (read 2026-09-13: Might on weapon swap; burst recharge reduction is also recharge) |
 | Discipline | 1369 | Axe Mastery | facts |  |
-| Discipline | 1317 | Heightened Focus | NoRecord |  |
+| Discipline | 1317 | Heightened Focus | record | https://wiki.guildwars2.com/wiki/Heightened_Focus (read 2026-09-13: Quickness 2.5 s in WvW/PvP when you strike a foe below 50% health; ICD 12 s; burst recharge and adrenaline healing are NeedsMechanic) |
 | Discipline | 1657 | Burst Mastery | facts |  |
-| Strength | 1446 | Reckless Dodge | NoRecord |  |
-| Strength | 1447 | Brave Stride | NoRecord |  |
-| Strength | 1451 | Restorative Strength | NoRecord |  |
+| Strength | 1446 | Reckless Dodge | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Reckless_Dodge (read 2026-09-13: Damage foes at the end of a dodge roll) |
+| Strength | 1447 | Brave Stride | NeedsMechanic: movement skill | https://wiki.guildwars2.com/wiki/Brave_Stride (read 2026-09-13: Movement skills grant stability, fury and adrenaline) |
+| Strength | 1451 | Restorative Strength | record | https://wiki.guildwars2.com/wiki/Restorative_Strength (read 2026-09-13: Heal skill: might x2 for 6 s in WvW/PvP) |
 | Strength | 1444 | Peak Performance | facts |  |
-| Strength | 1448 | Building Momentum | NoRecord |  |
-| Strength | 2000 | Body Blow | NoRecord |  |
+| Strength | 1448 | Building Momentum | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Building_Momentum (read 2026-09-13: Burst skills restore endurance on hit) |
+| Strength | 2000 | Body Blow | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Body_Blow (read 2026-09-13: Disables inflict vulnerability and weakness) |
 | Strength | 1338 | Forceful Greatsword | facts+record | https://wiki.guildwars2.com/wiki/Forceful_Greatsword |
 | Strength | 1449 | Great Fortitude | facts |  |
 | Strength | 1453 | Pinnacle of Strength | facts |  |
-| Strength | 1437 | Berserker's Power | NoRecord |  |
+| Strength | 1437 | Berserker's Power | NeedsMechanic: adrenaline | https://wiki.guildwars2.com/wiki/Berserker%27s_Power (read 2026-09-13: Strike damage buff based on adrenaline when you use a burst) |
 | Strength | 1454 | Might Makes Right | facts |  |
-| Strength | 1440 | Aggressive Onslaught | NoRecord |  |
+| Strength | 1440 | Aggressive Onslaught | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Aggressive_Onslaught (read 2026-09-13: Quickness and might when you disable; movement speed while quickness) |
 | Tactics | 1480 | Marching Orders | facts |  |
 | Tactics | 1469 | Leg Specialist | facts |  |
 | Tactics | 1474 | Soldier's Comfort | facts |  |
@@ -975,56 +975,56 @@
 | Tactics | 1485 | Empowered | facts |  |
 | Tactics | 1486 | Warrior's Cunning | facts |  |
 | Tactics | 1479 | Shrug It Off | facts |  |
-| Tactics | 1482 | Empower Allies | NoRecord |  |
+| Tactics | 1482 | Empower Allies | record | https://wiki.guildwars2.com/wiki/Empower_Allies (read 2026-09-13: In combat: might x5 for 10 s to self and nearby allies every 10 s; 5 targets radius 600) |
 | Tactics | 1481 | Mending Might | facts |  |
-| Tactics | 1667 | Martial Cadence | NoRecord |  |
+| Tactics | 1667 | Martial Cadence | NeedsMechanic: soldiers focus | https://wiki.guildwars2.com/wiki/Martial_Cadence (read 2026-09-13: Soldier's Focus grants stability/quickness and cleanses; refresh on weapon swap) |
 | Tactics | 1470 | Vigorous Shouts | facts |  |
 | Tactics | 1711 | Phalanx Strength | record | https://wiki.guildwars2.com/wiki/Phalanx_Strength |
-| Berserker | 1831 | Primal Rage | NoRecord |  |
+| Berserker | 1831 | Primal Rage | NeedsMechanic: berserk | https://wiki.guildwars2.com/wiki/Primal_Rage (read 2026-09-13: Access to berserk mode and primal bursts) |
 | Berserker | 2049 | Smash Brawler | facts |  |
-| Berserker | 2039 | Last Blaze | NoRecord |  |
-| Berserker | 1977 | Savage Instinct | NoRecord |  |
-| Berserker | 1993 | Burst of Aggression | NoRecord |  |
+| Berserker | 2039 | Last Blaze | record | https://wiki.guildwars2.com/wiki/Last_Blaze (read 2026-09-13: Rage skills: burning 4 s to nearby enemies (5 targets radius 300); berserk extension is NeedsMechanic berserk) |
+| Berserker | 1977 | Savage Instinct | NeedsMechanic: berserk | https://wiki.guildwars2.com/wiki/Savage_Instinct (read 2026-09-13: Berserk enter breaks stuns and reduces incoming damage) |
+| Berserker | 1993 | Burst of Aggression | NeedsMechanic: berserk | https://wiki.guildwars2.com/wiki/Burst_of_Aggression (read 2026-09-13: Quickness/superspeed/fury when entering berserk) |
 | Berserker | 2011 | Blood Reaction | facts |  |
-| Berserker | 2042 | Heat the Soul | NoRecord |  |
+| Berserker | 2042 | Heat the Soul | record | https://wiki.guildwars2.com/wiki/Heat_the_Soul (read 2026-09-13: Burst hits: quickness 2 s to nearby allies in WvW/PvP; radius 480) |
 | Berserker | 2002 | Dead or Alive | facts |  |
 | Berserker | 2046 | Fatal Frenzy | facts |  |
 | Berserker | 1928 | Bloody Roar | facts |  |
-| Berserker | 2038 | King of Fires | NoRecord |  |
-| Berserker | 2307 | Eternal Champion | NoRecord |  |
-| Bladesworn | 2226 | Gun X Sword | NoRecord |  |
-| Bladesworn | 2225 | Unseen Sword | NoRecord |  |
-| Bladesworn | 2260 | Sharp as the Wind | NoRecord |  |
-| Bladesworn | 2237 | River's Flow | NoRecord |  |
-| Bladesworn | 2242 | Dragonscale Defense | NoRecord |  |
+| Berserker | 2038 | King of Fires | NeedsMechanic: fire aura | https://wiki.guildwars2.com/wiki/King_of_Fires (read 2026-09-13: Fire aura on crit; berserker skills detonate it; burning duration increase) |
+| Berserker | 2307 | Eternal Champion | NeedsMechanic: berserk | https://wiki.guildwars2.com/wiki/Eternal_Champion (read 2026-09-13: Stability and endurance on berserk enter/exit; early exit) |
+| Bladesworn | 2226 | Gun X Sword | NeedsMechanic: dragon trigger | https://wiki.guildwars2.com/wiki/Gun_X_Sword (read 2026-09-13: Gunsaber alternate set; flow replaces adrenaline) |
+| Bladesworn | 2225 | Unseen Sword | NeedsMechanic: dragon trigger | https://wiki.guildwars2.com/wiki/Unseen_Sword (read 2026-09-13: Strike nearby and gain flow rate when swapping to gunsaber) |
+| Bladesworn | 2260 | Sharp as the Wind | NeedsMechanic: ammunition | https://wiki.guildwars2.com/wiki/Sharp_as_the_Wind (read 2026-09-13: Condition ammunition; burn and flow on gunsaber swap) |
+| Bladesworn | 2237 | River's Flow | NeedsMechanic: ammunition | https://wiki.guildwars2.com/wiki/River%27s_Flow (read 2026-09-13: Support ammunition; boons and positive flow on gunsaber swap) |
+| Bladesworn | 2242 | Dragonscale Defense | NeedsMechanic: dragon trigger | https://wiki.guildwars2.com/wiki/Dragonscale_Defense (read 2026-09-13: Boons when entering Dragon Trigger) |
 | Bladesworn | 2253 | Unshakable Mountain | facts |  |
-| Bladesworn | 2302 | Fierce as Fire | NoRecord |  |
-| Bladesworn | 2303 | Lush Forest | NoRecord |  |
-| Bladesworn | 2236 | Guns and Glory | NoRecord |  |
-| Bladesworn | 2261 | Immortal Dragon | NoRecord |  |
-| Bladesworn | 2239 | Unyielding Dragon | NoRecord |  |
-| Bladesworn | 2245 | Daring Dragon | NoRecord |  |
-| Paragon | 2373 | Rally the Valiant | NoRecord |  |
-| Paragon | 2345 | Call to Action | NoRecord |  |
-| Paragon | 2433 | Calming Tongue | NoRecord |  |
-| Paragon | 2357 | Liberating Liaise | NoRecord |  |
+| Bladesworn | 2302 | Fierce as Fire | NeedsMechanic: ammunition | https://wiki.guildwars2.com/wiki/Fierce_as_Fire (read 2026-09-13: Strike and condition damage per ammunition spent) |
+| Bladesworn | 2303 | Lush Forest | NeedsMechanic: ammunition | https://wiki.guildwars2.com/wiki/Lush_Forest (read 2026-09-13: First ammo round reduces recharge of warrior skills) |
+| Bladesworn | 2236 | Guns and Glory | NeedsMechanic: explosion | https://wiki.guildwars2.com/wiki/Guns_and_Glory (read 2026-09-13: Ferocity when you hit with an explosion) |
+| Bladesworn | 2261 | Immortal Dragon | NeedsMechanic: dragon trigger | https://wiki.guildwars2.com/wiki/Immortal_Dragon (read 2026-09-13: Dragon Slash heal percent; protection when converting flow) |
+| Bladesworn | 2239 | Unyielding Dragon | NeedsMechanic: dragon trigger | https://wiki.guildwars2.com/wiki/Unyielding_Dragon (read 2026-09-13: Dragon Slash unblockable; might when converting flow) |
+| Bladesworn | 2245 | Daring Dragon | NeedsMechanic: dragon trigger | https://wiki.guildwars2.com/wiki/Daring_Dragon (read 2026-09-13: Lower max charge; ally boons on Dragon Slash) |
+| Paragon | 2373 | Rally the Valiant | NeedsMechanic: chants | https://wiki.guildwars2.com/wiki/Rally_the_Valiant (read 2026-09-13: Access to chants/commands; motivation from chants and bursts during refrain) |
+| Paragon | 2345 | Call to Action | NeedsMechanic: chants | https://wiki.guildwars2.com/wiki/Call_to_Action (read 2026-09-13: Motivation on combat enter; auto-activate Chant of Action refrain) |
+| Paragon | 2433 | Calming Tongue | NeedsMechanic: chants | https://wiki.guildwars2.com/wiki/Calming_Tongue (read 2026-09-13: Chant of Recuperation removes conditions on activate) |
+| Paragon | 2357 | Liberating Liaise | NeedsMechanic: chants | https://wiki.guildwars2.com/wiki/Liberating_Liaise (read 2026-09-13: Chant of Freedom grants superspeed on activate) |
 | Paragon | 2418 | Inspiring Implements | facts |  |
-| Paragon | 2385 | Strengthening Stanzas | NoRecord |  |
+| Paragon | 2385 | Strengthening Stanzas | NeedsMechanic: refrain | https://wiki.guildwars2.com/wiki/Strengthening_Stanzas (read 2026-09-13: Refrains grant bonus effects while active) |
 | Paragon | 2426 | Invigorating Tempo | facts |  |
-| Paragon | 2399 | Reverberation | NoRecord |  |
-| Paragon | 2340 | Unyielding Resolve | NoRecord |  |
-| Paragon | 2369 | Feverish Pulse | NoRecord |  |
-| Paragon | 2375 | Brisk Pacing | NoRecord |  |
-| Paragon | 2428 | Enduring Refrain | NoRecord |  |
-| Spellbreaker | 2175 | Spellbreaker's Conviction | NoRecord |  |
+| Paragon | 2399 | Reverberation | NeedsMechanic: commands | https://wiki.guildwars2.com/wiki/Reverberation (read 2026-09-13: Command echoes can trigger a second time) |
+| Paragon | 2340 | Unyielding Resolve | NeedsMechanic: motivation | https://wiki.guildwars2.com/wiki/Unyielding_Resolve (read 2026-09-13: Incoming damage reduced per motivation point) |
+| Paragon | 2369 | Feverish Pulse | NeedsMechanic: chants | https://wiki.guildwars2.com/wiki/Feverish_Pulse (read 2026-09-13: Chant use reduces other chant recharge and grants ally boons) |
+| Paragon | 2375 | Brisk Pacing | NeedsMechanic: motivation | https://wiki.guildwars2.com/wiki/Brisk_Pacing (read 2026-09-13: Increased damage based on motivation level) |
+| Paragon | 2428 | Enduring Refrain | NeedsMechanic: refrain | https://wiki.guildwars2.com/wiki/Enduring_Refrain (read 2026-09-13: Stronger refrain effects; extra motivation on chant activate) |
+| Spellbreaker | 2175 | Spellbreaker's Conviction | NeedsMechanic: full counter | https://wiki.guildwars2.com/wiki/Spellbreaker%27s_Conviction (read 2026-09-13: Adrenaline capped at 2 bars; Full Counter and Meditation access) |
 | Spellbreaker | 2107 | Pure Strike | facts |  |
-| Spellbreaker | 2153 | Guard Counter | NoRecord |  |
-| Spellbreaker | 2140 | No Escape | NoRecord |  |
-| Spellbreaker | 2162 | Dispelling Force | NoRecord |  |
-| Spellbreaker | 2126 | Loss Aversion | NoRecord |  |
-| Spellbreaker | 2097 | Resilient Counter | NoRecord |  |
+| Spellbreaker | 2153 | Guard Counter | NeedsMechanic: full counter | https://wiki.guildwars2.com/wiki/Guard_Counter (read 2026-09-13: Protection after a successful Full Counter) |
+| Spellbreaker | 2140 | No Escape | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/No_Escape (read 2026-09-13: Dazes and stuns inflict immobilize) |
+| Spellbreaker | 2162 | Dispelling Force | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Dispelling_Force (read 2026-09-13: Disables remove boons) |
+| Spellbreaker | 2126 | Loss Aversion | NeedsMechanic: adrenaline | https://wiki.guildwars2.com/wiki/Loss_Aversion (read 2026-09-13: Removing boons deals coefficient damage and grants adrenaline) |
+| Spellbreaker | 2097 | Resilient Counter | NeedsMechanic: full counter | https://wiki.guildwars2.com/wiki/Resilient_Counter (read 2026-09-13: Full Counter grants resistance) |
 | Spellbreaker | 2095 | Sun and Moon Style | facts |  |
-| Spellbreaker | 2130 | Attacker's Insight | NoRecord |  |
-| Spellbreaker | 2163 | Enchantment Collapse | NoRecord |  |
+| Spellbreaker | 2130 | Attacker's Insight | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Attacker%27s_Insight (read 2026-09-13: Insight on disable/boon remove; Full Counter refreshes bursts) |
+| Spellbreaker | 2163 | Enchantment Collapse | record | https://wiki.guildwars2.com/wiki/Enchantment_Collapse (read 2026-09-13: Removing a boon from a foe strips 1 additional boon from nearby foes; ICD 1 s; 5 targets radius 240) |
 | Spellbreaker | 2168 | Resolute Counter | facts |  |
-| Spellbreaker | 2060 | Magebane Tether | NoRecord |  |
+| Spellbreaker | 2060 | Magebane Tether | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Magebane_Tether (read 2026-09-13: Burst hit casts Magebane Tether on target in range) |

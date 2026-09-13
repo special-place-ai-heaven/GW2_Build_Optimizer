@@ -2,6 +2,17 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.8 - 2026-09-13
+
+Warrior trait catalogue: every Warrior trait is classified; the coverage table's Warrior NoRecord column is 0.
+
+### Warrior trait triggers
+
+- The Warrior's 108 traits are catalogued: every trait is executed from its facts, executed from a dated wiki record, or classified with the mechanic it still needs (adrenaline, burst, berserk, banners, soldiers focus, block, fire aura, dragon trigger, ammunition, chants, refrain, motivation, full counter, disable trigger, weapon swap, dodge and the rest).
+- New wiki records fire on existing sites: on-condition-applied immobilize (Opportunist fury), burst on-hit / on-crit (Sundering Burst vulnerability, Cleansing Ire cleanse, Heat the Soul ally boons), on-crit (Bloodlust bleeding, Hardened Armor resolution), heal skill use (Thick Skin protection, Restorative Strength might and resistance), banner skill use (Doubled Standards resolution), periodic combat might (Empower Allies), on-hit foe-health gate (Heightened Focus quickness), rage skill use (Last Blaze burning), on-boon-stripped (Enchantment Collapse), and a passive outgoing-healing percent (Stalwart Focus). Trigger kinds reused from prior professions; no new trigger enum variants.
+- Honest `NeedsMechanic` entries name the fidelity still missing (adrenaline, burst, berserk, banners, Soldier's Focus, block, fire aura, Dragon Trigger / flow / ammunition, chants / refrains / motivation, Full Counter, and related). They are not claimed as simulated.
+- `docs/audit/trait-coverage.md` regenerated; Warrior `NoRecord=0`. Necromancer, Ranger and Thief coverage unchanged.
+
 ## 1.14.7 - 2026-09-13
 
 Thief trait catalogue: every Thief trait is classified; the coverage table's Thief NoRecord column is 0.

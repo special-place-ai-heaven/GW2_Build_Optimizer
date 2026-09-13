@@ -6068,6 +6068,1665 @@
         "class": "NeedsMechanic",
         "mechanic": "shadow shroud"
       }
+    },
+    {
+      "effect_id": "trait:1334:0",
+      "source_type": "Trait",
+      "source_id": 1334,
+      "source_name": "Opportunist",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Opportunist (read 2026-09-13: Fury 3 s when you immobilize; ICD 1 s; disable and adrenaline are NeedsMechanic)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000,
+        "internal_cooldown_ms": 1000
+      },
+      "internal_cooldown": 1.0,
+      "trigger_scope": {
+        "Status": "Immobile"
+      }
+    },
+    {
+      "effect_id": "trait:1334:coverage",
+      "source_type": "Trait",
+      "source_id": 1334,
+      "source_name": "Opportunist",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Opportunist (read 2026-09-13: Disable trigger and adrenaline gain on immobilize/disable)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:1316:0",
+      "source_type": "Trait",
+      "source_id": 1316,
+      "source_name": "Sundering Burst",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sundering_Burst (read 2026-09-13: Burst hits: vulnerability x5 for 6 s in WvW/PvP; ICD 5 s)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Vulnerability",
+        "amount_mode": "Stacks",
+        "amount_value": 5.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 6000,
+        "internal_cooldown_ms": 5000
+      },
+      "internal_cooldown": 5.0,
+      "trigger_scope": {
+        "Category": "Burst"
+      }
+    },
+    {
+      "effect_id": "trait:1316:1",
+      "source_type": "Trait",
+      "source_id": 1316,
+      "source_name": "Sundering Burst",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sundering_Burst (read 2026-09-13: Burst critical hits: additional vulnerability x5 for 6 s in WvW/PvP; ICD 5 s)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Vulnerability",
+        "amount_mode": "Stacks",
+        "amount_value": 5.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 6000,
+        "internal_cooldown_ms": 5000
+      },
+      "internal_cooldown": 5.0,
+      "trigger_scope": {
+        "Category": "Burst"
+      }
+    },
+    {
+      "effect_id": "trait:1337:0",
+      "source_type": "Trait",
+      "source_id": 1337,
+      "source_name": "Bloodlust",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bloodlust (read 2026-09-13: 33% chance on crit: bleeding 1 s in WvW/PvP; duration increase is NeedsMechanic condition duration)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Bleeding",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 1000
+      },
+      "proc_chance": 0.33
+    },
+    {
+      "effect_id": "trait:1337:coverage",
+      "source_type": "Trait",
+      "source_id": 1337,
+      "source_name": "Bloodlust",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bloodlust (read 2026-09-13: Outgoing bleeding duration +15% in WvW/PvP)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "condition duration"
+      }
+    },
+    {
+      "effect_id": "trait:1350:0",
+      "source_type": "Trait",
+      "source_id": 1350,
+      "source_name": "Thick Skin",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Thick_Skin (read 2026-09-13: Protection 3 s when you use a healing skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Protection",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      }
+    },
+    {
+      "effect_id": "trait:1380:0",
+      "source_type": "Trait",
+      "source_id": 1380,
+      "source_name": "Hardened Armor",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hardened_Armor (read 2026-09-13: Resolution 5 s when struck by a critical hit; ICD 15 s; block and damage reduction are NeedsMechanic)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Resolution",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 5000,
+        "internal_cooldown_ms": 15000
+      },
+      "internal_cooldown": 15.0
+    },
+    {
+      "effect_id": "trait:1380:coverage",
+      "source_type": "Trait",
+      "source_id": 1380,
+      "source_name": "Hardened Armor",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hardened_Armor (read 2026-09-13: Block trigger and 10% strike damage reduction while resolution)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming damage reduction"
+      }
+    },
+    {
+      "effect_id": "trait:1649:0",
+      "source_type": "Trait",
+      "source_id": 1649,
+      "source_name": "Cleansing Ire",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cleansing_Ire (read 2026-09-13: Remove 1 condition when you hit with a burst; adrenaline scaling is NeedsMechanic adrenaline)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self"
+      },
+      "trigger_scope": {
+        "Category": "Burst"
+      }
+    },
+    {
+      "effect_id": "trait:1649:coverage",
+      "source_type": "Trait",
+      "source_id": 1649,
+      "source_name": "Cleansing Ire",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cleansing_Ire (read 2026-09-13: Adrenaline when hit; extra cleanses per adrenaline bar spent)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "adrenaline"
+      }
+    },
+    {
+      "effect_id": "trait:1381:0",
+      "source_type": "Trait",
+      "source_id": 1381,
+      "source_name": "Stalwart Focus",
+      "category": "OutgoingHealingPct",
+      "value": 10.0,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "AlwaysOn"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stalwart_Focus (read 2026-09-13: +10% healing to others in WvW/PvP; incoming healing is NeedsMechanic incoming healing)"
+    },
+    {
+      "effect_id": "trait:1381:coverage",
+      "source_type": "Trait",
+      "source_id": 1381,
+      "source_name": "Stalwart Focus",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stalwart_Focus (read 2026-09-13: +3% incoming healing effectiveness in WvW/PvP)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming healing"
+      }
+    },
+    {
+      "effect_id": "trait:1484:0",
+      "source_type": "Trait",
+      "source_id": 1484,
+      "source_name": "Doubled Standards",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Doubled_Standards (read 2026-09-13: Banners grant resolution 5 s to allies when dropped; pulsing boon duration is NeedsMechanic banners)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Resolution",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 5000
+      },
+      "trigger_scope": {
+        "Category": "Banner"
+      }
+    },
+    {
+      "effect_id": "trait:1484:coverage",
+      "source_type": "Trait",
+      "source_id": 1484,
+      "source_name": "Doubled Standards",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Doubled_Standards (read 2026-09-13: Pulsing banner boons last 50% longer)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "banners"
+      }
+    },
+    {
+      "effect_id": "trait:1451:0",
+      "source_type": "Trait",
+      "source_id": 1451,
+      "source_name": "Restorative Strength",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Restorative_Strength (read 2026-09-13: Heal skill: might x2 for 6 s in WvW/PvP)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 2.0,
+        "target_scope": "self",
+        "base_duration_ms": 6000
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      }
+    },
+    {
+      "effect_id": "trait:1451:1",
+      "source_type": "Trait",
+      "source_id": 1451,
+      "source_name": "Restorative Strength",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Restorative_Strength (read 2026-09-13: Heal skill: resistance 4 s in WvW/PvP)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Resistance",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 4000
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      }
+    },
+    {
+      "effect_id": "trait:1482:0",
+      "source_type": "Trait",
+      "source_id": 1482,
+      "source_name": "Empower Allies",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "Periodic",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Empower_Allies (read 2026-09-13: In combat: might x5 for 10 s to self and nearby allies every 10 s; 5 targets radius 600)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 5.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 10000,
+        "internal_cooldown_ms": 10000,
+        "target_count": 5
+      },
+      "internal_cooldown": 10.0
+    },
+    {
+      "effect_id": "trait:1317:0",
+      "source_type": "Trait",
+      "source_id": 1317,
+      "source_name": "Heightened Focus",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Heightened_Focus (read 2026-09-13: Quickness 2.5 s in WvW/PvP when you strike a foe below 50% health; ICD 12 s; burst recharge and adrenaline healing are NeedsMechanic)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Quickness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 2500,
+        "internal_cooldown_ms": 12000
+      },
+      "internal_cooldown": 12.0,
+      "prerequisite": {
+        "foe_health": {
+          "above": false,
+          "percent": 50.0
+        }
+      }
+    },
+    {
+      "effect_id": "trait:1317:coverage",
+      "source_type": "Trait",
+      "source_id": 1317,
+      "source_name": "Heightened Focus",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Heightened_Focus (read 2026-09-13: Burst recharge and adrenaline-scaled outgoing healing on burst)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "recharge"
+      }
+    },
+    {
+      "effect_id": "trait:2039:0",
+      "source_type": "Trait",
+      "source_id": 2039,
+      "source_name": "Last Blaze",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Last_Blaze (read 2026-09-13: Rage skills: burning 4 s to nearby enemies (5 targets radius 300); berserk extension is NeedsMechanic berserk)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Burning",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "base_duration_ms": 4000,
+        "target_count": 5
+      },
+      "trigger_scope": {
+        "Category": "Rage"
+      }
+    },
+    {
+      "effect_id": "trait:2039:coverage",
+      "source_type": "Trait",
+      "source_id": 2039,
+      "source_name": "Last Blaze",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Last_Blaze (read 2026-09-13: Rage skills extend berserk by 1 s)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "berserk"
+      }
+    },
+    {
+      "effect_id": "trait:2042:0",
+      "source_type": "Trait",
+      "source_id": 2042,
+      "source_name": "Heat the Soul",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Heat_the_Soul (read 2026-09-13: Burst hits: quickness 2 s to nearby allies in WvW/PvP; radius 480)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Quickness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 2000
+      },
+      "trigger_scope": {
+        "Category": "Burst"
+      }
+    },
+    {
+      "effect_id": "trait:2042:1",
+      "source_type": "Trait",
+      "source_id": 2042,
+      "source_name": "Heat the Soul",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Heat_the_Soul (read 2026-09-13: Burst hits: might x3 for 8 s to nearby allies in WvW/PvP)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 3.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 8000
+      },
+      "trigger_scope": {
+        "Category": "Burst"
+      }
+    },
+    {
+      "effect_id": "trait:2042:2",
+      "source_type": "Trait",
+      "source_id": 2042,
+      "source_name": "Heat the Soul",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Heat_the_Soul (read 2026-09-13: Burst hits: fury 5 s to nearby allies)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 5000
+      },
+      "trigger_scope": {
+        "Category": "Burst"
+      }
+    },
+    {
+      "effect_id": "trait:2163:0",
+      "source_type": "Trait",
+      "source_id": 2163,
+      "source_name": "Enchantment Collapse",
+      "category": "RemovesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonStripped",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Enchantment_Collapse (read 2026-09-13: Removing a boon from a foe strips 1 additional boon from nearby foes; ICD 1 s; 5 targets radius 240)",
+      "status_operation": {
+        "operation_type": "RemovesBoon",
+        "target_side": "Enemy",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "internal_cooldown_ms": 1000,
+        "target_count": 5
+      },
+      "internal_cooldown": 1.0
+    },
+    {
+      "effect_id": "trait:1344:coverage",
+      "source_type": "Trait",
+      "source_id": 1344,
+      "source_name": "Signet Mastery",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Signet_Mastery (read 2026-09-13: Signet of Ferocity stacks on signet use; Lesser Signet of Might below 50% health)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:1336:coverage",
+      "source_type": "Trait",
+      "source_id": 1336,
+      "source_name": "Burst Precision",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Burst_Precision (read 2026-09-13: Burst skills +100% crit chance; Burst Precision buff duration by adrenaline spent)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "burst"
+      }
+    },
+    {
+      "effect_id": "trait:1346:coverage",
+      "source_type": "Trait",
+      "source_id": 1346,
+      "source_name": "Furious",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Furious (read 2026-09-13: Critical hits grant adrenaline and Furious Surge stacking condition damage)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "adrenaline"
+      }
+    },
+    {
+      "effect_id": "trait:1376:coverage",
+      "source_type": "Trait",
+      "source_id": 1376,
+      "source_name": "Shield Master",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shield_Master (read 2026-09-13: Reflect missiles while blocking; adrenaline on block/reflect)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "block"
+      }
+    },
+    {
+      "effect_id": "trait:1488:coverage",
+      "source_type": "Trait",
+      "source_id": 1488,
+      "source_name": "Dogged March",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dogged_March (read 2026-09-13: Shorter movement-impairing conditions; regeneration when affected; ICD 10 s)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming condition"
+      }
+    },
+    {
+      "effect_id": "trait:1348:coverage",
+      "source_type": "Trait",
+      "source_id": 1348,
+      "source_name": "Adrenal Health",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Adrenal_Health (read 2026-09-13: Heal based on adrenaline spent; Adrenal Health stacks)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "adrenaline"
+      }
+    },
+    {
+      "effect_id": "trait:1368:coverage",
+      "source_type": "Trait",
+      "source_id": 1368,
+      "source_name": "Defy Pain",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Defy_Pain (read 2026-09-13: Cast Lesser Endure Pain when you use an elite skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:1379:coverage",
+      "source_type": "Trait",
+      "source_id": 1379,
+      "source_name": "Resilient Roll",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Resilient_Roll (read 2026-09-13: Gain resistance when you dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1415:coverage",
+      "source_type": "Trait",
+      "source_id": 1415,
+      "source_name": "Versatile Rage",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Versatile_Rage (read 2026-09-13: Gain adrenaline on weapon swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon swap"
+      }
+    },
+    {
+      "effect_id": "trait:1329:coverage",
+      "source_type": "Trait",
+      "source_id": 1329,
+      "source_name": "Crack Shot",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Crack_Shot (read 2026-09-13: Longbow/rifle/harpoon gun skill 1 enhanced; recharge reduced)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "skill replace"
+      }
+    },
+    {
+      "effect_id": "trait:1416:coverage",
+      "source_type": "Trait",
+      "source_id": 1416,
+      "source_name": "Fast Hands",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Fast_Hands (read 2026-09-13: Gain swiftness when swapping weapons in combat)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon swap"
+      }
+    },
+    {
+      "effect_id": "trait:1709:coverage",
+      "source_type": "Trait",
+      "source_id": 1709,
+      "source_name": "Brawler's Recovery",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Brawler%27s_Recovery (read 2026-09-13: Remove conditions when you swap weapons)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon swap"
+      }
+    },
+    {
+      "effect_id": "trait:1417:coverage",
+      "source_type": "Trait",
+      "source_id": 1417,
+      "source_name": "Versatile Power",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Versatile_Power (read 2026-09-13: Might on weapon swap; burst recharge reduction is also recharge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon swap"
+      }
+    },
+    {
+      "effect_id": "trait:1446:coverage",
+      "source_type": "Trait",
+      "source_id": 1446,
+      "source_name": "Reckless Dodge",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Reckless_Dodge (read 2026-09-13: Damage foes at the end of a dodge roll)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1447:coverage",
+      "source_type": "Trait",
+      "source_id": 1447,
+      "source_name": "Brave Stride",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Brave_Stride (read 2026-09-13: Movement skills grant stability, fury and adrenaline)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "movement skill"
+      }
+    },
+    {
+      "effect_id": "trait:1448:coverage",
+      "source_type": "Trait",
+      "source_id": 1448,
+      "source_name": "Building Momentum",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Building_Momentum (read 2026-09-13: Burst skills restore endurance on hit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "endurance"
+      }
+    },
+    {
+      "effect_id": "trait:2000:coverage",
+      "source_type": "Trait",
+      "source_id": 2000,
+      "source_name": "Body Blow",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Body_Blow (read 2026-09-13: Disables inflict vulnerability and weakness)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:1437:coverage",
+      "source_type": "Trait",
+      "source_id": 1437,
+      "source_name": "Berserker's Power",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Berserker%27s_Power (read 2026-09-13: Strike damage buff based on adrenaline when you use a burst)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "adrenaline"
+      }
+    },
+    {
+      "effect_id": "trait:1440:coverage",
+      "source_type": "Trait",
+      "source_id": 1440,
+      "source_name": "Aggressive Onslaught",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Aggressive_Onslaught (read 2026-09-13: Quickness and might when you disable; movement speed while quickness)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:1667:coverage",
+      "source_type": "Trait",
+      "source_id": 1667,
+      "source_name": "Martial Cadence",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Martial_Cadence (read 2026-09-13: Soldier's Focus grants stability/quickness and cleanses; refresh on weapon swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "soldiers focus"
+      }
+    },
+    {
+      "effect_id": "trait:1831:coverage",
+      "source_type": "Trait",
+      "source_id": 1831,
+      "source_name": "Primal Rage",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Primal_Rage (read 2026-09-13: Access to berserk mode and primal bursts)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "berserk"
+      }
+    },
+    {
+      "effect_id": "trait:1977:coverage",
+      "source_type": "Trait",
+      "source_id": 1977,
+      "source_name": "Savage Instinct",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Savage_Instinct (read 2026-09-13: Berserk enter breaks stuns and reduces incoming damage)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "berserk"
+      }
+    },
+    {
+      "effect_id": "trait:1993:coverage",
+      "source_type": "Trait",
+      "source_id": 1993,
+      "source_name": "Burst of Aggression",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Burst_of_Aggression (read 2026-09-13: Quickness/superspeed/fury when entering berserk)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "berserk"
+      }
+    },
+    {
+      "effect_id": "trait:2038:coverage",
+      "source_type": "Trait",
+      "source_id": 2038,
+      "source_name": "King of Fires",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/King_of_Fires (read 2026-09-13: Fire aura on crit; berserker skills detonate it; burning duration increase)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "fire aura"
+      }
+    },
+    {
+      "effect_id": "trait:2307:coverage",
+      "source_type": "Trait",
+      "source_id": 2307,
+      "source_name": "Eternal Champion",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Eternal_Champion (read 2026-09-13: Stability and endurance on berserk enter/exit; early exit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "berserk"
+      }
+    },
+    {
+      "effect_id": "trait:2226:coverage",
+      "source_type": "Trait",
+      "source_id": 2226,
+      "source_name": "Gun X Sword",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Gun_X_Sword (read 2026-09-13: Gunsaber alternate set; flow replaces adrenaline)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dragon trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2225:coverage",
+      "source_type": "Trait",
+      "source_id": 2225,
+      "source_name": "Unseen Sword",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unseen_Sword (read 2026-09-13: Strike nearby and gain flow rate when swapping to gunsaber)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dragon trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2260:coverage",
+      "source_type": "Trait",
+      "source_id": 2260,
+      "source_name": "Sharp as the Wind",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sharp_as_the_Wind (read 2026-09-13: Condition ammunition; burn and flow on gunsaber swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ammunition"
+      }
+    },
+    {
+      "effect_id": "trait:2237:coverage",
+      "source_type": "Trait",
+      "source_id": 2237,
+      "source_name": "River's Flow",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/River%27s_Flow (read 2026-09-13: Support ammunition; boons and positive flow on gunsaber swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ammunition"
+      }
+    },
+    {
+      "effect_id": "trait:2242:coverage",
+      "source_type": "Trait",
+      "source_id": 2242,
+      "source_name": "Dragonscale Defense",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dragonscale_Defense (read 2026-09-13: Boons when entering Dragon Trigger)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dragon trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2302:coverage",
+      "source_type": "Trait",
+      "source_id": 2302,
+      "source_name": "Fierce as Fire",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Fierce_as_Fire (read 2026-09-13: Strike and condition damage per ammunition spent)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ammunition"
+      }
+    },
+    {
+      "effect_id": "trait:2303:coverage",
+      "source_type": "Trait",
+      "source_id": 2303,
+      "source_name": "Lush Forest",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lush_Forest (read 2026-09-13: First ammo round reduces recharge of warrior skills)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ammunition"
+      }
+    },
+    {
+      "effect_id": "trait:2236:coverage",
+      "source_type": "Trait",
+      "source_id": 2236,
+      "source_name": "Guns and Glory",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Guns_and_Glory (read 2026-09-13: Ferocity when you hit with an explosion)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "explosion"
+      }
+    },
+    {
+      "effect_id": "trait:2261:coverage",
+      "source_type": "Trait",
+      "source_id": 2261,
+      "source_name": "Immortal Dragon",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Immortal_Dragon (read 2026-09-13: Dragon Slash heal percent; protection when converting flow)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dragon trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2239:coverage",
+      "source_type": "Trait",
+      "source_id": 2239,
+      "source_name": "Unyielding Dragon",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unyielding_Dragon (read 2026-09-13: Dragon Slash unblockable; might when converting flow)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dragon trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2245:coverage",
+      "source_type": "Trait",
+      "source_id": 2245,
+      "source_name": "Daring Dragon",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Daring_Dragon (read 2026-09-13: Lower max charge; ally boons on Dragon Slash)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dragon trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2373:coverage",
+      "source_type": "Trait",
+      "source_id": 2373,
+      "source_name": "Rally the Valiant",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Rally_the_Valiant (read 2026-09-13: Access to chants/commands; motivation from chants and bursts during refrain)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "chants"
+      }
+    },
+    {
+      "effect_id": "trait:2345:coverage",
+      "source_type": "Trait",
+      "source_id": 2345,
+      "source_name": "Call to Action",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Call_to_Action (read 2026-09-13: Motivation on combat enter; auto-activate Chant of Action refrain)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "chants"
+      }
+    },
+    {
+      "effect_id": "trait:2433:coverage",
+      "source_type": "Trait",
+      "source_id": 2433,
+      "source_name": "Calming Tongue",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Calming_Tongue (read 2026-09-13: Chant of Recuperation removes conditions on activate)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "chants"
+      }
+    },
+    {
+      "effect_id": "trait:2357:coverage",
+      "source_type": "Trait",
+      "source_id": 2357,
+      "source_name": "Liberating Liaise",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Liberating_Liaise (read 2026-09-13: Chant of Freedom grants superspeed on activate)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "chants"
+      }
+    },
+    {
+      "effect_id": "trait:2385:coverage",
+      "source_type": "Trait",
+      "source_id": 2385,
+      "source_name": "Strengthening Stanzas",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Strengthening_Stanzas (read 2026-09-13: Refrains grant bonus effects while active)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "refrain"
+      }
+    },
+    {
+      "effect_id": "trait:2399:coverage",
+      "source_type": "Trait",
+      "source_id": 2399,
+      "source_name": "Reverberation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Reverberation (read 2026-09-13: Command echoes can trigger a second time)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "commands"
+      }
+    },
+    {
+      "effect_id": "trait:2340:coverage",
+      "source_type": "Trait",
+      "source_id": 2340,
+      "source_name": "Unyielding Resolve",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unyielding_Resolve (read 2026-09-13: Incoming damage reduced per motivation point)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "motivation"
+      }
+    },
+    {
+      "effect_id": "trait:2369:coverage",
+      "source_type": "Trait",
+      "source_id": 2369,
+      "source_name": "Feverish Pulse",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Feverish_Pulse (read 2026-09-13: Chant use reduces other chant recharge and grants ally boons)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "chants"
+      }
+    },
+    {
+      "effect_id": "trait:2375:coverage",
+      "source_type": "Trait",
+      "source_id": 2375,
+      "source_name": "Brisk Pacing",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Brisk_Pacing (read 2026-09-13: Increased damage based on motivation level)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "motivation"
+      }
+    },
+    {
+      "effect_id": "trait:2428:coverage",
+      "source_type": "Trait",
+      "source_id": 2428,
+      "source_name": "Enduring Refrain",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Enduring_Refrain (read 2026-09-13: Stronger refrain effects; extra motivation on chant activate)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "refrain"
+      }
+    },
+    {
+      "effect_id": "trait:2175:coverage",
+      "source_type": "Trait",
+      "source_id": 2175,
+      "source_name": "Spellbreaker's Conviction",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Spellbreaker%27s_Conviction (read 2026-09-13: Adrenaline capped at 2 bars; Full Counter and Meditation access)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "full counter"
+      }
+    },
+    {
+      "effect_id": "trait:2153:coverage",
+      "source_type": "Trait",
+      "source_id": 2153,
+      "source_name": "Guard Counter",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Guard_Counter (read 2026-09-13: Protection after a successful Full Counter)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "full counter"
+      }
+    },
+    {
+      "effect_id": "trait:2140:coverage",
+      "source_type": "Trait",
+      "source_id": 2140,
+      "source_name": "No Escape",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/No_Escape (read 2026-09-13: Dazes and stuns inflict immobilize)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2162:coverage",
+      "source_type": "Trait",
+      "source_id": 2162,
+      "source_name": "Dispelling Force",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dispelling_Force (read 2026-09-13: Disables remove boons)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2126:coverage",
+      "source_type": "Trait",
+      "source_id": 2126,
+      "source_name": "Loss Aversion",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Loss_Aversion (read 2026-09-13: Removing boons deals coefficient damage and grants adrenaline)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "adrenaline"
+      }
+    },
+    {
+      "effect_id": "trait:2097:coverage",
+      "source_type": "Trait",
+      "source_id": 2097,
+      "source_name": "Resilient Counter",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Resilient_Counter (read 2026-09-13: Full Counter grants resistance)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "full counter"
+      }
+    },
+    {
+      "effect_id": "trait:2130:coverage",
+      "source_type": "Trait",
+      "source_id": 2130,
+      "source_name": "Attacker's Insight",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Attacker%27s_Insight (read 2026-09-13: Insight on disable/boon remove; Full Counter refreshes bursts)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2060:coverage",
+      "source_type": "Trait",
+      "source_id": 2060,
+      "source_name": "Magebane Tether",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Magebane_Tether (read 2026-09-13: Burst hit casts Magebane Tether on target in range)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
     }
   ]
 }
