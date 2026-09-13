@@ -20,7 +20,9 @@ use super::simulator::{
     alacrity_cd_advance_ms, condition_tick_damage, crit_chance_fraction, reference_armor, SimParams,
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
-use super::trigger_bus::{BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST};
+use super::trigger_bus::{
+    land_foe_disable, BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST,
+};
 use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect, SkillSlot};
 
 const TIMELINE_TICK_MS: u32 = 50;
@@ -244,6 +246,8 @@ pub struct WvwCombatReport {
     pub dodge_count: u32,
     /// Bus OnDodge emissions this fight.
     pub bus_on_dodge: u32,
+    /// Bus OnDisableFoe emissions this fight (landed foe disables).
+    pub bus_on_disable_foe: u32,
 }
 
 /// Upper bound on [`WvwCombatReport::trace`]. The 513th event is dropped and
@@ -2365,13 +2369,14 @@ impl<'a> Timeline<'a> {
                 kind, duration_ms, ..
             } => {
                 if !self.target.stability {
-                    let previous_end = self.target.disabled_until_ms.max(self.now_ms);
-                    let new_end = self.target.disabled_until_ms.max(self.at(*duration_ms));
-                    let landed = new_end > previous_end;
-                    self.target.disabled_until_ms = new_end;
-                    self.control_landed_ms += new_end.saturating_sub(previous_end);
-                    if landed {
-                        self.trigger_bus.emit(BusEvent::OnDisableFoe, self.now_ms);
+                    let added = land_foe_disable(
+                        &mut self.target,
+                        &mut self.trigger_bus,
+                        self.now_ms,
+                        *duration_ms,
+                    );
+                    self.control_landed_ms += added;
+                    if added > 0 {
                         self.trigger_procs(TriggerRule::OnDisableFoe, Some(skill_id), false, 1.0);
                     }
                 }
@@ -2550,13 +2555,14 @@ impl<'a> Timeline<'a> {
             ComboOutcomeEffect::CrowdControl { duration_ms } => {
                 let duration = ((duration_ms as f64) * scale).round() as u32;
                 if duration > 0 && !self.target.stability {
-                    let previous_end = self.target.disabled_until_ms.max(self.now_ms);
-                    let new_end = self.target.disabled_until_ms.max(self.at(duration));
-                    let landed = new_end > previous_end;
-                    self.control_landed_ms += new_end.saturating_sub(previous_end);
-                    self.target.disabled_until_ms = new_end;
-                    if landed {
-                        self.trigger_bus.emit(BusEvent::OnDisableFoe, self.now_ms);
+                    let added = land_foe_disable(
+                        &mut self.target,
+                        &mut self.trigger_bus,
+                        self.now_ms,
+                        duration,
+                    );
+                    self.control_landed_ms += added;
+                    if added > 0 {
                         self.trigger_procs(TriggerRule::OnDisableFoe, Some(skill_id), false, 1.0);
                     }
                     self.trace(
@@ -3826,6 +3832,7 @@ impl<'a> Timeline<'a> {
             shroud_refusals: self.shroud_refusals.clone(),
             dodge_count: self.dodge_action.dodges,
             bus_on_dodge: self.trigger_bus.count(BusEvent::OnDodge),
+            bus_on_disable_foe: self.trigger_bus.count(BusEvent::OnDisableFoe),
         }
     }
 
@@ -4332,6 +4339,124 @@ mod tests {
             executing >= 3,
             ">=3 dodge-family traits must execute; got {executing}; {:?}",
             report.trait_fire_counts
+        );
+    }
+
+    /// E1 Kent: disable inactive vs active changes Dazzling Vulnerability via OnDisableFoe.
+    #[test]
+    fn kent_e1_causal_disable_inactive_vs_active_changes_dazzling() {
+        use crate::data::normalized_effects::{effects, SourceType, TriggerRule};
+
+        let effects_wvw = effects().effects_for_mode("WvW");
+        let disable_records: Vec<&_> = effects_wvw
+            .iter()
+            .filter(|e| {
+                e.source_type == SourceType::Trait
+                    && e.trigger_rule == TriggerRule::OnDisableFoe
+                    && e.coverage.is_none()
+                    && matches!(e.source_id, 694 | 1838 | 1983)
+            })
+            .collect();
+        assert!(
+            disable_records.len() >= 3,
+            "E1 must ship >=3 executable OnDisableFoe trait records; got {}",
+            disable_records.len()
+        );
+
+        let skills = [skill(
+            1,
+            SkillSlot::Utility,
+            250,
+            4_000,
+            vec![SkillEffect::CrowdControl {
+                kind: ControlKind::Stun,
+                duration_ms: 2_000,
+                stops_dodge: true,
+            }],
+        )];
+        let params = params();
+        let active: Vec<&_> = disable_records;
+
+        let mut live = Timeline::new(
+            &skills,
+            &params,
+            profile(3_000, vec![]),
+            open_enemy(false),
+            &active,
+            &[],
+            true,
+            Vec::new(),
+        );
+        live.run();
+        let live_report = live.report();
+        let live_vuln = live.target.stacks_of("Vulnerability", 1_000);
+        assert!(
+            live.trigger_bus.count(BusEvent::OnDisableFoe) >= 1,
+            "landed disable must emit OnDisableFoe"
+        );
+        assert_eq!(
+            live_report.bus_on_disable_foe,
+            live.trigger_bus.count(BusEvent::OnDisableFoe)
+        );
+        let fired = live_report
+            .trait_fire_counts
+            .get("Dazzling")
+            .copied()
+            .unwrap_or(0);
+        assert!(
+            fired >= 1,
+            "Dazzling must execute via OnDisableFoe; fires={fired}; counts={:?}",
+            live_report.trait_fire_counts
+        );
+        assert!(
+            live_vuln >= 5,
+            "Dazzling must apply 5 Vulnerability; got {live_vuln}"
+        );
+
+        let mut blocked = Timeline::new(
+            &skills,
+            &params,
+            profile(3_000, vec![]),
+            open_enemy(true),
+            &active,
+            &[],
+            true,
+            Vec::new(),
+        );
+        blocked.run();
+        let blocked_report = blocked.report();
+        let blocked_vuln = blocked.target.stacks_of("Vulnerability", 1_000);
+        assert_eq!(
+            blocked.trigger_bus.count(BusEvent::OnDisableFoe),
+            0,
+            "Stability must block OnDisableFoe emit"
+        );
+        assert_eq!(blocked_report.bus_on_disable_foe, 0);
+        assert_eq!(
+            blocked_report
+                .trait_fire_counts
+                .get("Dazzling")
+                .copied()
+                .unwrap_or(0),
+            0
+        );
+        assert_eq!(
+            blocked_vuln, 0,
+            "inactive disable must not apply Dazzling Vulnerability"
+        );
+        assert!(
+            live_vuln > blocked_vuln,
+            "disable active vs inactive must change measured Vulnerability ({live_vuln} vs {blocked_vuln})"
+        );
+
+        let executing = ["Dazzling", "Delayed Reactions", "Dulled Senses"]
+            .iter()
+            .filter(|n| live_report.trait_fire_counts.get(**n).copied().unwrap_or(0) >= 1)
+            .count();
+        assert!(
+            executing >= 3,
+            ">=3 disable-trigger traits must execute; got {executing}; {:?}",
+            live_report.trait_fire_counts
         );
     }
 

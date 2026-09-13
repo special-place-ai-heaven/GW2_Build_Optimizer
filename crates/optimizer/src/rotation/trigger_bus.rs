@@ -1,7 +1,9 @@
 //! NeedsMechanic Engine E0: shared TriggerBus + Endurance/Dodge family.
+//! E1 extends the same bus: landed foe-disable emits OnDisableFoe.
 //!
 //! Bus events are OnDodge, OnDisableFoe, OnElite, OnThreshold only.
 //! EndurancePool and DodgeAction are one family (not a second dodge path).
+//! Disable authority is TargetState.disabled_until_ms; no second disable engine.
 //! Trait-skill registry rides the bus as consumers — no one-off casts.
 
 use std::collections::VecDeque;
@@ -145,6 +147,34 @@ impl DodgeAction {
     }
 }
 
+/// Land a foe disable on the shared TargetState ledger and emit OnDisableFoe
+/// iff the disable actually extends (new_end > previous_end).
+///
+/// Stability blocks the land (no mutate, no emit). Overlap that does not
+/// extend updates nothing and does not emit. One bus (E0); not a second
+/// disable engine. Callers add control-ms accounting and trigger_procs.
+pub fn land_foe_disable(
+    target: &mut crate::rotation::combat_model::TargetState,
+    bus: &mut TriggerBus,
+    now_ms: u32,
+    duration_ms: u32,
+) -> u32 {
+    if target.stability || duration_ms == 0 {
+        return 0;
+    }
+    let previous_end = target.disabled_until_ms.max(now_ms);
+    let new_end = target
+        .disabled_until_ms
+        .max(now_ms.saturating_add(duration_ms));
+    target.disabled_until_ms = new_end;
+    if new_end > previous_end {
+        bus.emit(BusEvent::OnDisableFoe, now_ms);
+        new_end - previous_end
+    } else {
+        0
+    }
+}
+
 /// Map a bus event to the matching TriggerRule spelling used by records.
 pub fn bus_to_trigger_rule(event: BusEvent) -> crate::data::normalized_effects::TriggerRule {
     use crate::data::normalized_effects::TriggerRule;
@@ -208,5 +238,46 @@ mod kent_tests {
         assert_eq!(bus.count(BusEvent::OnDisableFoe), 1);
         assert_eq!(bus.count(BusEvent::OnElite), 1);
         assert_eq!(bus.count(BusEvent::OnThreshold), 1);
+    }
+
+    /// Kent causal disable micro-proof: TargetState disable land -> bus OnDisableFoe.
+    /// Stability / non-extending overlap do not emit.
+    #[test]
+    fn kent_e1_causal_disable_land_to_bus_on_disable_foe() {
+        use crate::rotation::combat_model::{EnemyDummy, TargetState};
+
+        let mut target = TargetState::from_seed(EnemyDummy::open());
+        let mut bus = TriggerBus::new();
+
+        let added = land_foe_disable(&mut target, &mut bus, 0, 2_000);
+        assert_eq!(added, 2_000);
+        assert_eq!(target.disabled_until_ms, 2_000);
+        assert_eq!(bus.count(BusEvent::OnDisableFoe), 1);
+        assert!(target.is_disabled(1_000));
+        assert!(!target.is_disabled(2_000));
+
+        // Overlap that does not extend: no emit.
+        let added = land_foe_disable(&mut target, &mut bus, 500, 1_000);
+        assert_eq!(added, 0);
+        assert_eq!(target.disabled_until_ms, 2_000);
+        assert_eq!(bus.count(BusEvent::OnDisableFoe), 1);
+
+        // Extend past current end: emit.
+        let added = land_foe_disable(&mut target, &mut bus, 500, 3_000);
+        assert_eq!(added, 1_500);
+        assert_eq!(target.disabled_until_ms, 3_500);
+        assert_eq!(bus.count(BusEvent::OnDisableFoe), 2);
+
+        // Stability blocks: no mutate, no emit.
+        let mut blocked = TargetState::from_seed(EnemyDummy {
+            protection: false,
+            stability: true,
+            hp: None,
+        });
+        let before = blocked.disabled_until_ms;
+        let added = land_foe_disable(&mut blocked, &mut bus, 0, 2_000);
+        assert_eq!(added, 0);
+        assert_eq!(blocked.disabled_until_ms, before);
+        assert_eq!(bus.count(BusEvent::OnDisableFoe), 2);
     }
 }

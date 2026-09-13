@@ -16,7 +16,9 @@ pub mod trigger_bus;
 pub mod wvw_timeline;
 
 pub use combo::{ComboEngine, ComboOutcome, ComboOutcomeEffect, ComboSite, SELF_COMBATANT_ID};
-pub use trigger_bus::{BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST};
+pub use trigger_bus::{
+    land_foe_disable, BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST,
+};
 pub use wvw_timeline::WvwCombatReport;
 
 use std::collections::HashMap;
