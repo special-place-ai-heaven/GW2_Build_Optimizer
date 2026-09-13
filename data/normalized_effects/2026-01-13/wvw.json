@@ -9399,6 +9399,1653 @@
         "class": "NeedsMechanic",
         "mechanic": "virtues"
       }
+    },
+    {
+      "effect_id": "trait:396:0",
+      "source_type": "Trait",
+      "source_id": 396,
+      "source_name": "Invigorating Speed",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Invigorating_Speed (read 2026-09-13: Vigor 5 s when you gain swiftness; ICD 10 s in WvW/PvP; superspeed half is NeedsMechanic movement skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Vigor",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 5000,
+        "internal_cooldown_ms": 10000
+      },
+      "internal_cooldown": 10.0,
+      "trigger_scope": {
+        "Status": "Swiftness"
+      }
+    },
+    {
+      "effect_id": "trait:520:0",
+      "source_type": "Trait",
+      "source_id": 520,
+      "source_name": "Comeback Cure",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionRemoved",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Comeback_Cure (read 2026-09-13: Regeneration 1 s in WvW when a cleanse removes a condition from you; ally-cleanse regen is NeedsMechanic ally state)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Regeneration",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 1000
+      }
+    },
+    {
+      "effect_id": "trait:473:0",
+      "source_type": "Trait",
+      "source_id": 473,
+      "source_name": "HGH",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/HGH (read 2026-09-13: Elixirs: Might x3 for 8 s in WvW to nearby allies; elixir duration increase is NeedsMechanic boon extension)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 3.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 8000
+      },
+      "trigger_scope": {
+        "Category": "Elixir"
+      }
+    },
+    {
+      "effect_id": "trait:508:0",
+      "source_type": "Trait",
+      "source_id": 508,
+      "source_name": "Reconstruction Enclosure",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Reconstruction_Enclosure (read 2026-09-13: Protection 3 s to nearby allies (5 targets) when you use a heal skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Protection",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 3000,
+        "target_count": 5
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      }
+    },
+    {
+      "effect_id": "trait:518:0",
+      "source_type": "Trait",
+      "source_id": 518,
+      "source_name": "Cleansing Synergy",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cleansing_Synergy (read 2026-09-13: Heal skill: Cleansing Pulse removes 1 condition from nearby allies; pulse regeneration is on the skill page)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "Ally",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies"
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      }
+    },
+    {
+      "effect_id": "trait:1930:0",
+      "source_type": "Trait",
+      "source_id": 1930,
+      "source_name": "Sanguine Array",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sanguine_Array (read 2026-09-13: Might 4 s when you inflict bleeding; no ICD)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 4000
+      },
+      "trigger_scope": {
+        "Status": "Bleeding"
+      }
+    },
+    {
+      "effect_id": "trait:433:0",
+      "source_type": "Trait",
+      "source_id": 433,
+      "source_name": "Incendiary Powder",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Incendiary_Powder (read 2026-09-13: On crit: Burning 4 s in WvW/PvP; burning duration increase is NeedsMechanic condition duration)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Burning",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 4000
+      }
+    },
+    {
+      "effect_id": "trait:515:0",
+      "source_type": "Trait",
+      "source_id": 515,
+      "source_name": "Serrated Steel",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Serrated_Steel (read 2026-09-13: 33% chance on crit: Bleeding 1 s in WvW/PvP; bleeding duration increase is NeedsMechanic condition duration)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Bleeding",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 1000
+      },
+      "proc_chance": 0.33
+    },
+    {
+      "effect_id": "trait:1979:0",
+      "source_type": "Trait",
+      "source_id": 1979,
+      "source_name": "Optimized Activation",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Optimized_Activation (read 2026-09-13: Vigor 2 s in WvW/PvP when you use a tool belt skill; Mech Command / Morph share the tool-belt slot)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Vigor",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 2000
+      },
+      "trigger_scope": {
+        "Slot": "Toolbelt"
+      }
+    },
+    {
+      "effect_id": "trait:1872:0",
+      "source_type": "Trait",
+      "source_id": 1872,
+      "source_name": "Mechanized Deployment",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mechanized_Deployment (read 2026-09-13: Tool belt skills remove 1 condition; 15% tool-belt recharge is NeedsMechanic recharge)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self"
+      },
+      "trigger_scope": {
+        "Slot": "Toolbelt"
+      }
+    },
+    {
+      "effect_id": "trait:2366:0",
+      "source_type": "Trait",
+      "source_id": 2366,
+      "source_name": "Stainless Steel",
+      "category": "ConvertsConditionToBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stainless_Steel (read 2026-09-13: Stance skills convert 1 condition to a boon in WvW/PvP; Evolve convert half is NeedsMechanic evolve)",
+      "status_operation": {
+        "operation_type": "ConvertsConditionToBoon",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self"
+      },
+      "trigger_scope": {
+        "Category": "Stance"
+      }
+    },
+    {
+      "effect_id": "trait:469:0",
+      "source_type": "Trait",
+      "source_id": 469,
+      "source_name": "Boiling Point",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Boiling_Point (read 2026-09-13: Fury 3 s in WvW/PvP when you gain might; ICD 1 s; stack threshold 5 is API fact (any might gates the record))",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000,
+        "internal_cooldown_ms": 1000
+      },
+      "internal_cooldown": 1.0,
+      "trigger_scope": {
+        "Status": "Might"
+      }
+    },
+    {
+      "effect_id": "trait:510:0",
+      "source_type": "Trait",
+      "source_id": 510,
+      "source_name": "Heavy Metal",
+      "category": "TriggeredEffect",
+      "value": 5.0,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Heavy_Metal (read 2026-09-13: +5% critical chance against foes below 75% health)",
+      "inner_category": "CritChancePct",
+      "prerequisite": {
+        "foe_health": {
+          "above": false,
+          "percent": 75.0
+        }
+      }
+    },
+    {
+      "effect_id": "trait:510:1",
+      "source_type": "Trait",
+      "source_id": 510,
+      "source_name": "Heavy Metal",
+      "category": "TriggeredEffect",
+      "value": 5.0,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Heavy_Metal (read 2026-09-13: +5% critical damage against foes below 75% health)",
+      "inner_category": "CritDamagePct",
+      "prerequisite": {
+        "foe_health": {
+          "above": false,
+          "percent": 75.0
+        }
+      }
+    },
+    {
+      "effect_id": "trait:510:2",
+      "source_type": "Trait",
+      "source_id": 510,
+      "source_name": "Heavy Metal",
+      "category": "TriggeredEffect",
+      "value": 10.0,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Heavy_Metal (read 2026-09-13: +10% critical chance against foes below 50% health)",
+      "inner_category": "CritChancePct",
+      "prerequisite": {
+        "foe_health": {
+          "above": false,
+          "percent": 50.0
+        }
+      }
+    },
+    {
+      "effect_id": "trait:510:3",
+      "source_type": "Trait",
+      "source_id": 510,
+      "source_name": "Heavy Metal",
+      "category": "TriggeredEffect",
+      "value": 10.0,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Heavy_Metal (read 2026-09-13: +10% critical damage against foes below 50% health)",
+      "inner_category": "CritDamagePct",
+      "prerequisite": {
+        "foe_health": {
+          "above": false,
+          "percent": 50.0
+        }
+      }
+    },
+    {
+      "effect_id": "trait:510:4",
+      "source_type": "Trait",
+      "source_id": 510,
+      "source_name": "Heavy Metal",
+      "category": "TriggeredEffect",
+      "value": 15.0,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Heavy_Metal (read 2026-09-13: +15% critical chance against foes below 25% health)",
+      "inner_category": "CritChancePct",
+      "prerequisite": {
+        "foe_health": {
+          "above": false,
+          "percent": 25.0
+        }
+      }
+    },
+    {
+      "effect_id": "trait:510:5",
+      "source_type": "Trait",
+      "source_id": 510,
+      "source_name": "Heavy Metal",
+      "category": "TriggeredEffect",
+      "value": 15.0,
+      "stacking_rule": "Multiplicative",
+      "trigger_rule": "Conditional",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Heavy_Metal (read 2026-09-13: +15% critical damage against foes below 25% health)",
+      "inner_category": "CritDamagePct",
+      "prerequisite": {
+        "foe_health": {
+          "above": false,
+          "percent": 25.0
+        }
+      }
+    },
+    {
+      "effect_id": "trait:468:coverage",
+      "source_type": "Trait",
+      "source_id": 468,
+      "source_name": "Hidden Flask",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hidden_Flask (read 2026-09-13: Drink Lesser Elixir B when struck below 75% health)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:509:coverage",
+      "source_type": "Trait",
+      "source_id": 509,
+      "source_name": "Protection Injection",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Protection_Injection (read 2026-09-13: Protection 3 s when you are disabled; ICD 30 s in WvW/PvP)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:521:coverage",
+      "source_type": "Trait",
+      "source_id": 521,
+      "source_name": "Health Insurance",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Health_Insurance (read 2026-09-13: +10% incoming healing; Med Kit outgoing heal bonus is NeedsMechanic kits)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming healing"
+      }
+    },
+    {
+      "effect_id": "trait:487:coverage",
+      "source_type": "Trait",
+      "source_id": 487,
+      "source_name": "Transmute",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Transmute (read 2026-09-13: Drink Lesser Elixir C when you use a healing skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:470:coverage",
+      "source_type": "Trait",
+      "source_id": 470,
+      "source_name": "Blast Zone",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blast_Zone (read 2026-09-13: Blast finisher when you use a healing skill associated tool-belt skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "toolbelt"
+      }
+    },
+    {
+      "effect_id": "trait:1871:coverage",
+      "source_type": "Trait",
+      "source_id": 1871,
+      "source_name": "Equal and Opposite Reaction",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Equal_and_Opposite_Reaction (read 2026-09-13: Quickness and stability when you disable an enemy; ICD 1 s in WvW)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:432:coverage",
+      "source_type": "Trait",
+      "source_id": 432,
+      "source_name": "Explosive Entrance",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Explosive_Entrance (read 2026-09-13: First attack on combat entry explodes; refreshes after dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:514:coverage",
+      "source_type": "Trait",
+      "source_id": 514,
+      "source_name": "Grenadier",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Grenadier (read 2026-09-13: Grenade blast radius; Lesser Grenade Barrage on heal skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "kits"
+      }
+    },
+    {
+      "effect_id": "trait:525:coverage",
+      "source_type": "Trait",
+      "source_id": 525,
+      "source_name": "Short Fuse",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Short_Fuse (read 2026-09-13: Fury when you hit with an explosion; ICD 3 s)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "explosion"
+      }
+    },
+    {
+      "effect_id": "trait:517:coverage",
+      "source_type": "Trait",
+      "source_id": 517,
+      "source_name": "Steel-Packed Powder",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Steel-Packed_Powder (read 2026-09-13: Explosions cause vulnerability)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "explosion"
+      }
+    },
+    {
+      "effect_id": "trait:482:coverage",
+      "source_type": "Trait",
+      "source_id": 482,
+      "source_name": "Aim-Assisted Rocket",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Aim-Assisted_Rocket (read 2026-09-13: Missile hits launch a rocket; orbital after enough rockets)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:1892:coverage",
+      "source_type": "Trait",
+      "source_id": 1892,
+      "source_name": "Explosive Temper",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Explosive_Temper (read 2026-09-13: Explosions grant stacking ferocity on hit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "explosion"
+      }
+    },
+    {
+      "effect_id": "trait:1541:coverage",
+      "source_type": "Trait",
+      "source_id": 1541,
+      "source_name": "Grand Entrance",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Grand_Entrance (read 2026-09-13: Explosive Entrance grants resistance and crit chance)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "explosion"
+      }
+    },
+    {
+      "effect_id": "trait:505:coverage",
+      "source_type": "Trait",
+      "source_id": 505,
+      "source_name": "Shrapnel",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shrapnel (read 2026-09-13: Explosions have a chance to cripple and bleed)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "explosion"
+      }
+    },
+    {
+      "effect_id": "trait:1984:coverage",
+      "source_type": "Trait",
+      "source_id": 1984,
+      "source_name": "Juggernaut",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Juggernaut (read 2026-09-13: Might while wielding flamethrower; Napalm stability/fire aura; might duration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "kits"
+      }
+    },
+    {
+      "effect_id": "trait:394:coverage",
+      "source_type": "Trait",
+      "source_id": 394,
+      "source_name": "Over Shield",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Over_Shield (read 2026-09-13: Shield skills grant ally protection; protection effectiveness on you)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon-scoped"
+      }
+    },
+    {
+      "effect_id": "trait:1901:coverage",
+      "source_type": "Trait",
+      "source_id": 1901,
+      "source_name": "Automated Medical Response",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Automated_Medical_Response (read 2026-09-13: Regeneration to allies when you use heal-associated tool-belt skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "toolbelt"
+      }
+    },
+    {
+      "effect_id": "trait:507:coverage",
+      "source_type": "Trait",
+      "source_id": 507,
+      "source_name": "Sapping Device",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sapping_Device (read 2026-09-13: Weaken enemies when you disable or immobilize them)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:1678:coverage",
+      "source_type": "Trait",
+      "source_id": 1678,
+      "source_name": "Experimental Turrets",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Experimental_Turrets (read 2026-09-13: Turrets create reflective barrier and pulse boons)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "turrets"
+      }
+    },
+    {
+      "effect_id": "trait:445:coverage",
+      "source_type": "Trait",
+      "source_id": 445,
+      "source_name": "Mecha Legs",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mecha_Legs (read 2026-09-13: Resistance when you dodge; 2 s in WvW/PvP)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:472:coverage",
+      "source_type": "Trait",
+      "source_id": 472,
+      "source_name": "Anticorrosion Plating",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Anticorrosion_Plating (read 2026-09-13: When you grant protection to an ally, cleanse a condition from them)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "boon grant"
+      }
+    },
+    {
+      "effect_id": "trait:1680:coverage",
+      "source_type": "Trait",
+      "source_id": 1680,
+      "source_name": "Bunker Down",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bunker_Down (read 2026-09-13: Proximity mine and med kit when you disable an enemy)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:1916:coverage",
+      "source_type": "Trait",
+      "source_id": 1916,
+      "source_name": "Medical Dispersion Field",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Medical_Dispersion_Field (read 2026-09-13: Store self-healing in combat and periodically heal nearby allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "percent heal"
+      }
+    },
+    {
+      "effect_id": "trait:532:coverage",
+      "source_type": "Trait",
+      "source_id": 532,
+      "source_name": "Static Discharge",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Static_Discharge (read 2026-09-13: Bolt of lightning whenever you use a tool belt skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:1997:coverage",
+      "source_type": "Trait",
+      "source_id": 1997,
+      "source_name": "Reactive Lenses",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Reactive_Lenses (read 2026-09-13: Activate Lesser Utility Goggles when using a healing skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:531:coverage",
+      "source_type": "Trait",
+      "source_id": 531,
+      "source_name": "Power Wrench",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Power_Wrench (read 2026-09-13: Reduce elite recharge when you dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:512:coverage",
+      "source_type": "Trait",
+      "source_id": 512,
+      "source_name": "Streamlined Kits",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Streamlined_Kits (read 2026-09-13: Equipping an engineering kit creates an attack/spell and grants swiftness)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "kits"
+      }
+    },
+    {
+      "effect_id": "trait:1946:coverage",
+      "source_type": "Trait",
+      "source_id": 1946,
+      "source_name": "Lock On",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lock_On (read 2026-09-13: Stealth strike / disable triggers analysis trait skills)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:1856:coverage",
+      "source_type": "Trait",
+      "source_id": 1856,
+      "source_name": "Kinetic Battery",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Kinetic_Battery (read 2026-09-13: Kinetic charges on tool-belt use; at max, quickness and damage)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "toolbelt"
+      }
+    },
+    {
+      "effect_id": "trait:523:coverage",
+      "source_type": "Trait",
+      "source_id": 523,
+      "source_name": "Adrenal Implant",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Adrenal_Implant (read 2026-09-13: Endurance regen increase; tool-belt recharge on dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "endurance"
+      }
+    },
+    {
+      "effect_id": "trait:1679:coverage",
+      "source_type": "Trait",
+      "source_id": 1679,
+      "source_name": "Gadgeteer",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Gadgeteer (read 2026-09-13: Gadget skills are more powerful)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "gadgets"
+      }
+    },
+    {
+      "effect_id": "trait:2377:coverage",
+      "source_type": "Trait",
+      "source_id": 2377,
+      "source_name": "Experimental Union",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Experimental_Union (read 2026-09-13: Elite unlock: morph skills replace tool belt; evolve merge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "morph"
+      }
+    },
+    {
+      "effect_id": "trait:2434:coverage",
+      "source_type": "Trait",
+      "source_id": 2434,
+      "source_name": "Hardened Chrome",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hardened_Chrome (read 2026-09-13: Morph skills and evolving grant protection)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "morph"
+      }
+    },
+    {
+      "effect_id": "trait:2383:coverage",
+      "source_type": "Trait",
+      "source_id": 2383,
+      "source_name": "Carbolic Composition",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Carbolic_Composition (read 2026-09-13: Amalgam skills inflict poison on hit; poison duration increase)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "morph"
+      }
+    },
+    {
+      "effect_id": "trait:2420:coverage",
+      "source_type": "Trait",
+      "source_id": 2420,
+      "source_name": "Mercurial Tendencies",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mercurial_Tendencies (read 2026-09-13: Disabling an enemy reduces Evolve cooldown)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2349:coverage",
+      "source_type": "Trait",
+      "source_id": 2349,
+      "source_name": "Silver Lining",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Silver_Lining (read 2026-09-13: Evolve no longer inherits strain bonuses; morphs grant them)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "morph"
+      }
+    },
+    {
+      "effect_id": "trait:2356:coverage",
+      "source_type": "Trait",
+      "source_id": 2356,
+      "source_name": "Willing Host",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Willing_Host (read 2026-09-13: Using a morph skill increases your damage for a duration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "morph"
+      }
+    },
+    {
+      "effect_id": "trait:2387:coverage",
+      "source_type": "Trait",
+      "source_id": 2387,
+      "source_name": "New Genes",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/New_Genes (read 2026-09-13: Morph skills grant boons to allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "morph"
+      }
+    },
+    {
+      "effect_id": "trait:2334:coverage",
+      "source_type": "Trait",
+      "source_id": 2334,
+      "source_name": "Double Helix",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Double_Helix (read 2026-09-13: Evolve has two charges and increased attribute bonus)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "evolve"
+      }
+    },
+    {
+      "effect_id": "trait:2158:coverage",
+      "source_type": "Trait",
+      "source_id": 2158,
+      "source_name": "Photon Projector",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Photon_Projector (read 2026-09-13: Elite unlock: Photon Forge replaces tool belt 5; Exceed skills)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "photon forge"
+      }
+    },
+    {
+      "effect_id": "trait:2114:coverage",
+      "source_type": "Trait",
+      "source_id": 2114,
+      "source_name": "Light Density Amplifier",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Light_Density_Amplifier (read 2026-09-13: Photon Forge reduces incoming damage but increases passive heat)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "heat"
+      }
+    },
+    {
+      "effect_id": "trait:2157:coverage",
+      "source_type": "Trait",
+      "source_id": 2157,
+      "source_name": "Prismatic Converter",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Prismatic_Converter (read 2026-09-13: Deactivate Photon Forge converts conditions to boons by heat)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "heat"
+      }
+    },
+    {
+      "effect_id": "trait:2103:coverage",
+      "source_type": "Trait",
+      "source_id": 2103,
+      "source_name": "Crystal Configuration: Storm",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Crystal_Configuration:_Storm (read 2026-09-13: Photon Forge skill 1 fires explosive projectiles; extra heat)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "photon forge"
+      }
+    },
+    {
+      "effect_id": "trait:2091:coverage",
+      "source_type": "Trait",
+      "source_id": 2091,
+      "source_name": "Crystal Configuration: Zephyr",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Crystal_Configuration:_Zephyr (read 2026-09-13: Holo Leap cleanses move-impair, superspeed, cripple)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "photon forge"
+      }
+    },
+    {
+      "effect_id": "trait:2066:coverage",
+      "source_type": "Trait",
+      "source_id": 2066,
+      "source_name": "Thermal Release Valve",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Thermal_Release_Valve (read 2026-09-13: Dodge vents heat as an attack and grants vigor)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:2137:coverage",
+      "source_type": "Trait",
+      "source_id": 2137,
+      "source_name": "Enhanced Capacity Storage Unit",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Enhanced_Capacity_Storage_Unit (read 2026-09-13: Higher heat capacity; might while above 100% heat)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "heat"
+      }
+    },
+    {
+      "effect_id": "trait:2064:coverage",
+      "source_type": "Trait",
+      "source_id": 2064,
+      "source_name": "Photonic Blasting Module",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Photonic_Blasting_Module (read 2026-09-13: Overheat blasts nearby foes; reduced tool-belt penalty)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "heat"
+      }
+    },
+    {
+      "effect_id": "trait:2291:coverage",
+      "source_type": "Trait",
+      "source_id": 2291,
+      "source_name": "Mechanical Genius",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mechanical_Genius (read 2026-09-13: Elite unlock: Jade Mech fights at your side)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mech"
+      }
+    },
+    {
+      "effect_id": "trait:2282:coverage",
+      "source_type": "Trait",
+      "source_id": 2282,
+      "source_name": "Mech Arms: Single-Edge Cutters",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mech_Arms:_Single-Edge_Cutters (read 2026-09-13: Unlocks Rolling Smash; mech attacks apply bleeding)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mech"
+      }
+    },
+    {
+      "effect_id": "trait:2296:coverage",
+      "source_type": "Trait",
+      "source_id": 2296,
+      "source_name": "Mech Arms: High-Impact Drivers",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mech_Arms:_High-Impact_Drivers (read 2026-09-13: Unlocks Explosive Knuckle; mech attacks generate ally might)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mech"
+      }
+    },
+    {
+      "effect_id": "trait:2266:coverage",
+      "source_type": "Trait",
+      "source_id": 2266,
+      "source_name": "Mech Fighter",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mech_Fighter (read 2026-09-13: Mech uses Rocket Punch on weapon skill 3; toughness/vitality inherit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mech"
+      }
+    },
+    {
+      "effect_id": "trait:2276:coverage",
+      "source_type": "Trait",
+      "source_id": 2276,
+      "source_name": "Mech Frame: Channeling Conduits",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mech_Frame:_Channeling_Conduits (read 2026-09-13: Unlocks Crisis Zone; barrier grants a boon)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mech"
+      }
+    },
+    {
+      "effect_id": "trait:2294:coverage",
+      "source_type": "Trait",
+      "source_id": 2294,
+      "source_name": "Mech Frame: Variable Mass Distributor",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mech_Frame:_Variable_Mass_Distributor (read 2026-09-13: Unlocks Core Reactor Shot; mech precision inherit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mech"
+      }
+    },
+    {
+      "effect_id": "trait:2267:coverage",
+      "source_type": "Trait",
+      "source_id": 2267,
+      "source_name": "Exigency Protocols",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Exigency_Protocols (read 2026-09-13: Mech below half health gains damage reduction and regeneration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mech"
+      }
+    },
+    {
+      "effect_id": "trait:2292:coverage",
+      "source_type": "Trait",
+      "source_id": 2292,
+      "source_name": "Mech Core: Jade Dynamo",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mech_Core:_Jade_Dynamo (read 2026-09-13: Unlocks Jade Mortar; Mech Command grants quickness and reduced recharge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mech"
+      }
+    },
+    {
+      "effect_id": "trait:2298:coverage",
+      "source_type": "Trait",
+      "source_id": 2298,
+      "source_name": "Mech Core: J-Drive",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mech_Core:_J-Drive (read 2026-09-13: Unlocks Sky Circus; bombardment while dismissed; signet passives)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mech"
+      }
+    },
+    {
+      "effect_id": "trait:1959:coverage",
+      "source_type": "Trait",
+      "source_id": 1959,
+      "source_name": "Function Gyro",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Function_Gyro (read 2026-09-13: Elite unlock: Function Gyro replaces tool belt 5; Gyro skills)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "gyros"
+      }
+    },
+    {
+      "effect_id": "trait:1917:coverage",
+      "source_type": "Trait",
+      "source_id": 1917,
+      "source_name": "Gyroscopic Acceleration",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Gyroscopic_Acceleration (read 2026-09-13: Gyros grant superspeed / leap enhancements)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "gyros"
+      }
+    },
+    {
+      "effect_id": "trait:1867:coverage",
+      "source_type": "Trait",
+      "source_id": 1867,
+      "source_name": "Mass Momentum",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mass_Momentum (read 2026-09-13: Might while you have stability; Function Gyro applies ally stability)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "gyros"
+      }
+    },
+    {
+      "effect_id": "trait:2014:coverage",
+      "source_type": "Trait",
+      "source_id": 2014,
+      "source_name": "Speed of Synergy",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Speed_of_Synergy (read 2026-09-13: Heal grants superspeed around you; heal tool-belt grants personal superspeed)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "movement skill"
+      }
+    },
+    {
+      "effect_id": "trait:1954:coverage",
+      "source_type": "Trait",
+      "source_id": 1954,
+      "source_name": "Rapid Regeneration",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Rapid_Regeneration (read 2026-09-13: Regenerate health while affected by swiftness or superspeed)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "percent heal"
+      }
+    },
+    {
+      "effect_id": "trait:1999:coverage",
+      "source_type": "Trait",
+      "source_id": 1999,
+      "source_name": "Expert Examination",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Expert_Examination (read 2026-09-13: Function Gyro and heal tool-belt grant protection to allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "gyros"
+      }
+    },
+    {
+      "effect_id": "trait:1877:coverage",
+      "source_type": "Trait",
+      "source_id": 1877,
+      "source_name": "Impact Savant",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Impact_Savant (read 2026-09-13: Percentage of strike damage converted into barrier)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "barrier"
+      }
     }
   ]
 }
