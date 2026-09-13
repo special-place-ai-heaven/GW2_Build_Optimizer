@@ -275,6 +275,20 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                 };
                 let cache = gw2_api::cache::DataCache::new(&cache_dir);
 
+                let fill_kind = crate::state::probe_items_fill_kind(&client, &cache);
+                crate::state::with_state(|s| {
+                    s.setup.download_progress = Some(crate::state::DownloadState {
+                        current_step: 0,
+                        total_steps: 14,
+                        step_name: String::new(),
+                        inner_done: 0,
+                        inner_total: 0,
+                        done: false,
+                        error: None,
+                        items_fill_kind: fill_kind,
+                    });
+                });
+
                 let download_result = gw2_api::download::download_game_and_names(
                     &client,
                     &cache,
@@ -285,12 +299,24 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                             return;
                         }
                         crate::state::with_state(|s| {
+                            let fill = s
+                                .setup
+                                .download_progress
+                                .as_ref()
+                                .and_then(|d| d.items_fill_kind);
+                            let mode = fill
+                                .map(crate::state::items_fill_i18n_key)
+                                .map(|k| gw2_core::i18n::t(k));
                             let detail = if let Some(ref d) = progress.detail {
                                 format!("Refreshing: {} ({})", progress.step_name, d)
                             } else {
                                 format!("Refreshing: {}", progress.step_name)
                             };
-                            s.main.game_refresh_stage = detail;
+                            s.main.game_refresh_stage = if let Some(ref mode) = mode {
+                                format!("{} | {}", mode, detail)
+                            } else {
+                                detail
+                            };
                             s.setup.download_progress = Some(crate::state::DownloadState {
                                 current_step: progress.current_step,
                                 total_steps: progress.total_steps,
@@ -299,6 +325,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                                 inner_total: progress.inner_total,
                                 done: progress.done,
                                 error: None,
+                                items_fill_kind: fill,
                             });
                         });
                     },

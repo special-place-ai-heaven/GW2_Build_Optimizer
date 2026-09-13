@@ -1768,6 +1768,12 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
             },
         );
         if let Some(ref dl) = state.setup.download_progress {
+            if let Some(kind) = dl.items_fill_kind {
+                ui.text_colored(
+                    theme::pal().muted,
+                    t(crate::state::items_fill_i18n_key(kind)),
+                );
+            }
             let overlay = format!("{}/{} — {}", dl.current_step, dl.total_steps, dl.step_name);
             theme::download_scribble(ui, dl.fraction(), &overlay);
         }
