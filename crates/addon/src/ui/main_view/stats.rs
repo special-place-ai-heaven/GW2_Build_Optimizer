@@ -279,6 +279,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                     &client,
                     &cache,
                     || token.is_cancelled(),
+                    gw2_api::download::RefreshMode::Default,
                     |progress| {
                         if token.is_cancelled() {
                             return;

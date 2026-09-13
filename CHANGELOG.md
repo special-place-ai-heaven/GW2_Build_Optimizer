@@ -2,6 +2,14 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.20 - 2026-09-13
+
+Ada FOLD3: idempotent Refresh Game Data for KEPT catalogs. SCHEMA CHANGE = N.
+
+- `RefreshMode::Default` (addon Refresh button) skips per-key body fetches and id-list probes when `CacheEntry.build` matches live `/v2/build`; `Verify` refetches KEPT only and compare-before-writes.
+- Build-mismatch items Refresh body-fetches `|new ∪ cached keep|` via persisted `items.ids` snapshot — never the discarded ~95k commons when `items.json` exists. Equal rows reuse the cached row; all-equal stamps build without rewriting the data payload; vanished keep-ids are dropped.
+- KEPT set unchanged: itemstats, specializations, traits, skills, professions, legends, pets, pvp_amulets, items (existing type+rarity filter), locale name packs.
+
 ## 1.14.19 - 2026-09-13
 
 Phase 4 ComboEngine: shared field x finisher resolution from `data/formulas/combos.json`. SCHEMA CHANGE = N.
