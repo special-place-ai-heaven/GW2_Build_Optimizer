@@ -14374,6 +14374,1474 @@
         "class": "NeedsMechanic",
         "mechanic": "interrupt"
       }
+    },
+    {
+      "effect_id": "trait:1727:0",
+      "source_type": "Trait",
+      "source_id": 1727,
+      "source_name": "Abyssal Chill",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Abyssal_Chill (read 2026-09-13: Torment 6 s in WvW/PvP when you chill a foe (PvE 3 s))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Torment",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 6000
+      },
+      "trigger_scope": {
+        "Status": "Chilled"
+      }
+    },
+    {
+      "effect_id": "trait:1781:0",
+      "source_type": "Trait",
+      "source_id": 1781,
+      "source_name": "Incensed Response",
+      "category": "AppliesBoon",
+      "value": 2.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Incensed_Response (read 2026-09-13: Might x2 for 4 s in WvW/PvP when you grant yourself fury; source-must-be-self approximated as OnBoonApplied Fury)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 2.0,
+        "target_scope": "self",
+        "base_duration_ms": 4000
+      },
+      "trigger_scope": {
+        "Status": "Fury"
+      }
+    },
+    {
+      "effect_id": "trait:2154:0",
+      "source_type": "Trait",
+      "source_id": 2154,
+      "source_name": "Endless Enmity",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Endless_Enmity (read 2026-09-13: Fury 4 s to self and nearby allies on crit; ICD 8 s; radius 360)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 4000,
+        "internal_cooldown_ms": 8000
+      },
+      "internal_cooldown": 8.0
+    },
+    {
+      "effect_id": "trait:1824:0",
+      "source_type": "Trait",
+      "source_id": 1824,
+      "source_name": "Blinding Truths",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blinding_Truths (read 2026-09-13: Blinded 5 s to nearby foes (5 targets, radius 240) when you use a healing skill; ICD 3 s in WvW/PvE)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Blinded",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "Area",
+        "base_duration_ms": 5000,
+        "internal_cooldown_ms": 3000,
+        "target_count": 5
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      },
+      "internal_cooldown": 3.0
+    },
+    {
+      "effect_id": "trait:2166:0",
+      "source_type": "Trait",
+      "source_id": 2166,
+      "source_name": "Ashen Demeanor",
+      "category": "AppliesBoon",
+      "value": 5.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Ashen_Demeanor (read 2026-09-13: Might x5 for 6 s when you use a healing skill; ICD 10 s; Kalla's Fervor half is NeedsMechanic kalla's fervor)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 5.0,
+        "target_scope": "self",
+        "base_duration_ms": 6000,
+        "internal_cooldown_ms": 10000
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      },
+      "internal_cooldown": 10.0
+    },
+    {
+      "effect_id": "trait:2166:1",
+      "source_type": "Trait",
+      "source_id": 2166,
+      "source_name": "Ashen Demeanor",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Ashen_Demeanor (read 2026-09-13: Resistance 4 s in WvW/PvP when you use a healing skill; ICD 10 s; Kalla's Fervor half is NeedsMechanic kalla's fervor)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Resistance",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 4000,
+        "internal_cooldown_ms": 10000
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      },
+      "internal_cooldown": 10.0
+    },
+    {
+      "effect_id": "trait:1786:0",
+      "source_type": "Trait",
+      "source_id": 1786,
+      "source_name": "Assassin's Presence",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "Periodic",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Assassin%27s_Presence (read 2026-09-13: In combat: Fury 3 s to self and nearby allies every 10 s; 5 targets radius 600)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 3000,
+        "internal_cooldown_ms": 10000,
+        "target_count": 5
+      },
+      "internal_cooldown": 10.0
+    },
+    {
+      "effect_id": "trait:1799:coverage",
+      "source_type": "Trait",
+      "source_id": 1799,
+      "source_name": "Invoking Torment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Invoking_Torment (read 2026-09-13: Release Invoke Torment when you switch legends)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1789:coverage",
+      "source_type": "Trait",
+      "source_id": 1789,
+      "source_name": "Demonic Defiance",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Demonic_Defiance (read 2026-09-13: Resistance and cleanse a damaging condition when you use a Legendary Demon skill; ICD 5 s)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1741:coverage",
+      "source_type": "Trait",
+      "source_id": 1741,
+      "source_name": "Replenishing Despair",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Replenishing_Despair (read 2026-09-13: Siphon health from nearby enemies when you gain a dark aura)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aura"
+      }
+    },
+    {
+      "effect_id": "trait:1726:coverage",
+      "source_type": "Trait",
+      "source_id": 1726,
+      "source_name": "Demonic Resistance",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Demonic_Resistance (read 2026-09-13: Incoming strike damage reduced while you have resistance)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming strike"
+      }
+    },
+    {
+      "effect_id": "trait:1714:coverage",
+      "source_type": "Trait",
+      "source_id": 1714,
+      "source_name": "Pact of Pain",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Pact_of_Pain (read 2026-09-13: Conditions you apply last longer; conditions on you also last longer)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "condition duration"
+      }
+    },
+    {
+      "effect_id": "trait:1744:coverage",
+      "source_type": "Trait",
+      "source_id": 1744,
+      "source_name": "Yearning Empowerment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Yearning_Empowerment (read 2026-09-13: Damaging conditions you apply last longer)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "condition duration"
+      }
+    },
+    {
+      "effect_id": "trait:1795:coverage",
+      "source_type": "Trait",
+      "source_id": 1795,
+      "source_name": "Diabolic Inferno",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Diabolic_Inferno (read 2026-09-13: Invoke Torment also applies poison and burning)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1721:coverage",
+      "source_type": "Trait",
+      "source_id": 1721,
+      "source_name": "Permeating Pestilence",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Permeating_Pestilence (read 2026-09-13: Invoke Torment transfers conditions from you onto foes)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1808:coverage",
+      "source_type": "Trait",
+      "source_id": 1808,
+      "source_name": "Expose Defenses",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Expose_Defenses (read 2026-09-13: First attack entering combat applies vulnerability; refreshes on elite)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "combat"
+      }
+    },
+    {
+      "effect_id": "trait:1776:coverage",
+      "source_type": "Trait",
+      "source_id": 1776,
+      "source_name": "Aggressive Arrival",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Aggressive_Arrival (read 2026-09-13: Gain resistance when you invoke a legend)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1765:coverage",
+      "source_type": "Trait",
+      "source_id": 1765,
+      "source_name": "Notoriety",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Notoriety (read 2026-09-13: Might when using a legendary stance skill; might grants more power and less condition damage)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "stance"
+      }
+    },
+    {
+      "effect_id": "trait:1802:coverage",
+      "source_type": "Trait",
+      "source_id": 1802,
+      "source_name": "Thrill of Combat",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Thrill_of_Combat (read 2026-09-13: Gain Battle Scars stacks while in combat)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "battle scars"
+      }
+    },
+    {
+      "effect_id": "trait:1754:coverage",
+      "source_type": "Trait",
+      "source_id": 1754,
+      "source_name": "Dance of Death",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dance_of_Death (read 2026-09-13: Applying vulnerability grants Battle Scars; healing from Battle Scars increased below health threshold)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "battle scars"
+      }
+    },
+    {
+      "effect_id": "trait:1778:coverage",
+      "source_type": "Trait",
+      "source_id": 1778,
+      "source_name": "Invoker's Rage",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Invoker%27s_Rage (read 2026-09-13: Gain fury when you invoke a legend)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1732:coverage",
+      "source_type": "Trait",
+      "source_id": 1732,
+      "source_name": "Cleansing Channel",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cleansing_Channel (read 2026-09-13: Invoking a legend removes a condition)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1774:coverage",
+      "source_type": "Trait",
+      "source_id": 1774,
+      "source_name": "Spirit Boon",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Spirit_Boon (read 2026-09-13: Invoking a legend grants boons to nearby allies based on the legend invoked)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1769:coverage",
+      "source_type": "Trait",
+      "source_id": 1769,
+      "source_name": "Contained Temper",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Contained_Temper (read 2026-09-13: Gain energy when you break stun)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "energy"
+      }
+    },
+    {
+      "effect_id": "trait:1749:coverage",
+      "source_type": "Trait",
+      "source_id": 1749,
+      "source_name": "Song of the Mists",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Song_of_the_Mists (read 2026-09-13: Invoking a legend casts a skill based on the legend invoked)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1791:coverage",
+      "source_type": "Trait",
+      "source_id": 1791,
+      "source_name": "Charged Mists",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Charged_Mists (read 2026-09-13: Invoking a legend at or below the energy threshold grants extra energy to the new legend)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "energy"
+      }
+    },
+    {
+      "effect_id": "trait:1783:coverage",
+      "source_type": "Trait",
+      "source_id": 1783,
+      "source_name": "Enduring Recovery",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Enduring_Recovery (read 2026-09-13: Gain increased endurance recovery)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "endurance"
+      }
+    },
+    {
+      "effect_id": "trait:1811:coverage",
+      "source_type": "Trait",
+      "source_id": 1811,
+      "source_name": "Planar Protection",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Planar_Protection (read 2026-09-13: Cast Dome of the Mists when you use a healing skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:1728:coverage",
+      "source_type": "Trait",
+      "source_id": 1728,
+      "source_name": "Close Quarters",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Close_Quarters (read 2026-09-13: Reduce strike damage from foes beyond the range threshold)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming strike"
+      }
+    },
+    {
+      "effect_id": "trait:1810:coverage",
+      "source_type": "Trait",
+      "source_id": 1810,
+      "source_name": "Spiritual Reckoning",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Spiritual_Reckoning (read 2026-09-13: Gain resolution when you invoke a legend; ICD 10 s)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1757:coverage",
+      "source_type": "Trait",
+      "source_id": 1757,
+      "source_name": "Unwavering Avoidance",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unwavering_Avoidance (read 2026-09-13: Gain vigor when successfully evading an attack; ICD 5 s)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1766:coverage",
+      "source_type": "Trait",
+      "source_id": 1766,
+      "source_name": "Set in Stone",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Set_in_Stone (read 2026-09-13: Gain protection when you use profession skill 2; affects True Nature as Herald)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "profession skill"
+      }
+    },
+    {
+      "effect_id": "trait:1782:coverage",
+      "source_type": "Trait",
+      "source_id": 1782,
+      "source_name": "Resolute Evasion",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Resolute_Evasion (read 2026-09-13: Gain resolution after you dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1713:coverage",
+      "source_type": "Trait",
+      "source_id": 1713,
+      "source_name": "Determined Resolution",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Determined_Resolution (read 2026-09-13: Strike damage taken reduced while you have resolution)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming strike"
+      }
+    },
+    {
+      "effect_id": "trait:1790:coverage",
+      "source_type": "Trait",
+      "source_id": 1790,
+      "source_name": "Steadfast Rejuvenation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Steadfast_Rejuvenation (read 2026-09-13: Heal every second for each point of upkeep currently in use)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "upkeep"
+      }
+    },
+    {
+      "effect_id": "trait:1823:coverage",
+      "source_type": "Trait",
+      "source_id": 1823,
+      "source_name": "Invoking Harmony",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Invoking_Harmony (read 2026-09-13: Healing to other allies increased for a short duration after invoking a legend)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1822:coverage",
+      "source_type": "Trait",
+      "source_id": 1822,
+      "source_name": "Eluding Nullification",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Eluding_Nullification (read 2026-09-13: End of dodge roll removes a condition from nearby allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1818:coverage",
+      "source_type": "Trait",
+      "source_id": 1818,
+      "source_name": "Fortified Blessing",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Fortified_Blessing (read 2026-09-13: Grant protection when you remove a condition from an ally)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ally state"
+      }
+    },
+    {
+      "effect_id": "trait:1814:coverage",
+      "source_type": "Trait",
+      "source_id": 1814,
+      "source_name": "Serene Rejuvenation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Serene_Rejuvenation (read 2026-09-13: Increase healing to other allies; Legendary Centaur skills apply boons in an area (legend half))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "percent heal"
+      }
+    },
+    {
+      "effect_id": "trait:1825:coverage",
+      "source_type": "Trait",
+      "source_id": 1825,
+      "source_name": "Unyielding Devotion",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unyielding_Devotion (read 2026-09-13: Take reduced strike damage for a duration after healing; longer if you heal an ally)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming strike"
+      }
+    },
+    {
+      "effect_id": "trait:1820:coverage",
+      "source_type": "Trait",
+      "source_id": 1820,
+      "source_name": "Invigorating Dismissal",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Invigorating_Dismissal (read 2026-09-13: Grant endurance when you remove a condition from an ally)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "endurance"
+      }
+    },
+    {
+      "effect_id": "trait:2364:coverage",
+      "source_type": "Trait",
+      "source_id": 2364,
+      "source_name": "Enigmatic Connection",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Enigmatic_Connection (read 2026-09-13: Elite unlock: Release Potential, Cosmic Wisdom, Legendary Entity Stance; affinity resource)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "cosmic wisdom"
+      }
+    },
+    {
+      "effect_id": "trait:2390:coverage",
+      "source_type": "Trait",
+      "source_id": 2390,
+      "source_name": "Conductive Armaments",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Conductive_Armaments (read 2026-09-13: Gain affinity when using a weapon skill that costs energy)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "affinity"
+      }
+    },
+    {
+      "effect_id": "trait:2355:coverage",
+      "source_type": "Trait",
+      "source_id": 2355,
+      "source_name": "Shared Wisdom",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shared_Wisdom (read 2026-09-13: Grant boons to allies when you use a Legendary Entity skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:2407:coverage",
+      "source_type": "Trait",
+      "source_id": 2407,
+      "source_name": "Lingering Determination",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lingering_Determination (read 2026-09-13: Gain affinity when you invoke a different legend)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "affinity"
+      }
+    },
+    {
+      "effect_id": "trait:2331:coverage",
+      "source_type": "Trait",
+      "source_id": 2331,
+      "source_name": "Bolstered Bonds",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bolstered_Bonds (read 2026-09-13: Attributes based on equipped legends; further bonus while Cosmic Wisdom is active)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "cosmic wisdom"
+      }
+    },
+    {
+      "effect_id": "trait:2411:coverage",
+      "source_type": "Trait",
+      "source_id": 2411,
+      "source_name": "Kinetic Insight",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Kinetic_Insight (read 2026-09-13: Release Potential recharge reduced; effectiveness as if +2 affinity)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "affinity"
+      }
+    },
+    {
+      "effect_id": "trait:2416:coverage",
+      "source_type": "Trait",
+      "source_id": 2416,
+      "source_name": "Ethereal Purification",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Ethereal_Purification (read 2026-09-13: Lose conditions when activating Cosmic Wisdom and periodically while active)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "cosmic wisdom"
+      }
+    },
+    {
+      "effect_id": "trait:2440:coverage",
+      "source_type": "Trait",
+      "source_id": 2440,
+      "source_name": "Numinous Gift",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Numinous_Gift (read 2026-09-13: Third minor traits improved; might and boons when you use Cosmic Wisdom by equipped legends)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "cosmic wisdom"
+      }
+    },
+    {
+      "effect_id": "trait:2429:coverage",
+      "source_type": "Trait",
+      "source_id": 2429,
+      "source_name": "Mistfire",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mistfire (read 2026-09-13: Apply conditions when you disable a foe; Cosmic Wisdom additional burn strike is NeedsMechanic cosmic wisdom)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2379:coverage",
+      "source_type": "Trait",
+      "source_id": 2379,
+      "source_name": "Enhanced Embodiment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Enhanced_Embodiment (read 2026-09-13: Reduced recharge of invoking legends in combat; invoking while Cosmic Wisdom active extends it)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:2352:coverage",
+      "source_type": "Trait",
+      "source_id": 2352,
+      "source_name": "Found Purpose",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Found_Purpose (read 2026-09-13: Trigger Numinous Gift when you invoke a legend in combat; ally boons by equipped legends)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "legend"
+      }
+    },
+    {
+      "effect_id": "trait:1777:coverage",
+      "source_type": "Trait",
+      "source_id": 1777,
+      "source_name": "Crystal Harbinger",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Crystal_Harbinger (read 2026-09-13: Elite unlock: Legendary Dragon skills and Facet of Nature)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "facets"
+      }
+    },
+    {
+      "effect_id": "trait:1813:coverage",
+      "source_type": "Trait",
+      "source_id": 1813,
+      "source_name": "Elder's Respite",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elder%27s_Respite (read 2026-09-13: Regen when struck below 50% health (3 s WvW); ICD 10 s; +20% regenerative healing is NeedsMechanic incoming healing)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming strike"
+      }
+    },
+    {
+      "effect_id": "trait:1806:coverage",
+      "source_type": "Trait",
+      "source_id": 1806,
+      "source_name": "Core Value",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Core_Value (read 2026-09-13: Improve the effects of the True Nature skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "facets"
+      }
+    },
+    {
+      "effect_id": "trait:1716:coverage",
+      "source_type": "Trait",
+      "source_id": 1716,
+      "source_name": "Rising Momentum",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Rising_Momentum (read 2026-09-13: Increased movement speed for each point of upkeep currently in use)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "upkeep"
+      }
+    },
+    {
+      "effect_id": "trait:1737:coverage",
+      "source_type": "Trait",
+      "source_id": 1737,
+      "source_name": "Draconic Fortitude",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Draconic_Fortitude (read 2026-09-13: Gain increased maximum health)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "max health"
+      }
+    },
+    {
+      "effect_id": "trait:1738:coverage",
+      "source_type": "Trait",
+      "source_id": 1738,
+      "source_name": "Shared Empowerment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shared_Empowerment (read 2026-09-13: When applying a boon to an ally, also apply might to nearby allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "boon grant"
+      }
+    },
+    {
+      "effect_id": "trait:1730:coverage",
+      "source_type": "Trait",
+      "source_id": 1730,
+      "source_name": "Hardening Persistence",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hardening_Persistence (read 2026-09-13: Strike damage taken reduced per upkeep in use; shield skills remove conditions)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "upkeep"
+      }
+    },
+    {
+      "effect_id": "trait:1772:coverage",
+      "source_type": "Trait",
+      "source_id": 1772,
+      "source_name": "Draconic Echo",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Draconic_Echo (read 2026-09-13: Retain facet passives after consume skills; facet passives grant additional bonuses)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "facets"
+      }
+    },
+    {
+      "effect_id": "trait:2181:coverage",
+      "source_type": "Trait",
+      "source_id": 2181,
+      "source_name": "Ambush Commander",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Ambush_Commander (read 2026-09-13: Elite unlock: Citadel Orders; Kalla's Fervor on crit/flank/defiant)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "citadel"
+      }
+    },
+    {
+      "effect_id": "trait:2120:coverage",
+      "source_type": "Trait",
+      "source_id": 2120,
+      "source_name": "Wrought-Iron Will",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wrought-Iron_Will (read 2026-09-13: Evading inspires Kalla's Fervor and grants boons to nearby allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:2133:coverage",
+      "source_type": "Trait",
+      "source_id": 2133,
+      "source_name": "Bold Reversal",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bold_Reversal (read 2026-09-13: Citadel Order skills are improved)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "citadel"
+      }
+    },
+    {
+      "effect_id": "trait:2108:coverage",
+      "source_type": "Trait",
+      "source_id": 2108,
+      "source_name": "All for One",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/All_for_One (read 2026-09-13: When Band Together triggers, gain energy and reduce recharge of the enhanced skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "band together"
+      }
+    },
+    {
+      "effect_id": "trait:2100:coverage",
+      "source_type": "Trait",
+      "source_id": 2100,
+      "source_name": "Lasting Legacy",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lasting_Legacy (read 2026-09-13: Kalla's Fervor lasts longer and is more potent; Heroic Command grants more might per stack)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "kalla's fervor"
+      }
+    },
+    {
+      "effect_id": "trait:2166:coverage",
+      "source_type": "Trait",
+      "source_id": 2166,
+      "source_name": "Ashen Demeanor",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Ashen_Demeanor (read 2026-09-13: Kalla's Fervor on heal-skill use; might/resistance are dated OnSkillUse Heal records)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "kalla's fervor"
+      }
+    },
+    {
+      "effect_id": "trait:2262:coverage",
+      "source_type": "Trait",
+      "source_id": 2262,
+      "source_name": "Tenacious Ruin",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Tenacious_Ruin (read 2026-09-13: Elite unlock: dodge replaced by leap that strikes foes on landing)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:2248:coverage",
+      "source_type": "Trait",
+      "source_id": 2248,
+      "source_name": "Amnesty of Shing Jea",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Amnesty_of_Shing_Jea (read 2026-09-13: Legendary Alliance abilities gain bonuses; Energy Meld/Alliance Tactics grant both; Kurzick regen / Luxon might)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "alliance"
+      }
+    },
+    {
+      "effect_id": "trait:2259:coverage",
+      "source_type": "Trait",
+      "source_id": 2259,
+      "source_name": "Reaver's Curse",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Reaver%27s_Curse (read 2026-09-13: Energy Meld cooldown reduced; increases effectiveness of next dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "energy meld"
+      }
+    },
+    {
+      "effect_id": "trait:2243:coverage",
+      "source_type": "Trait",
+      "source_id": 2243,
+      "source_name": "Angsiyan's Trust",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Angsiyan%27s_Trust (read 2026-09-13: Energy Meld no longer costs energy and grants energy when used in combat)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "energy"
+      }
+    },
+    {
+      "effect_id": "trait:2255:coverage",
+      "source_type": "Trait",
+      "source_id": 2255,
+      "source_name": "Song of Arboreum",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Song_of_Arboreum (read 2026-09-13: Energy Meld grants more endurance and shares endurance and vigor with nearby allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "energy meld"
+      }
+    },
+    {
+      "effect_id": "trait:2257:coverage",
+      "source_type": "Trait",
+      "source_id": 2257,
+      "source_name": "Forerunner of Death",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Forerunner_of_Death (read 2026-09-13: Dodge deals more damage in a smaller area; outgoing strike damage increased after impact)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:2232:coverage",
+      "source_type": "Trait",
+      "source_id": 2232,
+      "source_name": "Vassals of the Empire",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Vassals_of_the_Empire (read 2026-09-13: Dodging grants boons to allies and strikes foes when landing)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:2238:coverage",
+      "source_type": "Trait",
+      "source_id": 2238,
+      "source_name": "Saint of zu Heltzer",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Saint_of_zu_Heltzer (read 2026-09-13: Larger dodge area; heal allies on landing instead of damaging; outgoing healing increased after landing)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
     }
   ]
 }

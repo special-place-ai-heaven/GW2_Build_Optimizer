@@ -8,7 +8,7 @@
 | Mesmer | 108 | 22 | 6 | 1 | 0 | 79 | 0 | 0 |
 | Necromancer | 108 | 2 | 27 | 20 | 1 | 56 | 0 | 2 |
 | Ranger | 108 | 42 | 6 | 0 | 0 | 60 | 0 | 0 |
-| Revenant | 108 | 36 | 0 | 0 | 0 | 0 | 72 | 0 |
+| Revenant | 108 | 36 | 6 | 0 | 0 | 66 | 0 | 0 |
 | Thief | 108 | 42 | 11 | 0 | 0 | 55 | 0 | 0 |
 | Warrior | 108 | 38 | 15 | 1 | 0 | 54 | 0 | 0 |
 
@@ -694,114 +694,114 @@
 
 | Line | Id | Trait | State | Source |
 |---|---|---|---|---|
-| Corruption | 1799 | Invoking Torment | NoRecord |  |
+| Corruption | 1799 | Invoking Torment | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Invoking_Torment (read 2026-09-13: Release Invoke Torment when you switch legends) |
 | Corruption | 1793 | Acolyte of Torment | facts |  |
-| Corruption | 1789 | Demonic Defiance | NoRecord |  |
-| Corruption | 1741 | Replenishing Despair | NoRecord |  |
+| Corruption | 1789 | Demonic Defiance | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Demonic_Defiance (read 2026-09-13: Resistance and cleanse a damaging condition when you use a Legendary Demon skill; ICD 5 s) |
+| Corruption | 1741 | Replenishing Despair | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Replenishing_Despair (read 2026-09-13: Siphon health from nearby enemies when you gain a dark aura) |
 | Corruption | 1801 | Seething Malice | facts |  |
-| Corruption | 1727 | Abyssal Chill | NoRecord |  |
-| Corruption | 1726 | Demonic Resistance | NoRecord |  |
-| Corruption | 1714 | Pact of Pain | NoRecord |  |
-| Corruption | 1744 | Yearning Empowerment | NoRecord |  |
-| Corruption | 1795 | Diabolic Inferno | NoRecord |  |
+| Corruption | 1727 | Abyssal Chill | record | https://wiki.guildwars2.com/wiki/Abyssal_Chill (read 2026-09-13: Torment 6 s in WvW/PvP when you chill a foe (PvE 3 s)) |
+| Corruption | 1726 | Demonic Resistance | NeedsMechanic: incoming strike | https://wiki.guildwars2.com/wiki/Demonic_Resistance (read 2026-09-13: Incoming strike damage reduced while you have resistance) |
+| Corruption | 1714 | Pact of Pain | NeedsMechanic: condition duration | https://wiki.guildwars2.com/wiki/Pact_of_Pain (read 2026-09-13: Conditions you apply last longer; conditions on you also last longer) |
+| Corruption | 1744 | Yearning Empowerment | NeedsMechanic: condition duration | https://wiki.guildwars2.com/wiki/Yearning_Empowerment (read 2026-09-13: Damaging conditions you apply last longer) |
+| Corruption | 1795 | Diabolic Inferno | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Diabolic_Inferno (read 2026-09-13: Invoke Torment also applies poison and burning) |
 | Corruption | 1720 | Fiendish Tenacity | facts |  |
-| Corruption | 1721 | Permeating Pestilence | NoRecord |  |
-| Devastation | 1808 | Expose Defenses | NoRecord |  |
-| Devastation | 1776 | Aggressive Arrival | NoRecord |  |
+| Corruption | 1721 | Permeating Pestilence | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Permeating_Pestilence (read 2026-09-13: Invoke Torment transfers conditions from you onto foes) |
+| Devastation | 1808 | Expose Defenses | NeedsMechanic: combat | https://wiki.guildwars2.com/wiki/Expose_Defenses (read 2026-09-13: First attack entering combat applies vulnerability; refreshes on elite) |
+| Devastation | 1776 | Aggressive Arrival | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Aggressive_Arrival (read 2026-09-13: Gain resistance when you invoke a legend) |
 | Devastation | 1767 | Unsuspecting Strikes | facts |  |
 | Devastation | 1755 | Battle Scarred | facts |  |
 | Devastation | 1724 | Destructive Impulses | facts |  |
-| Devastation | 1786 | Assassin's Presence | NoRecord |  |
-| Devastation | 1765 | Notoriety | NoRecord |  |
-| Devastation | 1802 | Thrill of Combat | NoRecord |  |
+| Devastation | 1786 | Assassin's Presence | record | https://wiki.guildwars2.com/wiki/Assassin%27s_Presence (read 2026-09-13: In combat: Fury 3 s to self and nearby allies every 10 s; 5 targets radius 600) |
+| Devastation | 1765 | Notoriety | NeedsMechanic: stance | https://wiki.guildwars2.com/wiki/Notoriety (read 2026-09-13: Might when using a legendary stance skill; might grants more power and less condition damage) |
+| Devastation | 1802 | Thrill of Combat | NeedsMechanic: battle scars | https://wiki.guildwars2.com/wiki/Thrill_of_Combat (read 2026-09-13: Gain Battle Scars stacks while in combat) |
 | Devastation | 1792 | Targeted Destruction | facts |  |
 | Devastation | 1715 | Brutality | facts |  |
 | Devastation | 1800 | Swift Termination | facts |  |
-| Devastation | 1754 | Dance of Death | NoRecord |  |
-| Invocation | 1778 | Invoker's Rage | NoRecord |  |
-| Invocation | 1732 | Cleansing Channel | NoRecord |  |
+| Devastation | 1754 | Dance of Death | NeedsMechanic: battle scars | https://wiki.guildwars2.com/wiki/Dance_of_Death (read 2026-09-13: Applying vulnerability grants Battle Scars; healing from Battle Scars increased below health threshold) |
+| Invocation | 1778 | Invoker's Rage | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Invoker%27s_Rage (read 2026-09-13: Gain fury when you invoke a legend) |
+| Invocation | 1732 | Cleansing Channel | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Cleansing_Channel (read 2026-09-13: Invoking a legend removes a condition) |
 | Invocation | 1761 | Rising Tide | facts |  |
 | Invocation | 1784 | Glaring Resolve | facts |  |
 | Invocation | 1758 | Ferocious Aggression | facts |  |
-| Invocation | 1774 | Spirit Boon | NoRecord |  |
+| Invocation | 1774 | Spirit Boon | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Spirit_Boon (read 2026-09-13: Invoking a legend grants boons to nearby allies based on the legend invoked) |
 | Invocation | 1760 | Rapid Flow | facts |  |
-| Invocation | 1781 | Incensed Response | NoRecord |  |
-| Invocation | 1769 | Contained Temper | NoRecord |  |
-| Invocation | 1749 | Song of the Mists | NoRecord |  |
-| Invocation | 1791 | Charged Mists | NoRecord |  |
+| Invocation | 1781 | Incensed Response | record | https://wiki.guildwars2.com/wiki/Incensed_Response (read 2026-09-13: Might x2 for 4 s in WvW/PvP when you grant yourself fury; source-must-be-self approximated as OnBoonApplied Fury) |
+| Invocation | 1769 | Contained Temper | NeedsMechanic: energy | https://wiki.guildwars2.com/wiki/Contained_Temper (read 2026-09-13: Gain energy when you break stun) |
+| Invocation | 1749 | Song of the Mists | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Song_of_the_Mists (read 2026-09-13: Invoking a legend casts a skill based on the legend invoked) |
+| Invocation | 1791 | Charged Mists | NeedsMechanic: energy | https://wiki.guildwars2.com/wiki/Charged_Mists (read 2026-09-13: Invoking a legend at or below the energy threshold grants extra energy to the new legend) |
 | Invocation | 1719 | Roiling Mists | facts |  |
-| Retribution | 1783 | Enduring Recovery | NoRecord |  |
-| Retribution | 1811 | Planar Protection | NoRecord |  |
-| Retribution | 1728 | Close Quarters | NoRecord |  |
-| Retribution | 1810 | Spiritual Reckoning | NoRecord |  |
-| Retribution | 1757 | Unwavering Avoidance | NoRecord |  |
-| Retribution | 1766 | Set in Stone | NoRecord |  |
-| Retribution | 1782 | Resolute Evasion | NoRecord |  |
+| Retribution | 1783 | Enduring Recovery | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Enduring_Recovery (read 2026-09-13: Gain increased endurance recovery) |
+| Retribution | 1811 | Planar Protection | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Planar_Protection (read 2026-09-13: Cast Dome of the Mists when you use a healing skill) |
+| Retribution | 1728 | Close Quarters | NeedsMechanic: incoming strike | https://wiki.guildwars2.com/wiki/Close_Quarters (read 2026-09-13: Reduce strike damage from foes beyond the range threshold) |
+| Retribution | 1810 | Spiritual Reckoning | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Spiritual_Reckoning (read 2026-09-13: Gain resolution when you invoke a legend; ICD 10 s) |
+| Retribution | 1757 | Unwavering Avoidance | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Unwavering_Avoidance (read 2026-09-13: Gain vigor when successfully evading an attack; ICD 5 s) |
+| Retribution | 1766 | Set in Stone | NeedsMechanic: profession skill | https://wiki.guildwars2.com/wiki/Set_in_Stone (read 2026-09-13: Gain protection when you use profession skill 2; affects True Nature as Herald) |
+| Retribution | 1782 | Resolute Evasion | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Resolute_Evasion (read 2026-09-13: Gain resolution after you dodge) |
 | Retribution | 1740 | Dwarven Battle Training | facts |  |
-| Retribution | 1713 | Determined Resolution | NoRecord |  |
+| Retribution | 1713 | Determined Resolution | NeedsMechanic: incoming strike | https://wiki.guildwars2.com/wiki/Determined_Resolution (read 2026-09-13: Strike damage taken reduced while you have resolution) |
 | Retribution | 1779 | Vicious Reprisal | facts |  |
 | Retribution | 1770 | Versed in Stone | facts |  |
-| Retribution | 1790 | Steadfast Rejuvenation | NoRecord |  |
+| Retribution | 1790 | Steadfast Rejuvenation | NeedsMechanic: upkeep | https://wiki.guildwars2.com/wiki/Steadfast_Rejuvenation (read 2026-09-13: Heal every second for each point of upkeep currently in use) |
 | Salvation | 1816 | Healer's Gift | facts |  |
-| Salvation | 1823 | Invoking Harmony | NoRecord |  |
-| Salvation | 1824 | Blinding Truths | NoRecord |  |
-| Salvation | 1822 | Eluding Nullification | NoRecord |  |
+| Salvation | 1823 | Invoking Harmony | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Invoking_Harmony (read 2026-09-13: Healing to other allies increased for a short duration after invoking a legend) |
+| Salvation | 1824 | Blinding Truths | record | https://wiki.guildwars2.com/wiki/Blinding_Truths (read 2026-09-13: Blinded 5 s to nearby foes (5 targets, radius 240) when you use a healing skill; ICD 3 s in WvW/PvE) |
+| Salvation | 1822 | Eluding Nullification | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Eluding_Nullification (read 2026-09-13: End of dodge roll removes a condition from nearby allies) |
 | Salvation | 1821 | Life Attunement | facts |  |
 | Salvation | 1819 | Words of Censure | facts |  |
 | Salvation | 1817 | Resilient Spirit | facts |  |
-| Salvation | 1818 | Fortified Blessing | NoRecord |  |
-| Salvation | 1814 | Serene Rejuvenation | NoRecord |  |
+| Salvation | 1818 | Fortified Blessing | NeedsMechanic: ally state | https://wiki.guildwars2.com/wiki/Fortified_Blessing (read 2026-09-13: Grant protection when you remove a condition from an ally) |
+| Salvation | 1814 | Serene Rejuvenation | NeedsMechanic: percent heal | https://wiki.guildwars2.com/wiki/Serene_Rejuvenation (read 2026-09-13: Increase healing to other allies; Legendary Centaur skills apply boons in an area (legend half)) |
 | Salvation | 1815 | Generous Abundance | facts |  |
-| Salvation | 1825 | Unyielding Devotion | NoRecord |  |
-| Salvation | 1820 | Invigorating Dismissal | NoRecord |  |
-| Conduit | 2364 | Enigmatic Connection | NoRecord |  |
-| Conduit | 2390 | Conductive Armaments | NoRecord |  |
-| Conduit | 2355 | Shared Wisdom | NoRecord |  |
-| Conduit | 2407 | Lingering Determination | NoRecord |  |
-| Conduit | 2331 | Bolstered Bonds | NoRecord |  |
-| Conduit | 2411 | Kinetic Insight | NoRecord |  |
+| Salvation | 1825 | Unyielding Devotion | NeedsMechanic: incoming strike | https://wiki.guildwars2.com/wiki/Unyielding_Devotion (read 2026-09-13: Take reduced strike damage for a duration after healing; longer if you heal an ally) |
+| Salvation | 1820 | Invigorating Dismissal | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Invigorating_Dismissal (read 2026-09-13: Grant endurance when you remove a condition from an ally) |
+| Conduit | 2364 | Enigmatic Connection | NeedsMechanic: cosmic wisdom | https://wiki.guildwars2.com/wiki/Enigmatic_Connection (read 2026-09-13: Elite unlock: Release Potential, Cosmic Wisdom, Legendary Entity Stance; affinity resource) |
+| Conduit | 2390 | Conductive Armaments | NeedsMechanic: affinity | https://wiki.guildwars2.com/wiki/Conductive_Armaments (read 2026-09-13: Gain affinity when using a weapon skill that costs energy) |
+| Conduit | 2355 | Shared Wisdom | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Shared_Wisdom (read 2026-09-13: Grant boons to allies when you use a Legendary Entity skill) |
+| Conduit | 2407 | Lingering Determination | NeedsMechanic: affinity | https://wiki.guildwars2.com/wiki/Lingering_Determination (read 2026-09-13: Gain affinity when you invoke a different legend) |
+| Conduit | 2331 | Bolstered Bonds | NeedsMechanic: cosmic wisdom | https://wiki.guildwars2.com/wiki/Bolstered_Bonds (read 2026-09-13: Attributes based on equipped legends; further bonus while Cosmic Wisdom is active) |
+| Conduit | 2411 | Kinetic Insight | NeedsMechanic: affinity | https://wiki.guildwars2.com/wiki/Kinetic_Insight (read 2026-09-13: Release Potential recharge reduced; effectiveness as if +2 affinity) |
 | Conduit | 2358 | Expanded Consciousness | facts |  |
-| Conduit | 2416 | Ethereal Purification | NoRecord |  |
-| Conduit | 2440 | Numinous Gift | NoRecord |  |
-| Conduit | 2429 | Mistfire | NoRecord |  |
-| Conduit | 2379 | Enhanced Embodiment | NoRecord |  |
-| Conduit | 2352 | Found Purpose | NoRecord |  |
-| Herald | 1777 | Crystal Harbinger | NoRecord |  |
-| Herald | 1813 | Elder's Respite | NoRecord |  |
-| Herald | 1806 | Core Value | NoRecord |  |
-| Herald | 1716 | Rising Momentum | NoRecord |  |
-| Herald | 1737 | Draconic Fortitude | NoRecord |  |
-| Herald | 1738 | Shared Empowerment | NoRecord |  |
+| Conduit | 2416 | Ethereal Purification | NeedsMechanic: cosmic wisdom | https://wiki.guildwars2.com/wiki/Ethereal_Purification (read 2026-09-13: Lose conditions when activating Cosmic Wisdom and periodically while active) |
+| Conduit | 2440 | Numinous Gift | NeedsMechanic: cosmic wisdom | https://wiki.guildwars2.com/wiki/Numinous_Gift (read 2026-09-13: Third minor traits improved; might and boons when you use Cosmic Wisdom by equipped legends) |
+| Conduit | 2429 | Mistfire | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Mistfire (read 2026-09-13: Apply conditions when you disable a foe; Cosmic Wisdom additional burn strike is NeedsMechanic cosmic wisdom) |
+| Conduit | 2379 | Enhanced Embodiment | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Enhanced_Embodiment (read 2026-09-13: Reduced recharge of invoking legends in combat; invoking while Cosmic Wisdom active extends it) |
+| Conduit | 2352 | Found Purpose | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Found_Purpose (read 2026-09-13: Trigger Numinous Gift when you invoke a legend in combat; ally boons by equipped legends) |
+| Herald | 1777 | Crystal Harbinger | NeedsMechanic: facets | https://wiki.guildwars2.com/wiki/Crystal_Harbinger (read 2026-09-13: Elite unlock: Legendary Dragon skills and Facet of Nature) |
+| Herald | 1813 | Elder's Respite | NeedsMechanic: incoming strike | https://wiki.guildwars2.com/wiki/Elder%27s_Respite (read 2026-09-13: Regen when struck below 50% health (3 s WvW); ICD 10 s; +20% regenerative healing is NeedsMechanic incoming healing) |
+| Herald | 1806 | Core Value | NeedsMechanic: facets | https://wiki.guildwars2.com/wiki/Core_Value (read 2026-09-13: Improve the effects of the True Nature skill) |
+| Herald | 1716 | Rising Momentum | NeedsMechanic: upkeep | https://wiki.guildwars2.com/wiki/Rising_Momentum (read 2026-09-13: Increased movement speed for each point of upkeep currently in use) |
+| Herald | 1737 | Draconic Fortitude | NeedsMechanic: max health | https://wiki.guildwars2.com/wiki/Draconic_Fortitude (read 2026-09-13: Gain increased maximum health) |
+| Herald | 1738 | Shared Empowerment | NeedsMechanic: boon grant | https://wiki.guildwars2.com/wiki/Shared_Empowerment (read 2026-09-13: When applying a boon to an ally, also apply might to nearby allies) |
 | Herald | 1743 | Shining Aspects | facts |  |
-| Herald | 1730 | Hardening Persistence | NoRecord |  |
+| Herald | 1730 | Hardening Persistence | NeedsMechanic: upkeep | https://wiki.guildwars2.com/wiki/Hardening_Persistence (read 2026-09-13: Strike damage taken reduced per upkeep in use; shield skills remove conditions) |
 | Herald | 1788 | Reinforced Potency | facts |  |
 | Herald | 1746 | Elevated Compassion | facts |  |
-| Herald | 1772 | Draconic Echo | NoRecord |  |
+| Herald | 1772 | Draconic Echo | NeedsMechanic: facets | https://wiki.guildwars2.com/wiki/Draconic_Echo (read 2026-09-13: Retain facet passives after consume skills; facet passives grant additional bonuses) |
 | Herald | 1803 | Forceful Persistence | facts |  |
-| Renegade | 2181 | Ambush Commander | NoRecord |  |
-| Renegade | 2166 | Ashen Demeanor | NoRecord |  |
+| Renegade | 2181 | Ambush Commander | NeedsMechanic: citadel | https://wiki.guildwars2.com/wiki/Ambush_Commander (read 2026-09-13: Elite unlock: Citadel Orders; Kalla's Fervor on crit/flank/defiant) |
+| Renegade | 2166 | Ashen Demeanor | record | https://wiki.guildwars2.com/wiki/Ashen_Demeanor (read 2026-09-13: Might x5 for 6 s when you use a healing skill; ICD 10 s; Kalla's Fervor half is NeedsMechanic kalla's fervor) |
 | Renegade | 2079 | Blood Fury | facts |  |
-| Renegade | 2120 | Wrought-Iron Will | NoRecord |  |
-| Renegade | 2154 | Endless Enmity | NoRecord |  |
-| Renegade | 2133 | Bold Reversal | NoRecord |  |
+| Renegade | 2120 | Wrought-Iron Will | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Wrought-Iron_Will (read 2026-09-13: Evading inspires Kalla's Fervor and grants boons to nearby allies) |
+| Renegade | 2154 | Endless Enmity | record | https://wiki.guildwars2.com/wiki/Endless_Enmity (read 2026-09-13: Fury 4 s to self and nearby allies on crit; ICD 8 s; radius 360) |
+| Renegade | 2133 | Bold Reversal | NeedsMechanic: citadel | https://wiki.guildwars2.com/wiki/Bold_Reversal (read 2026-09-13: Citadel Order skills are improved) |
 | Renegade | 2092 | Heartpiercer | facts |  |
-| Renegade | 2108 | All for One | NoRecord |  |
+| Renegade | 2108 | All for One | NeedsMechanic: band together | https://wiki.guildwars2.com/wiki/All_for_One (read 2026-09-13: When Band Together triggers, gain energy and reduce recharge of the enhanced skill) |
 | Renegade | 2142 | Brutal Momentum | facts |  |
 | Renegade | 2094 | Vindication | facts |  |
-| Renegade | 2100 | Lasting Legacy | NoRecord |  |
+| Renegade | 2100 | Lasting Legacy | NeedsMechanic: kalla's fervor | https://wiki.guildwars2.com/wiki/Lasting_Legacy (read 2026-09-13: Kalla's Fervor lasts longer and is more potent; Heroic Command grants more might per stack) |
 | Renegade | 2182 | Righteous Rebel | facts |  |
-| Vindicator | 2262 | Tenacious Ruin | NoRecord |  |
+| Vindicator | 2262 | Tenacious Ruin | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Tenacious_Ruin (read 2026-09-13: Elite unlock: dodge replaced by leap that strikes foes on landing) |
 | Vindicator | 2258 | Leviathan Strength | facts |  |
-| Vindicator | 2248 | Amnesty of Shing Jea | NoRecord |  |
+| Vindicator | 2248 | Amnesty of Shing Jea | NeedsMechanic: alliance | https://wiki.guildwars2.com/wiki/Amnesty_of_Shing_Jea (read 2026-09-13: Legendary Alliance abilities gain bonuses; Energy Meld/Alliance Tactics grant both; Kurzick regen / Luxon might) |
 | Vindicator | 2228 | Redemptor's Sermon | facts |  |
 | Vindicator | 2254 | Balance in Discord | facts |  |
-| Vindicator | 2259 | Reaver's Curse | NoRecord |  |
-| Vindicator | 2243 | Angsiyan's Trust | NoRecord |  |
-| Vindicator | 2255 | Song of Arboreum | NoRecord |  |
+| Vindicator | 2259 | Reaver's Curse | NeedsMechanic: energy meld | https://wiki.guildwars2.com/wiki/Reaver%27s_Curse (read 2026-09-13: Energy Meld cooldown reduced; increases effectiveness of next dodge) |
+| Vindicator | 2243 | Angsiyan's Trust | NeedsMechanic: energy | https://wiki.guildwars2.com/wiki/Angsiyan%27s_Trust (read 2026-09-13: Energy Meld no longer costs energy and grants energy when used in combat) |
+| Vindicator | 2255 | Song of Arboreum | NeedsMechanic: energy meld | https://wiki.guildwars2.com/wiki/Song_of_Arboreum (read 2026-09-13: Energy Meld grants more endurance and shares endurance and vigor with nearby allies) |
 | Vindicator | 2229 | Empire Divided | facts |  |
-| Vindicator | 2257 | Forerunner of Death | NoRecord |  |
-| Vindicator | 2232 | Vassals of the Empire | NoRecord |  |
-| Vindicator | 2238 | Saint of zu Heltzer | NoRecord |  |
+| Vindicator | 2257 | Forerunner of Death | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Forerunner_of_Death (read 2026-09-13: Dodge deals more damage in a smaller area; outgoing strike damage increased after impact) |
+| Vindicator | 2232 | Vassals of the Empire | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Vassals_of_the_Empire (read 2026-09-13: Dodging grants boons to allies and strikes foes when landing) |
+| Vindicator | 2238 | Saint of zu Heltzer | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Saint_of_zu_Heltzer (read 2026-09-13: Larger dodge area; heal allies on landing instead of damaging; outgoing healing increased after landing) |
 
 ## Thief
 
