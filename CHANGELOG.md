@@ -2,6 +2,17 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.7 - 2026-09-13
+
+Thief trait catalogue: every Thief trait is classified; the coverage table's Thief NoRecord column is 0.
+
+### Thief trait triggers
+
+- The Thief's 108 traits are catalogued: every trait is executed from its facts, executed from a dated wiki record, or classified with the mechanic it still needs (steal, stealth, shadowstep, initiative, dodge, endurance, weapon swap, interrupt, artifact, malice, deadeye mark, shadow shroud, siphon, flanking, stolen skill, unique condition count and the rest).
+- New wiki records fire on existing sites: on-boon-applied fury (Assassin's Fury might), on-crit (Unrelenting Strikes fury), on-condition-applied poison (Lotus Poison) and immobilize (Panic Strike poison), Stealth Attack on-hit (Sundering Shade, Even the Odds, Hidden Thief, Rending Shade), Trick skill use (Trickster cleanse), on-boon-applied swiftness (Don't Stop cleanse), and a passive outgoing-healing percent (Dark Sentry). Trigger kinds reused from prior professions; no new trigger enum variants.
+- Honest `NeedsMechanic` entries name the fidelity still missing (steal, stealth, shadowstep, initiative, artifacts / Skritt Swipe, malice / Deadeye's Mark, Shadow Shroud / Siphon, dodge replacements, and related). They are not claimed as simulated.
+- `docs/audit/trait-coverage.md` regenerated; Thief `NoRecord=0`. Ranger and Necromancer coverage unchanged.
+
 ## 1.14.6 - 2026-09-13
 
 Ranger trait catalogue: every Ranger trait is classified; the coverage table's Ranger NoRecord column is 0.
