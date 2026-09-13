@@ -12686,6 +12686,1694 @@
         "class": "NeedsMechanic",
         "mechanic": "dual attack"
       }
+    },
+    {
+      "effect_id": "trait:666:0",
+      "source_type": "Trait",
+      "source_id": 666,
+      "source_name": "Metaphysical Rejuvenation",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Metaphysical_Rejuvenation (read 2026-09-13: Regeneration 4 s in WvW/PvP to nearby allies (5 targets, radius 360) when you use a healing skill; ICD 10 s)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Regeneration",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 4000,
+        "internal_cooldown_ms": 10000,
+        "target_count": 5
+      },
+      "internal_cooldown": 10.0,
+      "trigger_scope": {
+        "Slot": "Heal"
+      }
+    },
+    {
+      "effect_id": "trait:677:0",
+      "source_type": "Trait",
+      "source_id": 677,
+      "source_name": "Master of Manipulation",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Master_of_Manipulation (read 2026-09-13: Aegis 3 s to self and nearby allies (radius 300) when you use a Manipulation skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Aegis",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 3000,
+        "target_count": 5
+      },
+      "trigger_scope": {
+        "Category": "Manipulation"
+      }
+    },
+    {
+      "effect_id": "trait:706:0",
+      "source_type": "Trait",
+      "source_id": 706,
+      "source_name": "Critical Infusion",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Critical_Infusion (read 2026-09-13: Vigor 3 s in WvW/PvP when you critically strike; ICD 10 s; mesmer own crits only, not illusions)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Vigor",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000,
+        "internal_cooldown_ms": 10000
+      },
+      "internal_cooldown": 10.0
+    },
+    {
+      "effect_id": "trait:707:0",
+      "source_type": "Trait",
+      "source_id": 707,
+      "source_name": "Master Fencer",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Master_Fencer (read 2026-09-13: Fury 4 s to nearby allies (5 targets, radius 360) on crit; ICD 8 s; personal fury 8 s noted, ally duration recorded)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 4000,
+        "internal_cooldown_ms": 8000,
+        "target_count": 5
+      },
+      "internal_cooldown": 8.0
+    },
+    {
+      "effect_id": "trait:1950:0",
+      "source_type": "Trait",
+      "source_id": 1950,
+      "source_name": "Ineptitude",
+      "category": "AppliesCondition",
+      "value": 2.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Ineptitude (read 2026-09-13: 2 Confusion 2 s in WvW/PvP when you blind a foe; ICD 3 s; interrupt-inflicts-blind half is NeedsMechanic interrupt)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Confusion",
+        "amount_mode": "Stacks",
+        "amount_value": 2.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 2000,
+        "internal_cooldown_ms": 3000
+      },
+      "internal_cooldown": 3.0,
+      "trigger_scope": {
+        "Status": "Blinded"
+      }
+    },
+    {
+      "effect_id": "trait:1980:0",
+      "source_type": "Trait",
+      "source_id": 1980,
+      "source_name": "Temporal Enchanter",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Temporal_Enchanter (read 2026-09-13: Resistance 3 s to nearby allies (5 targets) when you cast a glamour; superspeed 2 s WvW half is NeedsMechanic movement skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Resistance",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 3000,
+        "target_count": 5
+      },
+      "trigger_scope": {
+        "Category": "Glamour"
+      }
+    },
+    {
+      "effect_id": "trait:670:coverage",
+      "source_type": "Trait",
+      "source_id": 670,
+      "source_name": "Method of Madness",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Method_of_Madness (read 2026-09-13: Cast Lesser Chaos Storm when you use a healing skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:675:coverage",
+      "source_type": "Trait",
+      "source_id": 675,
+      "source_name": "Illusionary Defense",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Illusionary_Defense (read 2026-09-13: Protection to nearby allies when you use Shatter skill 2)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:667:coverage",
+      "source_type": "Trait",
+      "source_id": 667,
+      "source_name": "Illusionary Membrane",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Illusionary_Membrane (read 2026-09-13: Chaos aura when you use Shatter skill 2; condition damage while aura active)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aura"
+      }
+    },
+    {
+      "effect_id": "trait:673:coverage",
+      "source_type": "Trait",
+      "source_id": 673,
+      "source_name": "Auspicious Anguish",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Auspicious_Anguish (read 2026-09-13: Convert damaging conditions when you gain Distortion or become disabled; disable half also needs disable trigger)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "distortion"
+      }
+    },
+    {
+      "effect_id": "trait:668:coverage",
+      "source_type": "Trait",
+      "source_id": 668,
+      "source_name": "Chaotic Transference",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Chaotic_Transference (read 2026-09-13: Gaining chaos aura grants boons to nearby allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aura"
+      }
+    },
+    {
+      "effect_id": "trait:669:coverage",
+      "source_type": "Trait",
+      "source_id": 669,
+      "source_name": "Chaotic Interruption",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Chaotic_Interruption (read 2026-09-13: Interrupt recharges a random equipped weapon skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "interrupt"
+      }
+    },
+    {
+      "effect_id": "trait:671:coverage",
+      "source_type": "Trait",
+      "source_id": 671,
+      "source_name": "Shaper of Chaos",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shaper_of_Chaos (read 2026-09-13: Detonate existing chaos aura for boons and foe conditions)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aura"
+      }
+    },
+    {
+      "effect_id": "trait:674:coverage",
+      "source_type": "Trait",
+      "source_id": 674,
+      "source_name": "Prismatic Understanding",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Prismatic_Understanding (read 2026-09-13: Stealth duration and shatter-4 stealth; regen on enter / protection and resolution on exit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "stealth"
+      }
+    },
+    {
+      "effect_id": "trait:1687:coverage",
+      "source_type": "Trait",
+      "source_id": 1687,
+      "source_name": "Bountiful Disillusionment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bountiful_Disillusionment (read 2026-09-13: Stability on Shatter; additional ally boon per Shatter skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:685:coverage",
+      "source_type": "Trait",
+      "source_id": 685,
+      "source_name": "Illusion of Vulnerability",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Illusion_of_Vulnerability (read 2026-09-13: Vulnerability when you interrupt a foe)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "interrupt"
+      }
+    },
+    {
+      "effect_id": "trait:686:coverage",
+      "source_type": "Trait",
+      "source_id": 686,
+      "source_name": "Bountiful Blades",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bountiful_Blades (read 2026-09-13: Greatsword / Phantasmal Berserker summon and bounce improvements)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "phantasms"
+      }
+    },
+    {
+      "effect_id": "trait:687:coverage",
+      "source_type": "Trait",
+      "source_id": 687,
+      "source_name": "Rending Shatter",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Rending_Shatter (read 2026-09-13: Shatter skills inflict vulnerability on hit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:694:coverage",
+      "source_type": "Trait",
+      "source_id": 694,
+      "source_name": "Dazzling",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dazzling (read 2026-09-13: Disabling a foe also applies vulnerability)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:693:coverage",
+      "source_type": "Trait",
+      "source_id": 693,
+      "source_name": "Shattered Concentration",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shattered_Concentration (read 2026-09-13: Shatter skills remove a boon on hit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:712:coverage",
+      "source_type": "Trait",
+      "source_id": 712,
+      "source_name": "Furious Interruption",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Furious_Interruption (read 2026-09-13: Quickness when you interrupt a foe)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "interrupt"
+      }
+    },
+    {
+      "effect_id": "trait:1688:coverage",
+      "source_type": "Trait",
+      "source_id": 1688,
+      "source_name": "Power Block",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Power_Block (read 2026-09-13: Interrupts deal damage, inflict weakness, and grant a damage increase)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "interrupt"
+      }
+    },
+    {
+      "effect_id": "trait:701:coverage",
+      "source_type": "Trait",
+      "source_id": 701,
+      "source_name": "Phantasmal Fury",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Phantasmal_Fury (read 2026-09-13: Your phantasms have fury)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "phantasms"
+      }
+    },
+    {
+      "effect_id": "trait:705:coverage",
+      "source_type": "Trait",
+      "source_id": 705,
+      "source_name": "Mental Gymnastics",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mental_Gymnastics (read 2026-09-13: Vigor when you successfully evade an attack)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:700:coverage",
+      "source_type": "Trait",
+      "source_id": 700,
+      "source_name": "Duelist's Discipline",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Duelist%27s_Discipline (read 2026-09-13: Interrupt recharges pistol skills; pistol bleed chance is weapon-scoped / illusions)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "interrupt"
+      }
+    },
+    {
+      "effect_id": "trait:710:coverage",
+      "source_type": "Trait",
+      "source_id": 710,
+      "source_name": "Sharper Images",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sharper_Images (read 2026-09-13: Illusions inflict bleeding on critical hits)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "clones"
+      }
+    },
+    {
+      "effect_id": "trait:1889:coverage",
+      "source_type": "Trait",
+      "source_id": 1889,
+      "source_name": "Blinding Dissipation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blinding_Dissipation (read 2026-09-13: Shatter skill 2 inflicts blindness)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:1960:coverage",
+      "source_type": "Trait",
+      "source_id": 1960,
+      "source_name": "Wandering Mind",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wandering_Mind (read 2026-09-13: Remove a nondamaging condition and gain swiftness on evade)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:708:coverage",
+      "source_type": "Trait",
+      "source_id": 708,
+      "source_name": "Fencer's Finesse",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Fencer%27s_Finesse (read 2026-09-13: Ferocity stacks and recharge on one-handed sword / spear strikes by you or illusions)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon-scoped"
+      }
+    },
+    {
+      "effect_id": "trait:704:coverage",
+      "source_type": "Trait",
+      "source_id": 704,
+      "source_name": "Deceptive Evasion",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Deceptive_Evasion (read 2026-09-13: Create a clone when you dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "clones"
+      }
+    },
+    {
+      "effect_id": "trait:734:coverage",
+      "source_type": "Trait",
+      "source_id": 734,
+      "source_name": "Cry of Pain",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cry_of_Pain (read 2026-09-13: Shatter skill 2 inflicts more confusion stacks/duration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:721:coverage",
+      "source_type": "Trait",
+      "source_id": 721,
+      "source_name": "Shatter Storm",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shatter_Storm (read 2026-09-13: Shatter skill 1 becomes an ammo skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:1869:coverage",
+      "source_type": "Trait",
+      "source_id": 1869,
+      "source_name": "Persistence of Memory",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Persistence_of_Memory (read 2026-09-13: When a phantasm becomes a clone, it transfers its boons to you)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "phantasms"
+      }
+    },
+    {
+      "effect_id": "trait:691:coverage",
+      "source_type": "Trait",
+      "source_id": 691,
+      "source_name": "The Pledge",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/The_Pledge (read 2026-09-13: Torch flame bursts inflict additional burning)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon-scoped"
+      }
+    },
+    {
+      "effect_id": "trait:723:coverage",
+      "source_type": "Trait",
+      "source_id": 723,
+      "source_name": "Compounding Power",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Compounding_Power (read 2026-09-13: Creating an illusion increases outgoing strike and condition damage; Virtuoso blades)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "clones"
+      }
+    },
+    {
+      "effect_id": "trait:722:coverage",
+      "source_type": "Trait",
+      "source_id": 722,
+      "source_name": "Escape Artist",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Escape_Artist (read 2026-09-13: Grant distortion when a phantasm is created)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "phantasms"
+      }
+    },
+    {
+      "effect_id": "trait:729:coverage",
+      "source_type": "Trait",
+      "source_id": 729,
+      "source_name": "Phantasmal Haste",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Phantasmal_Haste (read 2026-09-13: Phantasms spawn with quickness; gain quickness when you create a phantasm)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "phantasms"
+      }
+    },
+    {
+      "effect_id": "trait:1690:coverage",
+      "source_type": "Trait",
+      "source_id": 1690,
+      "source_name": "Maim the Disillusioned",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Maim_the_Disillusioned (read 2026-09-13: Shatter skills inflict torment on hit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:731:coverage",
+      "source_type": "Trait",
+      "source_id": 731,
+      "source_name": "Master of Misdirection",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Master_of_Misdirection (read 2026-09-13: Shatter skills gain recharge reduction)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "recharge"
+      }
+    },
+    {
+      "effect_id": "trait:733:coverage",
+      "source_type": "Trait",
+      "source_id": 733,
+      "source_name": "Phantasmal Force",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Phantasmal_Force (read 2026-09-13: Phantasm strike scales with might; might when phantasms become clones)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "phantasms"
+      }
+    },
+    {
+      "effect_id": "trait:2035:coverage",
+      "source_type": "Trait",
+      "source_id": 2035,
+      "source_name": "Master of Fragmentation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Master_of_Fragmentation (read 2026-09-13: Your Shatter skills are improved)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:753:coverage",
+      "source_type": "Trait",
+      "source_id": 753,
+      "source_name": "Malicious Sorcery",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Malicious_Sorcery (read 2026-09-13: Confusion duration increase plus confusion on dodge; duration half is condition duration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:757:coverage",
+      "source_type": "Trait",
+      "source_id": 757,
+      "source_name": "Mender's Purity",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mender%27s_Purity (read 2026-09-13: Cast Lesser Power Cleanse when you use a healing skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:756:coverage",
+      "source_type": "Trait",
+      "source_id": 756,
+      "source_name": "Medic's Feedback",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Medic%27s_Feedback (read 2026-09-13: Cast Feedback while reviving; Feedback revives allies inside its dome)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "revive"
+      }
+    },
+    {
+      "effect_id": "trait:744:coverage",
+      "source_type": "Trait",
+      "source_id": 744,
+      "source_name": "Sympathetic Visage",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sympathetic_Visage (read 2026-09-13: Phantasms take your conditions from you when summoned)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "phantasms"
+      }
+    },
+    {
+      "effect_id": "trait:1852:coverage",
+      "source_type": "Trait",
+      "source_id": 1852,
+      "source_name": "Inspiring Distortion",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Inspiring_Distortion (read 2026-09-13: Aegis to nearby allies when you gain distortion or use Shatter skill 4)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "distortion"
+      }
+    },
+    {
+      "effect_id": "trait:751:coverage",
+      "source_type": "Trait",
+      "source_id": 751,
+      "source_name": "Warden's Feedback",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Warden%27s_Feedback (read 2026-09-13: Focus skills reflect projectiles; reduces focus recharge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon-scoped"
+      }
+    },
+    {
+      "effect_id": "trait:740:coverage",
+      "source_type": "Trait",
+      "source_id": 740,
+      "source_name": "Ego Restoration",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Ego_Restoration (read 2026-09-13: Create a clone when you use a healing skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "clones"
+      }
+    },
+    {
+      "effect_id": "trait:2005:coverage",
+      "source_type": "Trait",
+      "source_id": 2005,
+      "source_name": "Mental Defense",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mental_Defense (read 2026-09-13: Shatter skill 4 grants boons and breaks allies out of stuns)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:752:coverage",
+      "source_type": "Trait",
+      "source_id": 752,
+      "source_name": "Blurred Inscriptions",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blurred_Inscriptions (read 2026-09-13: Signets improved; activating a signet grants distortion)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "signets"
+      }
+    },
+    {
+      "effect_id": "trait:2030:coverage",
+      "source_type": "Trait",
+      "source_id": 2030,
+      "source_name": "Time Splitter",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Time_Splitter (read 2026-09-13: Unlocks chronomancer shatter skills and Wells (Continuum Split line))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "continuum split"
+      }
+    },
+    {
+      "effect_id": "trait:1838:coverage",
+      "source_type": "Trait",
+      "source_id": 1838,
+      "source_name": "Delayed Reactions",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Delayed_Reactions (read 2026-09-13: Disabling a foe slows them)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:1913:coverage",
+      "source_type": "Trait",
+      "source_id": 1913,
+      "source_name": "Illusionary Reversion",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Illusionary_Reversion (read 2026-09-13: Shatter skills generate a clone and grant alacrity with enough clones)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:1859:coverage",
+      "source_type": "Trait",
+      "source_id": 1859,
+      "source_name": "Time Marches On",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Time_Marches_On (read 2026-09-13: Move 25% faster; alacrity applied to you is stronger)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "alacrity"
+      }
+    },
+    {
+      "effect_id": "trait:1942:coverage",
+      "source_type": "Trait",
+      "source_id": 1942,
+      "source_name": "Stretched Time",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stretched_Time (read 2026-09-13: Ally boons per clone shattered; boons when you summon a phantasm)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:2022:coverage",
+      "source_type": "Trait",
+      "source_id": 2022,
+      "source_name": "Seize the Moment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Seize_the_Moment (read 2026-09-13: Ally quickness per clone shattered; quickness when you summon a phantasm)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:1890:coverage",
+      "source_type": "Trait",
+      "source_id": 1890,
+      "source_name": "Chronophantasma",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Chronophantasma (read 2026-09-13: First phantasm-to-clone transition resummons the phantasm)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "phantasms"
+      }
+    },
+    {
+      "effect_id": "trait:2150:coverage",
+      "source_type": "Trait",
+      "source_id": 2150,
+      "source_name": "Mirage Cloak",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mirage_Cloak (read 2026-09-13: Mirage Cloak instead of dodge; Ambush and Deception access)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mirage cloak"
+      }
+    },
+    {
+      "effect_id": "trait:2141:coverage",
+      "source_type": "Trait",
+      "source_id": 2141,
+      "source_name": "Self-Deception",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Self-Deception (read 2026-09-13: Deception skills create a clone if any other clones are active)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "deceptions"
+      }
+    },
+    {
+      "effect_id": "trait:2082:coverage",
+      "source_type": "Trait",
+      "source_id": 2082,
+      "source_name": "Renewing Oasis",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Renewing_Oasis (read 2026-09-13: Regeneration when you gain Mirage Cloak; incoming damaging condition duration while regenerating)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mirage cloak"
+      }
+    },
+    {
+      "effect_id": "trait:2110:coverage",
+      "source_type": "Trait",
+      "source_id": 2110,
+      "source_name": "Riddle of Sand",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Riddle_of_Sand (read 2026-09-13: First Ambush in combat applies confusion; refreshes on Shatter)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ambush"
+      }
+    },
+    {
+      "effect_id": "trait:2178:coverage",
+      "source_type": "Trait",
+      "source_id": 2178,
+      "source_name": "Desert Distortion",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Desert_Distortion (read 2026-09-13: Illusions shattered by Distortion become Mirage Mirrors; Ambush on self-distortion)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "distortion"
+      }
+    },
+    {
+      "effect_id": "trait:2174:coverage",
+      "source_type": "Trait",
+      "source_id": 2174,
+      "source_name": "Mirage Mantle",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mirage_Mantle (read 2026-09-13: Ambush skills grant boons to nearby allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ambush"
+      }
+    },
+    {
+      "effect_id": "trait:2098:coverage",
+      "source_type": "Trait",
+      "source_id": 2098,
+      "source_name": "Phantom Pain",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Phantom_Pain (read 2026-09-13: Damage increase when you use a Shatter, scaling per clone shattered)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shatter"
+      }
+    },
+    {
+      "effect_id": "trait:2117:coverage",
+      "source_type": "Trait",
+      "source_id": 2117,
+      "source_name": "Speed of Sand",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Speed_of_Sand (read 2026-09-13: Mirage Cloak increases movement speed)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mirage cloak"
+      }
+    },
+    {
+      "effect_id": "trait:2070:coverage",
+      "source_type": "Trait",
+      "source_id": 2070,
+      "source_name": "Infinite Horizon",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Infinite_Horizon (read 2026-09-13: When you gain Mirage Cloak, your illusions also gain it)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mirage cloak"
+      }
+    },
+    {
+      "effect_id": "trait:2113:coverage",
+      "source_type": "Trait",
+      "source_id": 2113,
+      "source_name": "Elusive Mind",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elusive_Mind (read 2026-09-13: Lose conditions when you gain Mirage Cloak)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mirage cloak"
+      }
+    },
+    {
+      "effect_id": "trait:2169:coverage",
+      "source_type": "Trait",
+      "source_id": 2169,
+      "source_name": "Dune Cloak",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dune_Cloak (read 2026-09-13: Shatter grants Mirage Cloak with enough clones; Mirage Cloak recharges Mind Wrack and Cry of Frustration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mirage cloak"
+      }
+    },
+    {
+      "effect_id": "trait:2386:coverage",
+      "source_type": "Trait",
+      "source_id": 2386,
+      "source_name": "Wandering Minstrel",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wandering_Minstrel (read 2026-09-13: Notes instead of illusions; instrument skills and Tales access)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "instruments"
+      }
+    },
+    {
+      "effect_id": "trait:2427:coverage",
+      "source_type": "Trait",
+      "source_id": 2427,
+      "source_name": "Mayhem",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Mayhem (read 2026-09-13: Flustering Flute torment; dodge reduces Flustering Flute recharge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "instruments"
+      }
+    },
+    {
+      "effect_id": "trait:2432:coverage",
+      "source_type": "Trait",
+      "source_id": 2432,
+      "source_name": "Syncopate",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Syncopate (read 2026-09-13: Deafening Drum extra wave; damage to enemies you disable)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "instruments"
+      }
+    },
+    {
+      "effect_id": "trait:2424:coverage",
+      "source_type": "Trait",
+      "source_id": 2424,
+      "source_name": "Symphonic Resonance",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Symphonic_Resonance (read 2026-09-13: Instruments provide bonuses while playing in the background)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "instruments"
+      }
+    },
+    {
+      "effect_id": "trait:2367:coverage",
+      "source_type": "Trait",
+      "source_id": 2367,
+      "source_name": "Life of the Party",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Life_of_the_Party (read 2026-09-13: Lively Lute and Crescendo grant boons to affected allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "instruments"
+      }
+    },
+    {
+      "effect_id": "trait:2422:coverage",
+      "source_type": "Trait",
+      "source_id": 2422,
+      "source_name": "Love Song",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Love_Song (read 2026-09-13: Harmonious Harp distortion duration; strike damage reduction while harp plays)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "instruments"
+      }
+    },
+    {
+      "effect_id": "trait:2374:coverage",
+      "source_type": "Trait",
+      "source_id": 2374,
+      "source_name": "Harmonize",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Harmonize (read 2026-09-13: Gain a note when you use a phantasm skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "phantasms"
+      }
+    },
+    {
+      "effect_id": "trait:2353:coverage",
+      "source_type": "Trait",
+      "source_id": 2353,
+      "source_name": "Fortissimo",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Fortissimo (read 2026-09-13: Notes after Crescendo; attributes per instrument playing)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "instruments"
+      }
+    },
+    {
+      "effect_id": "trait:2414:coverage",
+      "source_type": "Trait",
+      "source_id": 2414,
+      "source_name": "Call and Response",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Call_and_Response (read 2026-09-13: Instrument above note threshold creates an afterimage)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "instruments"
+      }
+    },
+    {
+      "effect_id": "trait:2441:coverage",
+      "source_type": "Trait",
+      "source_id": 2441,
+      "source_name": "Altered Chord",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Altered_Chord (read 2026-09-13: Crescendo spotlights last instrument; playing recharges Crescendo)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "instruments"
+      }
+    },
+    {
+      "effect_id": "trait:2216:coverage",
+      "source_type": "Trait",
+      "source_id": 2216,
+      "source_name": "Psychic Blades",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Psychic_Blades (read 2026-09-13: Stock blades instead of clones; Bladesongs replace shatters)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "blades"
+      }
+    },
+    {
+      "effect_id": "trait:2212:coverage",
+      "source_type": "Trait",
+      "source_id": 2212,
+      "source_name": "Bladeturn Refrain",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bladeturn_Refrain (read 2026-09-13: Bladesongs grant aegis)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "bladesong"
+      }
+    },
+    {
+      "effect_id": "trait:2202:coverage",
+      "source_type": "Trait",
+      "source_id": 2202,
+      "source_name": "Jagged Mind",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Jagged_Mind (read 2026-09-13: Blade attacks bleed on crit; percent of condition damage heals you)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "blades"
+      }
+    },
+    {
+      "effect_id": "trait:2204:coverage",
+      "source_type": "Trait",
+      "source_id": 2204,
+      "source_name": "Deadly Blades",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Deadly_Blades (read 2026-09-13: Blades inflict vulnerability on crit; damage after Bladesong)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "blades"
+      }
+    },
+    {
+      "effect_id": "trait:2215:coverage",
+      "source_type": "Trait",
+      "source_id": 2215,
+      "source_name": "Duelist's Reversal",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Duelist%27s_Reversal (read 2026-09-13: Blocking or dodging an attack grants boons)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "block"
+      }
+    },
+    {
+      "effect_id": "trait:2205:coverage",
+      "source_type": "Trait",
+      "source_id": 2205,
+      "source_name": "Phantasmal Blades",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Phantasmal_Blades (read 2026-09-13: Completed phantasm attacks launch a blade and grant fury on expire)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "phantasms"
+      }
+    },
+    {
+      "effect_id": "trait:2211:coverage",
+      "source_type": "Trait",
+      "source_id": 2211,
+      "source_name": "Psychic Riposte",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Psychic_Riposte (read 2026-09-13: Blocking/evading stocks blades; dodging stocks a blade)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "blades"
+      }
+    },
+    {
+      "effect_id": "trait:1950:coverage",
+      "source_type": "Trait",
+      "source_id": 1950,
+      "source_name": "Ineptitude",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Ineptitude (read 2026-09-13: Interrupt-inflicts-blind half; blinding-inflicts-confusion is a dated OnConditionApplied record)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "interrupt"
+      }
     }
   ]
 }
