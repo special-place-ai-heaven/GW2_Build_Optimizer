@@ -1023,10 +1023,67 @@ fn fill_revenant_legends(response: &GeminiBuildResponse, result: &mut ValidatedB
             }
         }
     }
+    pad_revenant_legends(&mut ids, db, &spec_ids);
+    if ids.is_empty() {
+        return;
+    }
+    let old_utility_ids: Vec<u32> = result
+        .skills
+        .utilities
+        .iter()
+        .filter_map(|u| u.as_ref().map(|p| p.0))
+        .collect();
+    let old_elite = result.skills.elite.as_ref().map(|e| e.0);
+    apply_legend_package(result, db, &ids[0]);
+    if inferred_from_heal {
+        let new_utility_ids: Vec<u32> = result
+            .skills
+            .utilities
+            .iter()
+            .filter_map(|u| u.as_ref().map(|p| p.0))
+            .collect();
+        let utilities_changed = old_utility_ids != new_utility_ids;
+        let elite_changed = old_elite != result.skills.elite.as_ref().map(|e| e.0);
+        if utilities_changed || elite_changed {
+            result.warnings.push(format!(
+                "Revenant utilities/elite were replaced from legend {} inferred from heal",
+                ids[0]
+            ));
+        }
+    }
+    result.legends = ids.clone();
+    result.aquatic_legends = ids;
+}
+
+/// Write the active legend's heal / utilities / elite onto `build`.
+/// Shared by plate fill and elite-swap retarget.
+pub(crate) fn apply_legend_package(build: &mut ValidatedBuild, db: &GameDb, legend_id: &str) {
+    let Some(legend) = db.legends.get(legend_id) else {
+        return;
+    };
+    let name_of = |id: u32| {
+        db.skills
+            .get(&id)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| format!("Skill {id}"))
+    };
+    build.skills.heal = Some((legend.heal, name_of(legend.heal)));
+    build.skills.utilities = legend
+        .utilities
+        .iter()
+        .take(3)
+        .map(|&id| Some((id, name_of(id))))
+        .collect();
+    build.skills.elite = Some((legend.elite, name_of(legend.elite)));
+}
+
+/// Pad `ids` to two available legends, sorted by template code then id
+/// (same order `fill_revenant_legends` has always used).
+pub(crate) fn pad_revenant_legends(ids: &mut Vec<String>, db: &GameDb, spec_ids: &[u32]) {
     let mut rest: Vec<(u8, String)> = db
         .legends
         .keys()
-        .filter(|id| !ids.contains(id) && db.legend_available(id, &spec_ids))
+        .filter(|id| !ids.contains(id) && db.legend_available(id, spec_ids))
         .map(|id| (db.legend_template_code(id), id.clone()))
         .collect();
     rest.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -1036,47 +1093,6 @@ fn fill_revenant_legends(response: &GeminiBuildResponse, result: &mut ValidatedB
         }
         ids.push(id);
     }
-    if ids.is_empty() {
-        return;
-    }
-    if let Some(legend) = db.legends.get(&ids[0]) {
-        let name_of = |id: u32| {
-            db.skills
-                .get(&id)
-                .map(|s| s.name.clone())
-                .unwrap_or_else(|| format!("Skill {id}"))
-        };
-        let new_utilities: Vec<Option<(u32, String)>> = legend
-            .utilities
-            .iter()
-            .take(3)
-            .map(|&id| Some((id, name_of(id))))
-            .collect();
-        let new_elite = Some((legend.elite, name_of(legend.elite)));
-        let old_utility_ids: Vec<u32> = result
-            .skills
-            .utilities
-            .iter()
-            .filter_map(|u| u.as_ref().map(|p| p.0))
-            .collect();
-        let new_utility_ids: Vec<u32> = new_utilities
-            .iter()
-            .filter_map(|u| u.as_ref().map(|p| p.0))
-            .collect();
-        let utilities_changed = old_utility_ids != new_utility_ids;
-        let elite_changed = result.skills.elite.as_ref().map(|e| e.0) != Some(legend.elite);
-        result.skills.heal = Some((legend.heal, name_of(legend.heal)));
-        result.skills.utilities = new_utilities;
-        result.skills.elite = new_elite;
-        if inferred_from_heal && (utilities_changed || elite_changed) {
-            result.warnings.push(format!(
-                "Revenant utilities/elite were replaced from legend {} inferred from heal",
-                ids[0]
-            ));
-        }
-    }
-    result.legends = ids.clone();
-    result.aquatic_legends = ids;
 }
 
 fn validate_rune(response: &GeminiBuildResponse, db: &GameDb, result: &mut ValidatedBuild) {

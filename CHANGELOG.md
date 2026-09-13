@@ -2,6 +2,17 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.14 - 2026-09-13
+
+Revenant elite swaps now carry legends through `retarget_after_elite_swap`. SCHEMA CHANGE = N.
+
+### Revenant elite-swap legends
+
+- After an elite swap, legends that fail `legend_available` are dropped, legal ones are kept, and the list is padded to 2 in the same template-code order `fill_revenant_legends` uses.
+- The active legend's heal / utilities / elite package is applied via `apply_legend_package`, shared with plate fill.
+- Aquatic legends keep remaining legal entries (padded) or copy terrestrial when none remain; empty aquatic stays empty so the encoder copies terrestrial.
+- `swap_elite_spec` is unlocked for Revenant and still honors `locks.specs[2]`. `refill_bar` and the independent Rev heal / utility / elite operators stay no-ops.
+
 ## 1.14.13 - 2026-09-13
 
 Revenant trait catalogue: every Revenant trait is classified; the coverage table's Revenant NoRecord column is 0. Track B Success [9] — all nine professions shipped.
