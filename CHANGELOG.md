@@ -11,6 +11,12 @@ Revenant legends use the same icon+name skill-bar slots as Ranger pets. SCHEMA C
 - Clicking a legend slot still previews that legend's heal / utilities / elite.
 - Addon compile: `SimParams.deferred_target` is filled at the suggestion-rotation call site so the crate builds after 1.14.15.
 
+News Show filters are icon+label tabs (All / Articles / Notes / Videos / Guides). SCHEMA CHANGE = N.
+
+- Kind filters keep exclusive single-select wiring (`filter=None` for All) with the kind glyph left of the visible i18n label.
+- Selected/hover uses the gold chip tokens; height follows `theme::control_height`; narrow widths wrap via wrap_chip (no H-scroll, no icon-only collapse).
+- Per-tab kind hint tooltips are removed; the Show caption still carries `news.filter.show.hint`. English `news.kind.video` reads Videos.
+
 ## 1.14.15 - 2026-09-13
 
 Live foe TargetState ledger and deferred vs-target resolve (Success [5]). SCHEMA CHANGE = N.
