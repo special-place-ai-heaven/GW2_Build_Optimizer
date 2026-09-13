@@ -890,6 +890,7 @@ pub fn optimize_v2_search(
                 && a.validated.relic == b.validated.relic
                 && a.validated.food == b.validated.food
                 && a.validated.utility == b.validated.utility
+                && a.validated.infusion_seats == b.validated.infusion_seats
                 && a.validated.specializations == b.validated.specializations
                 && a.validated.weapons == b.validated.weapons
                 && a.validated.skills.heal == b.validated.skills.heal
@@ -3286,6 +3287,7 @@ mod tests {
             gear_locks: HashMap::new(),
             food: None,
             utility: None,
+            infusion_locks: HashMap::new(),
         };
         let none_locked = generate_neighbors(
             &candidate,

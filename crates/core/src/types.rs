@@ -76,6 +76,10 @@ pub struct BuildLocks {
     /// Locked enhancement (utility consumable) item id. Inner argmax never overwrites this.
     #[serde(default)]
     pub utility: Option<u32>,
+    /// Per gear-slot locked infusion fills. Vec index matches that piece's
+    /// infusion_slots order; None = seat unlocked. Serde default for legacy JSON.
+    #[serde(default)]
+    pub infusion_locks: HashMap<GearSlot, Vec<Option<u32>>>,
 }
 
 impl BuildLocks {
@@ -93,6 +97,10 @@ impl BuildLocks {
             || !self.gear_locks.is_empty()
             || self.food.is_some()
             || self.utility.is_some()
+            || self
+                .infusion_locks
+                .values()
+                .any(|seats| seats.iter().any(|s| s.is_some()))
     }
 
     /// Get locked trait for a specific spec and column (0=Adept, 1=Master, 2=Grandmaster).
@@ -151,6 +159,26 @@ impl BuildLocks {
         }
         if let Some(id) = self.utility {
             parts.push(format!("Utility locked to ID {id}"));
+        }
+        let mut infusion_entries: Vec<(&GearSlot, &Vec<Option<u32>>)> =
+            self.infusion_locks.iter().collect();
+        infusion_entries.sort_by_key(|(slot, _)| {
+            GearSlot::ALL
+                .iter()
+                .position(|canonical| canonical == *slot)
+                .unwrap_or(usize::MAX)
+        });
+        for (slot, seats) in infusion_entries {
+            for (idx, id) in seats.iter().enumerate() {
+                if let Some(id) = id {
+                    parts.push(format!(
+                        "Infusion {} seat {} locked to ID {}",
+                        slot_name(slot),
+                        idx,
+                        id
+                    ));
+                }
+            }
         }
         if parts.is_empty() {
             String::new()

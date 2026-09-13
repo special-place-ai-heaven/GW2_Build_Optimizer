@@ -1159,6 +1159,7 @@ pub fn calculate_validated_stats(
         ctx,
     );
     crate::consumables::fold_into_validated_stats(&mut full_stats, &mut modifiers, validated, db);
+    crate::infusions::fold_into_validated_stats(&mut full_stats, validated, db);
 
     (full_stats, modifiers)
 }

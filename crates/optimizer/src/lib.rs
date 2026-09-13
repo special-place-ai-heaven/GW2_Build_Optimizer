@@ -12,6 +12,7 @@ pub mod gemini;
 pub mod gemini_tools;
 #[cfg(test)]
 mod grouped_sheet;
+pub mod infusions;
 pub mod itemstat_pool;
 pub mod llm;
 #[cfg(test)]
