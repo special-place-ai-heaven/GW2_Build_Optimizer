@@ -6,6 +6,7 @@ pub mod attunement;
 pub mod builder;
 pub mod combat_model;
 pub mod combo;
+pub mod illusion;
 #[cfg(test)]
 pub(crate) mod necro_published;
 pub mod prose;
@@ -19,6 +20,7 @@ pub mod wvw_timeline;
 
 pub use attunement::{apply_attunement_skill, AttunementState, Element};
 pub use combo::{ComboEngine, ComboOutcome, ComboOutcomeEffect, ComboSite, SELF_COMBATANT_ID};
+pub use illusion::{spawn_clone, IllusionState, CLONE_CAP};
 pub use trait_skill::resolve_trait_skill;
 pub use trigger_bus::{
     land_foe_disable, BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST,

@@ -13367,23 +13367,19 @@
       }
     },
     {
-      "effect_id": "trait:704:coverage",
+      "effect_id": "trait:704:0",
       "source_type": "Trait",
       "source_id": 704,
       "source_name": "Deceptive Evasion",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "SpawnClone",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnDodge",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Deceptive_Evasion (read 2026-09-13: Create a clone when you dodge)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "clones"
-      }
+      "source": "https://wiki.guildwars2.com/wiki/Deceptive_Evasion (read 2026-09-13: Create a clone when you dodge)"
     },
     {
       "effect_id": "trait:734:coverage",
@@ -13462,23 +13458,38 @@
       }
     },
     {
-      "effect_id": "trait:723:coverage",
+      "effect_id": "trait:723:0",
       "source_type": "Trait",
       "source_id": 723,
       "source_name": "Compounding Power",
-      "category": "FlatStat",
-      "value": null,
+      "category": "StrikeDamagePct",
+      "value": 2.0,
       "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "trigger_rule": "OnCloneCreated",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Compounding_Power (read 2026-09-13: Creating an illusion increases outgoing strike and condition damage; Virtuoso blades)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "clones"
-      }
+      "source": "https://wiki.guildwars2.com/wiki/Compounding_Power (read 2026-09-13: Creating an illusion +2% strike / +2% condi damage 8 s WvW; max 5 stacks; Virtuoso blades banked)",
+      "effect_duration": 8.0,
+      "max_stacks": 5
+    },
+    {
+      "effect_id": "trait:723:1",
+      "source_type": "Trait",
+      "source_id": 723,
+      "source_name": "Compounding Power",
+      "category": "ConditionDamagePct",
+      "value": 2.0,
+      "stacking_rule": "Additive",
+      "trigger_rule": "OnCloneCreated",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Compounding_Power (read 2026-09-13: Creating an illusion +2% strike / +2% condi damage 8 s WvW; max 5 stacks; Virtuoso blades banked)",
+      "effect_duration": 8.0,
+      "max_stacks": 5
     },
     {
       "effect_id": "trait:722:coverage",
@@ -13709,22 +13720,21 @@
       }
     },
     {
-      "effect_id": "trait:740:coverage",
+      "effect_id": "trait:740:0",
       "source_type": "Trait",
       "source_id": 740,
       "source_name": "Ego Restoration",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "SpawnClone",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Ego_Restoration (read 2026-09-13: Create a clone when you use a healing skill)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "clones"
+      "trigger_scope": {
+        "Slot": "Heal"
       }
     },
     {

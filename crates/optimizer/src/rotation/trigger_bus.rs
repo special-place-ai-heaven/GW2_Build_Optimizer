@@ -1,8 +1,9 @@
 //! NeedsMechanic Engine E0: shared TriggerBus + Endurance/Dodge family.
 //! E1 extends the same bus: landed foe-disable emits OnDisableFoe.
 //! E3 extends the same bus: attunement swap emits OnAttunementSwap.
+//! E4 extends the same bus: successful clone spawn emits OnCloneCreated.
 //!
-//! Bus events are OnDodge, OnDisableFoe, OnElite, OnThreshold, OnAttunementSwap.
+//! Bus events are OnDodge, OnDisableFoe, OnElite, OnThreshold, OnAttunementSwap, OnCloneCreated.
 //! EndurancePool and DodgeAction are one family (not a second dodge path).
 //! Disable authority is TargetState.disabled_until_ms; no second disable engine.
 //! Attunement authority is AttunementState (rotation/attunement.rs); one bus.
@@ -20,6 +21,8 @@ pub enum BusEvent {
     OnThreshold,
     /// Primary attunement changed (AttunementState swap).
     OnAttunementSwap,
+    /// Clone count rose (IllusionState spawn).
+    OnCloneCreated,
 }
 
 /// One recorded emission for causal proofs / traces.
@@ -34,7 +37,7 @@ pub struct BusEmission {
 pub struct TriggerBus {
     queue: VecDeque<BusEmission>,
     /// Cumulative emit counts (never cleared by drain).
-    pub totals: [u32; 5],
+    pub totals: [u32; 6],
 }
 
 impl TriggerBus {
@@ -49,6 +52,7 @@ impl TriggerBus {
             BusEvent::OnElite => 2,
             BusEvent::OnThreshold => 3,
             BusEvent::OnAttunementSwap => 4,
+            BusEvent::OnCloneCreated => 5,
         };
         self.totals[idx] = self.totals[idx].saturating_add(1);
         self.queue.push_back(BusEmission { event, at_ms });
@@ -69,6 +73,7 @@ impl TriggerBus {
             BusEvent::OnElite => self.totals[2],
             BusEvent::OnThreshold => self.totals[3],
             BusEvent::OnAttunementSwap => self.totals[4],
+            BusEvent::OnCloneCreated => self.totals[5],
         }
     }
 }
@@ -190,6 +195,7 @@ pub fn bus_to_trigger_rule(event: BusEvent) -> crate::data::normalized_effects::
         BusEvent::OnElite => TriggerRule::OnElite,
         BusEvent::OnThreshold => TriggerRule::OnThreshold,
         BusEvent::OnAttunementSwap => TriggerRule::OnAttunementSwap,
+        BusEvent::OnCloneCreated => TriggerRule::OnCloneCreated,
     }
 }
 
@@ -235,18 +241,20 @@ mod kent_tests {
     }
 
     #[test]
-    fn bus_events_include_e3_on_attunement_swap() {
+    fn bus_events_include_e3_and_e4_bus_events() {
         let mut bus = TriggerBus::new();
         bus.emit(BusEvent::OnDodge, 0);
         bus.emit(BusEvent::OnDisableFoe, 1);
         bus.emit(BusEvent::OnElite, 2);
         bus.emit(BusEvent::OnThreshold, 3);
         bus.emit(BusEvent::OnAttunementSwap, 4);
+        bus.emit(BusEvent::OnCloneCreated, 5);
         assert_eq!(bus.count(BusEvent::OnDodge), 1);
         assert_eq!(bus.count(BusEvent::OnDisableFoe), 1);
         assert_eq!(bus.count(BusEvent::OnElite), 1);
         assert_eq!(bus.count(BusEvent::OnThreshold), 1);
         assert_eq!(bus.count(BusEvent::OnAttunementSwap), 1);
+        assert_eq!(bus.count(BusEvent::OnCloneCreated), 1);
     }
 
     /// Kent causal disable micro-proof: TargetState disable land -> bus OnDisableFoe.

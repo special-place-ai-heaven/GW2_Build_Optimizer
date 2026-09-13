@@ -2,6 +2,16 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.30 - 2026-09-14
+
+NeedsMechanic Engine E4: Mesmer IllusionState (clones) + TriggerBus OnCloneCreated. SCHEMA CHANGE = N.
+
+- NEW `rotation/illusion.rs` `IllusionState { count, cap }` sole clone-count authority. Default count=0, Cap=3. Shared by flow sim and WvW timeline. `spawn` / `consume` only writers; `spawn_clone` emits OnCloneCreated iff count rose. Cap no-op does not emit.
+- One new bus event/rule: `OnCloneCreated` on the existing TriggerBus. Optional `EffectCategory::SpawnClone` on normalized effects (catalog class). No OnShatter / OnPhantasm / OnCloneConsumed / blades / mirage / distortion / continuum.
+- Executable records: Deceptive Evasion (OnDodge -> spawn_clone), Ego Restoration (OnSkillUse + Slot Heal -> spawn_clone), Compounding Power (OnCloneCreated -> +2% strike / +2% condi damage 8 s WvW, max 5 stacks; Virtuoso blades banked). Sharper Images (710) stays NeedsMechanic: clones.
+- ValidatedBuild SCHEMA = N; TriggerBus += OnCloneCreated only. Weapon-skill clone summons stay residual; no `SkillEffect::SpawnClone`.
+- Kent causal micro-proof: dodge 0->1 + emit; 4th spawn at cap = no-op/no emit; heal-slot Ego Restoration; 723 buff only on successful spawn; 710 still NeedsMechanic; >=3 Mes clone traits executing.
+
 ## 1.14.29
 
 ### Fixed

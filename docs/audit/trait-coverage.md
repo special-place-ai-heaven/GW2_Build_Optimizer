@@ -5,7 +5,7 @@
 | Elementalist | 108 | 29 | 16 | 0 | 0 | 63 | 0 | 0 |
 | Engineer | 108 | 32 | 13 | 0 | 0 | 63 | 0 | 0 |
 | Guardian | 108 | 35 | 14 | 0 | 0 | 59 | 0 | 0 |
-| Mesmer | 108 | 22 | 8 | 1 | 0 | 77 | 0 | 0 |
+| Mesmer | 108 | 22 | 11 | 1 | 0 | 74 | 0 | 0 |
 | Necromancer | 108 | 2 | 27 | 20 | 1 | 56 | 0 | 2 |
 | Ranger | 108 | 42 | 6 | 0 | 0 | 60 | 0 | 0 |
 | Revenant | 108 | 36 | 7 | 0 | 0 | 65 | 0 | 0 |
@@ -390,12 +390,12 @@
 | Dueling | 707 | Master Fencer | record | https://wiki.guildwars2.com/wiki/Master_Fencer (read 2026-09-13: Fury 4 s to nearby allies (5 targets, radius 360) on crit; ICD 8 s; personal fury 8 s noted, ally duration recorded) |
 | Dueling | 692 | Superiority Complex | facts |  |
 | Dueling | 1950 | Ineptitude | record | https://wiki.guildwars2.com/wiki/Ineptitude (read 2026-09-13: 2 Confusion 2 s in WvW/PvP when you blind a foe; ICD 3 s; interrupt-inflicts-blind half is NeedsMechanic interrupt) |
-| Dueling | 704 | Deceptive Evasion | NeedsMechanic: clones | https://wiki.guildwars2.com/wiki/Deceptive_Evasion (read 2026-09-13: Create a clone when you dodge) |
+| Dueling | 704 | Deceptive Evasion | record | https://wiki.guildwars2.com/wiki/Deceptive_Evasion (read 2026-09-13: Create a clone when you dodge) |
 | Illusions | 734 | Cry of Pain | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Cry_of_Pain (read 2026-09-13: Shatter skill 2 inflicts more confusion stacks/duration) |
 | Illusions | 721 | Shatter Storm | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Shatter_Storm (read 2026-09-13: Shatter skill 1 becomes an ammo skill) |
 | Illusions | 1869 | Persistence of Memory | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Persistence_of_Memory (read 2026-09-13: When a phantasm becomes a clone, it transfers its boons to you) |
 | Illusions | 691 | The Pledge | NeedsMechanic: weapon-scoped | https://wiki.guildwars2.com/wiki/The_Pledge (read 2026-09-13: Torch flame bursts inflict additional burning) |
-| Illusions | 723 | Compounding Power | NeedsMechanic: clones | https://wiki.guildwars2.com/wiki/Compounding_Power (read 2026-09-13: Creating an illusion increases outgoing strike and condition damage; Virtuoso blades) |
+| Illusions | 723 | Compounding Power | record | https://wiki.guildwars2.com/wiki/Compounding_Power (read 2026-09-13: Creating an illusion +2% strike / +2% condi damage 8 s WvW; max 5 stacks; Virtuoso blades banked) |
 | Illusions | 722 | Escape Artist | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Escape_Artist (read 2026-09-13: Grant distortion when a phantasm is created) |
 | Illusions | 729 | Phantasmal Haste | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Phantasmal_Haste (read 2026-09-13: Phantasms spawn with quickness; gain quickness when you create a phantasm) |
 | Illusions | 1690 | Maim the Disillusioned | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Maim_the_Disillusioned (read 2026-09-13: Shatter skills inflict torment on hit) |
@@ -409,7 +409,7 @@
 | Inspiration | 744 | Sympathetic Visage | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Sympathetic_Visage (read 2026-09-13: Phantasms take your conditions from you when summoned) |
 | Inspiration | 1852 | Inspiring Distortion | NeedsMechanic: distortion | https://wiki.guildwars2.com/wiki/Inspiring_Distortion (read 2026-09-13: Aegis to nearby allies when you gain distortion or use Shatter skill 4) |
 | Inspiration | 751 | Warden's Feedback | NeedsMechanic: weapon-scoped | https://wiki.guildwars2.com/wiki/Warden%27s_Feedback (read 2026-09-13: Focus skills reflect projectiles; reduces focus recharge) |
-| Inspiration | 740 | Ego Restoration | NeedsMechanic: clones | https://wiki.guildwars2.com/wiki/Ego_Restoration (read 2026-09-13: Create a clone when you use a healing skill) |
+| Inspiration | 740 | Ego Restoration | record | https://wiki.guildwars2.com/wiki/Ego_Restoration (read 2026-09-13: Create a clone when you use a healing skill) |
 | Inspiration | 1980 | Temporal Enchanter | record | https://wiki.guildwars2.com/wiki/Temporal_Enchanter (read 2026-09-13: Resistance 3 s to nearby allies (5 targets) when you cast a glamour; superspeed 2 s WvW half is NeedsMechanic movement skill) |
 | Inspiration | 1915 | Illusionary Inspiration | facts |  |
 | Inspiration | 2005 | Mental Defense | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Mental_Defense (read 2026-09-13: Shatter skill 4 grants boons and breaks allies out of stuns) |
