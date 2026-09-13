@@ -129,44 +129,25 @@ fn kind_filters(ui: &Ui, state: &mut AddonState) {
     hover_hint(ui, "news.filter.show.hint");
     ui.same_line_with_spacing(0.0, 8.0);
 
-    let kinds: [(Option<NewsKind>, &str, &str); 5] = [
-        (None, "news.kind.all", "news.kind.all.hint"),
-        (
-            Some(NewsKind::Articles),
-            "news.kind.articles",
-            "news.kind.articles.hint",
-        ),
-        (
-            Some(NewsKind::Notes),
-            "news.kind.notes",
-            "news.kind.notes.hint",
-        ),
-        (
-            Some(NewsKind::Video),
-            "news.kind.video",
-            "news.kind.video.hint",
-        ),
-        (
-            Some(NewsKind::Guides),
-            "news.kind.guides",
-            "news.kind.guides.hint",
-        ),
+    // Order: All -> Articles -> Notes -> Videos -> Guides. All keeps filter=None.
+    let kinds: [(Option<NewsKind>, &str); 5] = [
+        (None, "news.kind.all"),
+        (Some(NewsKind::Articles), "news.kind.articles"),
+        (Some(NewsKind::Notes), "news.kind.notes"),
+        (Some(NewsKind::Video), "news.kind.video"),
+        (Some(NewsKind::Guides), "news.kind.guides"),
     ];
-    let side = theme::control_height(ui).max(26.0);
+    let h = theme::control_height(ui);
     let avail = ui.content_region_avail()[0];
     let mut row_x = 0.0_f32;
     let mut pick = None;
-    for (i, (kind, label_key, hint_key)) in kinds.iter().enumerate() {
-        theme::wrap_chip(ui, avail, &mut row_x, side, 4.0);
+    for (i, (kind, label_key)) in kinds.iter().enumerate() {
+        let label = t(label_key);
+        let w = kind_filter_tab_width(ui, &label, h);
+        theme::wrap_chip(ui, avail, &mut row_x, w, 4.0);
         let on = state.news.filter == *kind;
-        if kind_icon_button(ui, &format!("##news_kind_{i}"), side, on, *kind) && !on {
+        if kind_filter_tab(ui, &format!("##news_kind_{i}"), &label, w, h, on, *kind) && !on {
             pick = Some(*kind);
-        }
-        if ui.is_item_hovered() {
-            theme::wide_tooltip(ui, |ui| {
-                ui.text_colored(theme::pal().gold, t(label_key));
-                ui.text(t(hint_key));
-            });
         }
     }
     if let Some(kind) = pick {
@@ -174,16 +155,33 @@ fn kind_filters(ui: &Ui, state: &mut AddonState) {
     }
 }
 
-fn kind_icon_button(ui: &Ui, id: &str, side: f32, on: bool, kind: Option<NewsKind>) -> bool {
+fn kind_filter_tab_width(ui: &Ui, label: &str, h: f32) -> f32 {
+    let pad_x = 8.0;
+    let glyph = (h * 0.55).max(12.0);
+    let gap = 6.0;
+    let tw = ui.calc_text_size(label)[0];
+    (pad_x + glyph + gap + tw + pad_x).max(h)
+}
+
+/// Icon + visible label tab. Always shows both; narrow rows wrap via wrap_chip.
+fn kind_filter_tab(
+    ui: &Ui,
+    id: &str,
+    label: &str,
+    w: f32,
+    h: f32,
+    on: bool,
+    kind: Option<NewsKind>,
+) -> bool {
     let p = ui.cursor_screen_pos();
-    let hit = ui.invisible_button(id, [side, side]);
+    let hit = ui.invisible_button(id, [w, h]);
     let hovered = ui.is_item_hovered();
     let fill = if on {
         theme::pal().gold_fill
     } else if hovered {
         theme::pal().gold_hover
     } else {
-        theme::with_alpha(theme::pal().chip_idle_fill, 0.72)
+        theme::pal().chip_idle_fill
     };
     let rim = if on {
         theme::pal().gold
@@ -197,21 +195,24 @@ fn kind_icon_button(ui: &Ui, id: &str, side: f32, on: bool, kind: Option<NewsKin
     } else {
         theme::pal().cream
     };
+    let pad_x = 8.0;
+    let glyph = (h * 0.55).max(12.0);
+    let gap = 6.0;
     let dl = ui.get_window_draw_list();
-    dl.add_rect(p, [p[0] + side, p[1] + side], fill)
+    dl.add_rect(p, [p[0] + w, p[1] + h], fill)
         .filled(true)
-        .rounding(theme::ICON_ROUNDING)
+        .rounding(h * 0.45)
         .build();
-    dl.add_rect(p, [p[0] + side, p[1] + side], rim)
-        .rounding(theme::ICON_ROUNDING)
+    dl.add_rect(p, [p[0] + w, p[1] + h], rim)
+        .rounding(h * 0.45)
         .build();
-    draw_kind_glyph(
-        &dl,
-        kind,
-        [p[0] + side * 0.5, p[1] + side * 0.5],
-        side * 0.62,
-        ink,
-    );
+    let gx = p[0] + pad_x + glyph * 0.5;
+    let gy = p[1] + h * 0.5;
+    draw_kind_glyph(&dl, kind, [gx, gy], glyph, ink);
+    let tw = ui.calc_text_size(label);
+    let tx = p[0] + pad_x + glyph + gap;
+    let ty = p[1] + (h - tw[1]) * 0.5;
+    dl.add_text([tx, ty], crate::ui::color_u32(ink), label);
     hit
 }
 
