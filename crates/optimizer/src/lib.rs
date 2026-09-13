@@ -4,6 +4,7 @@ pub mod benchmark;
 pub mod build_template;
 pub mod combat;
 pub mod consumables;
+pub mod infusions;
 pub mod context;
 pub mod data;
 pub mod engine;

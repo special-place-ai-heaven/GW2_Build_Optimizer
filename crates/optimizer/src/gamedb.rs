@@ -632,6 +632,80 @@ impl GameDb {
         self.consumables_of(&["Utility", "Enhancement"], mode)
     }
 
+    /// Standing combat-stat infusions/enrichments legal in `mode`.
+    /// Agony-only upgrades are excluded (fixed fill+lock only).
+    pub fn stat_infusions_for(&self, mode: &gw2_core::types::GameMode) -> Vec<&Item> {
+        let ids = self
+            .items_by_type
+            .get("UpgradeComponent")
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let mut out: Vec<&Item> = ids
+            .iter()
+            .filter_map(|id| self.items.get(id))
+            .filter(|item| {
+                crate::infusions::is_stat_infusion(item)
+                    && crate::infusions::item_legal_for_mode(item, mode)
+            })
+            .collect();
+        out.sort_by_key(|item| item.id);
+        out
+    }
+
+    /// Sample Ascended (or any) item's infusion_slots flags for a gear slot.
+    pub fn sample_infusion_slot_flags(
+        &self,
+        slot: gw2_core::types::GearSlot,
+    ) -> Option<Vec<Vec<String>>> {
+        use gw2_core::types::GearSlot;
+        let want_types: &[&str] = match slot {
+            GearSlot::Helm
+            | GearSlot::Shoulders
+            | GearSlot::Coat
+            | GearSlot::Gloves
+            | GearSlot::Leggings
+            | GearSlot::Boots => &["Armor"],
+            GearSlot::Back => &["Back"],
+            GearSlot::Accessory1 | GearSlot::Accessory2 => &["Trinket"],
+            GearSlot::Amulet => &["Trinket"],
+            GearSlot::Ring1 | GearSlot::Ring2 => &["Trinket"],
+            GearSlot::WeaponSet1Main
+            | GearSlot::WeaponSet1Off
+            | GearSlot::WeaponSet2Main
+            | GearSlot::WeaponSet2Off => &["Weapon"],
+        };
+        let detail_hint: Option<&str> = match slot {
+            GearSlot::Amulet => Some("Amulet"),
+            GearSlot::Ring1 | GearSlot::Ring2 => Some("Ring"),
+            GearSlot::Accessory1 | GearSlot::Accessory2 => Some("Accessory"),
+            _ => None,
+        };
+        for ty in want_types {
+            let ids = self.items_by_type.get(*ty).map(|v| v.as_slice()).unwrap_or(&[]);
+            for id in ids {
+                let Some(item) = self.items.get(id) else { continue };
+                let Some(details) = item.details.as_ref() else { continue };
+                if details.infusion_slots.is_empty() {
+                    continue;
+                }
+                if let Some(hint) = detail_hint {
+                    let dt = details.detail_type.as_deref().unwrap_or("");
+                    if !dt.eq_ignore_ascii_case(hint) {
+                        continue;
+                    }
+                }
+                return Some(
+                    details
+                        .infusion_slots
+                        .iter()
+                        .map(|s| s.flags.clone())
+                        .collect(),
+                );
+            }
+        }
+        None
+    }
+
     fn consumables_of(
         &self,
         detail_types: &[&str],

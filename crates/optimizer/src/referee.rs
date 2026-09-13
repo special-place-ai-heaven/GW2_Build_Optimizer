@@ -1110,11 +1110,12 @@ pub fn evaluate_validated_build(
     evaluate_validated_build_with(validated, db, profession_name, weights, ctx, scenario, &[])
 }
 
-/// Evaluate a completed kit after the cheap consumable inner argmax.
+/// Evaluate a completed kit after the cheap consumable + infusion inner argmax.
 ///
-/// Writes chosen food/utility ids onto `validated` (locks are not overwritten)
-/// and then ranks the exact kit. Search calls this after the kit is complete
-/// and before the rank is retained. Exact-kit tests use [`evaluate_validated_build`].
+/// Writes chosen food/utility/infusion-seat ids onto `validated` (locks are not
+/// overwritten) and then ranks the exact kit. Search calls this after the kit is
+/// complete and before the rank is retained. Exact-kit tests use
+/// [`evaluate_validated_build`].
 pub fn evaluate_validated_build_solved(
     validated: &mut ValidatedBuild,
     db: &GameDb,
@@ -1125,6 +1126,15 @@ pub fn evaluate_validated_build_solved(
     locks: &gw2_core::types::BuildLocks,
 ) -> RefereeReport {
     crate::consumables::assign_best_consumables(
+        validated,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+        locks,
+    );
+    crate::infusions::assign_best_infusions(
         validated,
         db,
         profession_name,
@@ -2913,6 +2923,7 @@ mod tests {
             relic: None,
             food: None,
             utility: None,
+            infusion_seats: Vec::new(),
             gear_slots: gw2_core::types::GearSlots::default(), // itemstat 9999 intentionally absent
             explanation: String::new(),
             synergy_explanation: String::new(),

@@ -77,6 +77,9 @@ pub struct ValidatedBuild {
     pub food: Option<ValidatedItem>,
     /// Enhancement (utility consumable). Same ownership as rune/relic.
     pub utility: Option<ValidatedItem>,
+    /// Per worn-slot infusion seats (not a bag). Layout from item infusion_slots;
+    /// inner argmax writes chosen ids. Empty in PvP.
+    pub infusion_seats: Vec<crate::infusions::InfusionSeat>,
     /// Per-slot gear prefixes. Population policy (Task 2): every constructor
     /// that used to write the build-wide `gear_prefix` now fills all sixteen
     /// slots; category overrides (the old `gear_groups`) overwrite their own
