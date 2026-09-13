@@ -2,6 +2,13 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.23 - 2026-09-13
+
+Settings Refresh Game Data no longer wipes the cache. SCHEMA CHANGE = N.
+
+- Refresh button removed `cache.clear_all()` and no longer clears `cache_build_number` before `RefreshMode::Default`.
+- Warm cache + same build can take the FOLD3 skip path again (0 catalog body fetches); Clear Cache still wipes explicitly.
+
 ## 1.14.22 - 2026-09-13
 
 NeedsMechanic Engine E2: trait-skill cast scheduler via existing TriggerRule sites. SCHEMA CHANGE = N.
