@@ -4,8 +4,8 @@
 |---|---|---|---|---|---|---|---|---|
 | Elementalist | 108 | 29 | 12 | 0 | 0 | 67 | 0 | 0 |
 | Engineer | 108 | 32 | 13 | 0 | 0 | 63 | 0 | 0 |
-| Guardian | 108 | 35 | 12 | 0 | 0 | 61 | 0 | 0 |
-| Mesmer | 108 | 22 | 6 | 1 | 0 | 79 | 0 | 0 |
+| Guardian | 108 | 35 | 13 | 0 | 0 | 60 | 0 | 0 |
+| Mesmer | 108 | 22 | 8 | 1 | 0 | 77 | 0 | 0 |
 | Necromancer | 108 | 2 | 27 | 20 | 1 | 56 | 0 | 2 |
 | Ranger | 108 | 42 | 6 | 0 | 0 | 60 | 0 | 0 |
 | Revenant | 108 | 36 | 7 | 0 | 0 | 65 | 0 | 0 |
@@ -304,7 +304,7 @@
 | Zeal | 2017 | Furious Focus | facts |  |
 | Dragonhunter | 1848 | Virtuous Action | NeedsMechanic: traps | https://wiki.guildwars2.com/wiki/Virtuous_Action (read 2026-09-13: Virtues become physical aspects; access to Traps) |
 | Dragonhunter | 1898 | Hunter's Premonition | record | https://wiki.guildwars2.com/wiki/Hunter%27s_Premonition (read 2026-09-13: Aegis 3 s when you use a Trap skill) |
-| Dragonhunter | 1983 | Dulled Senses | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Dulled_Senses (read 2026-09-13: Cripple enemies you disable) |
+| Dragonhunter | 1983 | Dulled Senses | record | https://wiki.guildwars2.com/wiki/Dulled_Senses (read 2026-09-13: Cripple 4 s when you disable a foe) |
 | Dragonhunter | 1911 | Soaring Devastation | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Soaring_Devastation (read 2026-09-13: Wings of Resolve landing attack and movement speed) |
 | Dragonhunter | 1896 | Defender's Dogma | facts |  |
 | Dragonhunter | 2037 | Hunter's Determination | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Hunter%27s_Determination (read 2026-09-13: Elite breaks stun and grants endurance) |
@@ -371,7 +371,7 @@
 | Domination | 686 | Bountiful Blades | NeedsMechanic: phantasms | https://wiki.guildwars2.com/wiki/Bountiful_Blades (read 2026-09-13: Greatsword / Phantasmal Berserker summon and bounce improvements) |
 | Domination | 682 | Empowered Illusions | facts |  |
 | Domination | 687 | Rending Shatter | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Rending_Shatter (read 2026-09-13: Shatter skills inflict vulnerability on hit) |
-| Domination | 694 | Dazzling | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Dazzling (read 2026-09-13: Disabling a foe also applies vulnerability) |
+| Domination | 694 | Dazzling | record | https://wiki.guildwars2.com/wiki/Dazzling (read 2026-09-13: 5 Vulnerability 6 s in WvW when you disable a foe) |
 | Domination | 693 | Shattered Concentration | NeedsMechanic: shatter | https://wiki.guildwars2.com/wiki/Shattered_Concentration (read 2026-09-13: Shatter skills remove a boon on hit) |
 | Domination | 713 | Egotism | facts |  |
 | Domination | 712 | Furious Interruption | NeedsMechanic: interrupt | https://wiki.guildwars2.com/wiki/Furious_Interruption (read 2026-09-13: Quickness when you interrupt a foe) |
@@ -416,7 +416,7 @@
 | Inspiration | 1866 | Restorative Illusions | facts |  |
 | Inspiration | 752 | Blurred Inscriptions | NeedsMechanic: signets | https://wiki.guildwars2.com/wiki/Blurred_Inscriptions (read 2026-09-13: Signets improved; activating a signet grants distortion) |
 | Chronomancer | 2030 | Time Splitter | NeedsMechanic: continuum split | https://wiki.guildwars2.com/wiki/Time_Splitter (read 2026-09-13: Unlocks chronomancer shatter skills and Wells (Continuum Split line)) |
-| Chronomancer | 1838 | Delayed Reactions | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Delayed_Reactions (read 2026-09-13: Disabling a foe slows them) |
+| Chronomancer | 1838 | Delayed Reactions | record | https://wiki.guildwars2.com/wiki/Delayed_Reactions (read 2026-09-13: Slow 1.5 s in WvW when you disable a foe; ICD 3 s) |
 | Chronomancer | 1995 | Time Catches Up | facts |  |
 | Chronomancer | 1987 | All's Well That Ends Well | facts |  |
 | Chronomancer | 1927 | Flow of Time | facts |  |

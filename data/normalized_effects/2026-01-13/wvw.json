@@ -8846,22 +8846,27 @@
       }
     },
     {
-      "effect_id": "trait:1983:coverage",
+      "effect_id": "trait:1983:0",
       "source_type": "Trait",
       "source_id": 1983,
       "source_name": "Dulled Senses",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnDisableFoe",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Dulled_Senses (read 2026-09-13: Cripple enemies you disable)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "disable trigger"
+      "source": "https://wiki.guildwars2.com/wiki/Dulled_Senses (read 2026-09-13: Cripple 4 s when you disable a foe)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Cripple",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 4000
       }
     },
     {
@@ -13099,22 +13104,27 @@
       }
     },
     {
-      "effect_id": "trait:694:coverage",
+      "effect_id": "trait:694:0",
       "source_type": "Trait",
       "source_id": 694,
       "source_name": "Dazzling",
-      "category": "FlatStat",
-      "value": null,
+      "category": "AppliesCondition",
+      "value": 5.0,
       "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "trigger_rule": "OnDisableFoe",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Dazzling (read 2026-09-13: Disabling a foe also applies vulnerability)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "disable trigger"
+      "source": "https://wiki.guildwars2.com/wiki/Dazzling (read 2026-09-13: 5 Vulnerability 6 s in WvW when you disable a foe)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Vulnerability",
+        "amount_mode": "Stacks",
+        "amount_value": 5.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 6000
       }
     },
     {
@@ -13726,22 +13736,29 @@
       }
     },
     {
-      "effect_id": "trait:1838:coverage",
+      "effect_id": "trait:1838:0",
       "source_type": "Trait",
       "source_id": 1838,
       "source_name": "Delayed Reactions",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnDisableFoe",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Delayed_Reactions (read 2026-09-13: Disabling a foe slows them)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "disable trigger"
+      "source": "https://wiki.guildwars2.com/wiki/Delayed_Reactions (read 2026-09-13: Slow 1.5 s in WvW when you disable a foe; ICD 3 s)",
+      "internal_cooldown": 3.0,
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Slow",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 1500,
+        "internal_cooldown_ms": 3000
       }
     },
     {

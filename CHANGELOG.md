@@ -2,6 +2,14 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.21 - 2026-09-13
+
+NeedsMechanic Engine E1: TriggerBus OnDisableFoe fires on landed foe disable. SCHEMA CHANGE = N.
+
+- Shared `land_foe_disable` reads `TargetState.disabled_until_ms` (Stability blocks; overlap that does not extend does not emit). Flow sim and WvW CrowdControl use the same emit; one TriggerBus (E0), no second disable engine.
+- Executable OnDisableFoe records for Dazzling, Delayed Reactions, and Dulled Senses (NeedsMechanic:disable trigger -> record). No trait-skill casts; no profession cores.
+- Kent causal disable micro-proof: disable inactive vs active changes Dazzling Vulnerability.
+
 ## 1.14.20 - 2026-09-13
 
 Ada FOLD3: idempotent Refresh Game Data for KEPT catalogs. SCHEMA CHANGE = N.
