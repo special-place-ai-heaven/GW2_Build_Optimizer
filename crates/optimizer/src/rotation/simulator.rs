@@ -883,7 +883,9 @@ impl SimState {
                     .iter()
                     .position(|c| c.name.eq_ignore_ascii_case(&condition.name))
                 {
-                    self.condition_ticks[slot] += 1.0;
+                    // Intensity ledger stores stacks on the entry; pre-Phase-3
+                    // had one ConditionStack per stack so += 1.0 was correct.
+                    self.condition_ticks[slot] += condition.stacks as f64;
                 }
                 condition.next_tick_ms = condition
                     .next_tick_ms
@@ -905,7 +907,7 @@ impl SimState {
                         .iter()
                         .position(|c| c.name.eq_ignore_ascii_case(&condition.name))
                     {
-                        self.condition_ticks[slot] += frac;
+                        self.condition_ticks[slot] += condition.stacks as f64 * frac;
                     }
                 }
             }
