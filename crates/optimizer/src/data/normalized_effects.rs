@@ -198,6 +198,15 @@ pub enum TriggerRule {
     OnBoonStripped,
     /// Every `internal_cooldown` seconds from the fight's start.
     Periodic,
+    // NeedsMechanic Engine E0 (TriggerBus)
+    /// Player dodge roll resolves (EndurancePool + DodgeAction).
+    OnDodge,
+    /// Player disables a foe (reads TargetState disable; no second map).
+    OnDisableFoe,
+    /// Player elite skill resolves.
+    OnElite,
+    /// A modeled threshold crossed (health / similar); bus OnThreshold.
+    OnThreshold,
 }
 
 /// Health prerequisite of an `OnHealthThreshold` / `Conditional` effect,
@@ -1345,6 +1354,10 @@ mod tests {
             (TriggerRule::OnBoonApplied, "\"OnBoonApplied\""),
             (TriggerRule::OnBoonStripped, "\"OnBoonStripped\""),
             (TriggerRule::Periodic, "\"Periodic\""),
+            (TriggerRule::OnDodge, "\"OnDodge\""),
+            (TriggerRule::OnDisableFoe, "\"OnDisableFoe\""),
+            (TriggerRule::OnElite, "\"OnElite\""),
+            (TriggerRule::OnThreshold, "\"OnThreshold\""),
         ] {
             let mut effect = minimal_effect("kind");
             effect.trigger_rule = rule.clone();
@@ -1519,6 +1532,10 @@ mod tests {
                             | TriggerRule::OnBoonApplied
                             | TriggerRule::OnBoonStripped
                             | TriggerRule::Periodic
+                            | TriggerRule::OnDodge
+                            | TriggerRule::OnDisableFoe
+                            | TriggerRule::OnElite
+                            | TriggerRule::OnThreshold
                     )
                     || matches!(
                         effect.inner_category.as_ref().unwrap_or(&effect.category),

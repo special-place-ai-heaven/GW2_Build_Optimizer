@@ -8,9 +8,9 @@
 | Mesmer | 108 | 22 | 6 | 1 | 0 | 79 | 0 | 0 |
 | Necromancer | 108 | 2 | 27 | 20 | 1 | 56 | 0 | 2 |
 | Ranger | 108 | 42 | 6 | 0 | 0 | 60 | 0 | 0 |
-| Revenant | 108 | 36 | 6 | 0 | 0 | 66 | 0 | 0 |
-| Thief | 108 | 42 | 11 | 0 | 0 | 55 | 0 | 0 |
-| Warrior | 108 | 38 | 15 | 1 | 0 | 54 | 0 | 0 |
+| Revenant | 108 | 36 | 7 | 0 | 0 | 65 | 0 | 0 |
+| Thief | 108 | 42 | 13 | 0 | 0 | 53 | 0 | 0 |
+| Warrior | 108 | 38 | 16 | 1 | 0 | 53 | 0 | 0 |
 
 ## Elementalist
 
@@ -736,7 +736,7 @@
 | Retribution | 1810 | Spiritual Reckoning | NeedsMechanic: legend | https://wiki.guildwars2.com/wiki/Spiritual_Reckoning (read 2026-09-13: Gain resolution when you invoke a legend; ICD 10 s) |
 | Retribution | 1757 | Unwavering Avoidance | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Unwavering_Avoidance (read 2026-09-13: Gain vigor when successfully evading an attack; ICD 5 s) |
 | Retribution | 1766 | Set in Stone | NeedsMechanic: profession skill | https://wiki.guildwars2.com/wiki/Set_in_Stone (read 2026-09-13: Gain protection when you use profession skill 2; affects True Nature as Herald) |
-| Retribution | 1782 | Resolute Evasion | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Resolute_Evasion (read 2026-09-13: Gain resolution after you dodge) |
+| Retribution | 1782 | Resolute Evasion | record | https://wiki.guildwars2.com/wiki/Resolute_Evasion (read 2026-09-13: Gain resolution after you dodge) |
 | Retribution | 1740 | Dwarven Battle Training | facts |  |
 | Retribution | 1713 | Determined Resolution | NeedsMechanic: incoming strike | https://wiki.guildwars2.com/wiki/Determined_Resolution (read 2026-09-13: Strike damage taken reduced while you have resolution) |
 | Retribution | 1779 | Vicious Reprisal | facts |  |
@@ -807,9 +807,9 @@
 
 | Line | Id | Trait | State | Source |
 |---|---|---|---|---|
-| Acrobatics | 1240 | Expeditious Dodger | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Expeditious_Dodger (read 2026-09-13: Swiftness 6 s on dodge) |
+| Acrobatics | 1240 | Expeditious Dodger | record | https://wiki.guildwars2.com/wiki/Expeditious_Dodger (read 2026-09-13: Swiftness 6 s on dodge) |
 | Acrobatics | 1112 | Instant Reflexes | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Instant_Reflexes (read 2026-09-13: Evasion (Instant Reflexes effect) on elite; 1.5 s in WvW) |
-| Acrobatics | 1289 | Pumping Up | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Pumping_Up (read 2026-09-13: Might on dodge (1 stack 20 s in WvW/PvP)) |
+| Acrobatics | 1289 | Pumping Up | record | https://wiki.guildwars2.com/wiki/Pumping_Up (read 2026-09-13: Might on dodge (1 stack 20 s in WvW/PvP)) |
 | Acrobatics | 1237 | Pain Response | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Pain_Response (read 2026-09-13: Dodging removes a damaging condition) |
 | Acrobatics | 1234 | Feline Grace | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Feline_Grace (read 2026-09-13: Vigor on evade (3 s in WvW/PvP)) |
 | Acrobatics | 1241 | Guarded Initiation | NeedsMechanic: movement skill | https://wiki.guildwars2.com/wiki/Guarded_Initiation (read 2026-09-13: Resistance 2 s on movement skills; ICD 5 s) |
@@ -938,7 +938,7 @@
 | Defense | 1372 | Cull the Weak | facts |  |
 | Defense | 1348 | Adrenal Health | NeedsMechanic: adrenaline | https://wiki.guildwars2.com/wiki/Adrenal_Health (read 2026-09-13: Heal based on adrenaline spent; Adrenal Health stacks) |
 | Defense | 1368 | Defy Pain | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Defy_Pain (read 2026-09-13: Cast Lesser Endure Pain when you use an elite skill) |
-| Defense | 1379 | Resilient Roll | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Resilient_Roll (read 2026-09-13: Gain resistance when you dodge) |
+| Defense | 1379 | Resilient Roll | record | https://wiki.guildwars2.com/wiki/Resilient_Roll (read 2026-09-13: Gain resistance when you dodge) |
 | Defense | 1367 | Merciless Hammer | facts |  |
 | Defense | 1380 | Hardened Armor | record | https://wiki.guildwars2.com/wiki/Hardened_Armor (read 2026-09-13: Resolution 5 s when struck by a critical hit; ICD 15 s; block and damage reduction are NeedsMechanic) |
 | Defense | 1375 | Last Stand | facts |  |

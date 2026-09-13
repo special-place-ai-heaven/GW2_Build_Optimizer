@@ -318,6 +318,15 @@ struct ScheduledStrike {
 }
 
 struct SimState {
+    /// E0: shared TriggerBus + Endurance/Dodge types with wvw_timeline.
+    /// Live try_dodge / OnDodge wiring is WvW-only today; flow tick hookup is follow-up.
+    #[allow(dead_code)]
+    trigger_bus: super::trigger_bus::TriggerBus,
+    #[allow(dead_code)]
+    endurance: super::trigger_bus::EndurancePool,
+    #[allow(dead_code)]
+    dodge_action: super::trigger_bus::DodgeAction,
+
     skills: Vec<RotationSkill>,
     skill_states: Vec<SkillState>,
     duration_ms: u32,
@@ -382,6 +391,9 @@ impl SimState {
             .collect();
 
         Self {
+            trigger_bus: super::trigger_bus::TriggerBus::new(),
+            endurance: super::trigger_bus::EndurancePool::new_full(),
+            dodge_action: super::trigger_bus::DodgeAction::new(),
             skills: skills.to_vec(),
             skill_states,
             duration_ms,
@@ -2786,5 +2798,22 @@ mod tests {
         };
         ledger.conditions.push(shared);
         assert_eq!(ledger.stacks_of("Burning", 0), 2);
+    }
+
+    /// E0 Kent: flow sim and WvW timeline share one TriggerBus / Endurance / Dodge family.
+    #[test]
+    fn kent_e0_flow_and_wvw_share_trigger_bus_family() {
+        use super::super::trigger_bus::{
+            BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST,
+        };
+        let mut pool = EndurancePool::new_full();
+        let mut bus = TriggerBus::new();
+        let mut dodge = DodgeAction::new();
+        assert!(dodge.try_dodge(&mut pool, &mut bus, 0));
+        assert_eq!(bus.count(BusEvent::OnDodge), 1);
+        assert!((pool.spent - DODGE_COST).abs() < 1e-9);
+        // Same types the timeline holds — not a second dodge path.
+        let _also: TriggerBus = TriggerBus::new();
+        let _also_pool: EndurancePool = EndurancePool::new_full();
     }
 }

@@ -11,8 +11,10 @@ pub mod prose;
 pub(crate) mod reaper_fixture;
 pub mod simulator;
 pub mod skill_timings;
+pub mod trigger_bus;
 pub mod wvw_timeline;
 
+pub use trigger_bus::{BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST};
 pub use wvw_timeline::WvwCombatReport;
 
 use std::collections::HashMap;
