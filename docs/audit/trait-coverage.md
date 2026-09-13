@@ -4,7 +4,7 @@
 |---|---|---|---|---|---|---|---|---|
 | Elementalist | 108 | 29 | 0 | 0 | 0 | 0 | 79 | 0 |
 | Engineer | 108 | 32 | 0 | 0 | 0 | 0 | 76 | 0 |
-| Guardian | 108 | 35 | 1 | 0 | 0 | 0 | 72 | 0 |
+| Guardian | 108 | 35 | 12 | 0 | 0 | 61 | 0 | 0 |
 | Mesmer | 108 | 22 | 0 | 1 | 0 | 0 | 85 | 0 |
 | Necromancer | 108 | 2 | 27 | 20 | 1 | 56 | 0 | 2 |
 | Ranger | 108 | 42 | 6 | 0 | 0 | 60 | 0 | 0 |
@@ -242,114 +242,114 @@
 
 | Line | Id | Trait | State | Source |
 |---|---|---|---|---|
-| Honor | 564 | Vigorous Precision | NoRecord |  |
-| Honor | 1899 | Invigorated Bulwark | NoRecord |  |
-| Honor | 559 | Protective Reviver | NoRecord |  |
-| Honor | 654 | Protector's Restoration | NoRecord |  |
+| Honor | 564 | Vigorous Precision | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Vigorous_Precision (read 2026-09-13: Vigor at end of dodge roll) |
+| Honor | 1899 | Invigorated Bulwark | NeedsMechanic: block | https://wiki.guildwars2.com/wiki/Invigorated_Bulwark (read 2026-09-13: Healing stacks and mace recharge/boon duration on block) |
+| Honor | 559 | Protective Reviver | NeedsMechanic: revive | https://wiki.guildwars2.com/wiki/Protective_Reviver (read 2026-09-13: Lesser Shield of Absorption on revive start) |
+| Honor | 654 | Protector's Restoration | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Protector%27s_Restoration (read 2026-09-13: Cast Lesser Symbol of Protection on heal skill) |
 | Honor | 551 | Selfless Daring | facts |  |
 | Honor | 557 | Honorable Staff | facts |  |
 | Honor | 549 | Pure of Heart | facts |  |
-| Honor | 562 | Empowering Might | NoRecord |  |
-| Honor | 1685 | Purity of Body | NoRecord |  |
+| Honor | 562 | Empowering Might | record | https://wiki.guildwars2.com/wiki/Empowering_Might (read 2026-09-13: Might 6 s in WvW/PvP to nearby allies on crit; ICD 1 s; 5 targets) |
+| Honor | 1685 | Purity of Body | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Purity_of_Body (read 2026-09-13: Virtue 2 passive also regenerates endurance) |
 | Honor | 553 | Pure of Voice | record | https://wiki.guildwars2.com/wiki/Pure_of_Voice |
 | Honor | 558 | Writ of Persistence | facts |  |
-| Honor | 1682 | Force of Will | NoRecord |  |
-| Radiance | 572 | Justice is Blind | NoRecord |  |
-| Radiance | 577 | Inner Fire | NoRecord |  |
+| Honor | 1682 | Force of Will | NeedsMechanic: vitality scaling | https://wiki.guildwars2.com/wiki/Force_of_Will (read 2026-09-13: Vitality and healing-to-others scaled by vitality) |
+| Radiance | 572 | Justice is Blind | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Justice_is_Blind (read 2026-09-13: Light aura and blind on Virtue 1 activate) |
+| Radiance | 577 | Inner Fire | record | https://wiki.guildwars2.com/wiki/Inner_Fire (read 2026-09-13: Fury 8 s when you strike a burning foe; ICD 10 s; stack threshold 3 is API fact (any burning gates the record)) |
 | Radiance | 566 | Right-Hand Strength | facts |  |
-| Radiance | 574 | Healer's Resolution | NoRecord |  |
-| Radiance | 571 | Renewed Justice | NoRecord |  |
-| Radiance | 578 | Wrath of Justice | NoRecord |  |
+| Radiance | 574 | Healer's Resolution | record | https://wiki.guildwars2.com/wiki/Healer%27s_Resolution (read 2026-09-13: Resolution 8 s when you use a healing skill; ICD 20 s) |
+| Radiance | 571 | Renewed Justice | NeedsMechanic: kill | https://wiki.guildwars2.com/wiki/Renewed_Justice (read 2026-09-13: Virtue 1 renewed on foe kill) |
+| Radiance | 578 | Wrath of Justice | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Wrath_of_Justice (read 2026-09-13: Virtue 1 burn strike casts Lesser Signet of Wrath) |
 | Radiance | 567 | Radiant Fire | facts |  |
 | Radiance | 565 | Retribution | facts |  |
 | Radiance | 568 | Radiant Power | facts |  |
 | Radiance | 1686 | Amplified Wrath | facts |  |
-| Radiance | 579 | Perfect Inscriptions | NoRecord |  |
+| Radiance | 579 | Perfect Inscriptions | NeedsMechanic: signets | https://wiki.guildwars2.com/wiki/Perfect_Inscriptions (read 2026-09-13: Signet passives improved and persist while recharging) |
 | Radiance | 1683 | Righteous Instincts | facts |  |
-| Valor | 582 | Valorous Defense | NoRecord |  |
-| Valor | 588 | Strength of the Fallen | NoRecord |  |
-| Valor | 581 | Smiter's Boon | NoRecord |  |
-| Valor | 633 | Focus Mastery | NoRecord |  |
-| Valor | 594 | Steadfast Courage | NoRecord |  |
+| Valor | 582 | Valorous Defense | NeedsMechanic: incoming strike | https://wiki.guildwars2.com/wiki/Valorous_Defense (read 2026-09-13: Aegis when struck below 50% health) |
+| Valor | 588 | Strength of the Fallen | record | https://wiki.guildwars2.com/wiki/Strength_of_the_Fallen (read 2026-09-13: Remove 1 condition every 10 s; downed degeneration is NeedsMechanic downed) |
+| Valor | 581 | Smiter's Boon | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Smiter%27s_Boon (read 2026-09-13: Cast Lesser Smite Condition on heal skill) |
+| Valor | 633 | Focus Mastery | NeedsMechanic: recharge | https://wiki.guildwars2.com/wiki/Focus_Mastery (read 2026-09-13: Focus skills grant protection/resolution and reduced recharge) |
+| Valor | 594 | Steadfast Courage | NeedsMechanic: aegis | https://wiki.guildwars2.com/wiki/Steadfast_Courage (read 2026-09-13: Protection when aegis blocks an attack) |
 | Valor | 580 | Stalwart Defender | facts |  |
-| Valor | 584 | Redemption | NoRecord |  |
-| Valor | 1684 | Communal Defenses | NoRecord |  |
-| Valor | 583 | Might of the Protector | NoRecord |  |
+| Valor | 584 | Redemption | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Redemption (read 2026-09-13: Cast Lesser Litany of Wrath on Virtue 3 activate) |
+| Valor | 1684 | Communal Defenses | NeedsMechanic: block | https://wiki.guildwars2.com/wiki/Communal_Defenses (read 2026-09-13: Blocking grants aegis to nearby allies) |
+| Valor | 583 | Might of the Protector | NeedsMechanic: block | https://wiki.guildwars2.com/wiki/Might_of_the_Protector (read 2026-09-13: Might when you block attacks) |
 | Valor | 585 | Altruistic Healing | facts |  |
 | Valor | 586 | Monk's Focus | facts |  |
-| Valor | 589 | Tenacious Defense | NoRecord |  |
+| Valor | 589 | Tenacious Defense | NeedsMechanic: aegis | https://wiki.guildwars2.com/wiki/Tenacious_Defense (read 2026-09-13: Aegis block reduces Virtue 3 recharge) |
 | Virtues | 621 | Inspired Virtue | facts |  |
 | Virtues | 624 | Unscathed Contender | facts |  |
-| Virtues | 625 | Resolute Subconscious | NoRecord |  |
-| Virtues | 617 | Master of Consecrations | NoRecord |  |
-| Virtues | 604 | Virtue of Resolution | NoRecord |  |
-| Virtues | 603 | Inspiring Virtue | NoRecord |  |
-| Virtues | 610 | Absolute Resolve | NoRecord |  |
+| Virtues | 625 | Resolute Subconscious | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Resolute_Subconscious (read 2026-09-13: Resolution and aegis when disabled) |
+| Virtues | 617 | Master of Consecrations | NeedsMechanic: consecrations | https://wiki.guildwars2.com/wiki/Master_of_Consecrations (read 2026-09-13: Consecrations gain increased duration) |
+| Virtues | 604 | Virtue of Resolution | record | https://wiki.guildwars2.com/wiki/Virtue_of_Resolution (read 2026-09-13: Resolution 3 s when you activate a Virtue; resolution duration increase is NeedsMechanic boon extension) |
+| Virtues | 603 | Inspiring Virtue | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Inspiring_Virtue (read 2026-09-13: Strike damage increased after activating a virtue) |
+| Virtues | 610 | Absolute Resolve | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Absolute_Resolve (read 2026-09-13: Virtue 2 activate cleanses allies; stronger passive) |
 | Virtues | 587 | Glacial Heart | facts |  |
 | Virtues | 620 | Power of the Virtuous | facts |  |
-| Virtues | 622 | Permeating Wrath | NoRecord |  |
-| Virtues | 554 | Battle Presence | NoRecord |  |
-| Virtues | 612 | Indomitable Courage | NoRecord |  |
-| Zeal | 648 | Zealot's Resolution | NoRecord |  |
-| Zeal | 563 | Wrathful Spirit | NoRecord |  |
+| Virtues | 622 | Permeating Wrath | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Permeating_Wrath (read 2026-09-13: Justice passive burns in an area faster) |
+| Virtues | 554 | Battle Presence | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Battle_Presence (read 2026-09-13: Allies gain Virtue 2 passive; Willbender heal on Resolve) |
+| Virtues | 612 | Indomitable Courage | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Indomitable_Courage (read 2026-09-13: Virtue 3 breaks stun and grants stability; shorter passive interval) |
+| Zeal | 648 | Zealot's Resolution | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Zealot%27s_Resolution (read 2026-09-13: Lesser Symbol of Resolution when striking below health threshold) |
+| Zeal | 563 | Wrathful Spirit | NeedsMechanic: aegis | https://wiki.guildwars2.com/wiki/Wrathful_Spirit (read 2026-09-13: Aegis grants resolution and fury when it ends) |
 | Zeal | 634 | Fiery Wrath | facts |  |
-| Zeal | 1925 | Zealous Scepter | NoRecord |  |
+| Zeal | 1925 | Zealous Scepter | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Zealous_Scepter (read 2026-09-13: Might when Justice passive triggers; more with scepter) |
 | Zeal | 646 | Symbolic Exposure | facts |  |
 | Zeal | 628 | Renewing Splendor | facts |  |
 | Zeal | 653 | Zealous Blade | facts |  |
 | Zeal | 1556 | Kindled Zeal | facts |  |
-| Zeal | 649 | Symbolic Avenger | NoRecord |  |
-| Zeal | 635 | Eternal Armory | NoRecord |  |
-| Zeal | 637 | Shattered Aegis | NoRecord |  |
+| Zeal | 649 | Symbolic Avenger | NeedsMechanic: symbols | https://wiki.guildwars2.com/wiki/Symbolic_Avenger (read 2026-09-13: Strike damage stacks when Symbols hit) |
+| Zeal | 635 | Eternal Armory | record | https://wiki.guildwars2.com/wiki/Eternal_Armory (read 2026-09-13: Spirit Weapon hits: burning 4 s in competitive splits; additional ammunition is NeedsMechanic ammunition) |
+| Zeal | 637 | Shattered Aegis | NeedsMechanic: aegis | https://wiki.guildwars2.com/wiki/Shattered_Aegis (read 2026-09-13: Aegis block unleashes Mystic Rebuke) |
 | Zeal | 2017 | Furious Focus | facts |  |
-| Dragonhunter | 1848 | Virtuous Action | NoRecord |  |
-| Dragonhunter | 1898 | Hunter's Premonition | NoRecord |  |
-| Dragonhunter | 1983 | Dulled Senses | NoRecord |  |
-| Dragonhunter | 1911 | Soaring Devastation | NoRecord |  |
+| Dragonhunter | 1848 | Virtuous Action | NeedsMechanic: traps | https://wiki.guildwars2.com/wiki/Virtuous_Action (read 2026-09-13: Virtues become physical aspects; access to Traps) |
+| Dragonhunter | 1898 | Hunter's Premonition | record | https://wiki.guildwars2.com/wiki/Hunter%27s_Premonition (read 2026-09-13: Aegis 3 s when you use a Trap skill) |
+| Dragonhunter | 1983 | Dulled Senses | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Dulled_Senses (read 2026-09-13: Cripple enemies you disable) |
+| Dragonhunter | 1911 | Soaring Devastation | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Soaring_Devastation (read 2026-09-13: Wings of Resolve landing attack and movement speed) |
 | Dragonhunter | 1896 | Defender's Dogma | facts |  |
-| Dragonhunter | 2037 | Hunter's Determination | NoRecord |  |
+| Dragonhunter | 2037 | Hunter's Determination | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Hunter%27s_Determination (read 2026-09-13: Elite breaks stun and grants endurance) |
 | Dragonhunter | 1835 | Zealot's Aggression | facts |  |
-| Dragonhunter | 1943 | Bulwark | NoRecord |  |
+| Dragonhunter | 1943 | Bulwark | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Bulwark (read 2026-09-13: Shield of Courage radius and duration) |
 | Dragonhunter | 1926 | Pure of Sight | facts |  |
 | Dragonhunter | 1908 | Hunter's Fortification | facts |  |
 | Dragonhunter | 1963 | Heavy Light | facts |  |
 | Dragonhunter | 1955 | Big Game Hunter | facts |  |
-| Firebrand | 2089 | Purity of Word | NoRecord |  |
-| Firebrand | 2075 | Unrelenting Criticism | NoRecord |  |
-| Firebrand | 2101 | Liberator's Vow | NoRecord |  |
-| Firebrand | 2086 | Archivist of Whispers | NoRecord |  |
-| Firebrand | 2062 | Swift Scholar | NoRecord |  |
-| Firebrand | 2063 | Weighty Terms | NoRecord |  |
-| Firebrand | 2076 | Stalwart Speed | NoRecord |  |
-| Firebrand | 2116 | Legendary Lore | NoRecord |  |
+| Firebrand | 2089 | Purity of Word | NeedsMechanic: tomes | https://wiki.guildwars2.com/wiki/Purity_of_Word (read 2026-09-13: Virtues become Tomes; access to Mantras; page regen) |
+| Firebrand | 2075 | Unrelenting Criticism | NeedsMechanic: weapon-scoped | https://wiki.guildwars2.com/wiki/Unrelenting_Criticism (read 2026-09-13: Axe skills chance to inflict bleeding) |
+| Firebrand | 2101 | Liberator's Vow | record | https://wiki.guildwars2.com/wiki/Liberator%27s_Vow (read 2026-09-13: Quickness 1 s in WvW to nearby allies when you use a heal skill; ICD 7 s; 5 targets) |
+| Firebrand | 2086 | Archivist of Whispers | NeedsMechanic: pages | https://wiki.guildwars2.com/wiki/Archivist_of_Whispers (read 2026-09-13: Virtues/Tomes gain additional pages) |
+| Firebrand | 2062 | Swift Scholar | NeedsMechanic: tomes | https://wiki.guildwars2.com/wiki/Swift_Scholar (read 2026-09-13: Equipping a Virtue/Tome grants quickness; third tome skill grants pages) |
+| Firebrand | 2063 | Weighty Terms | NeedsMechanic: mantras | https://wiki.guildwars2.com/wiki/Weighty_Terms (read 2026-09-13: Mantra final charge slows foes and grants pages) |
+| Firebrand | 2076 | Stalwart Speed | NeedsMechanic: boon grant | https://wiki.guildwars2.com/wiki/Stalwart_Speed (read 2026-09-13: Granting aegis or stability also grants quickness) |
+| Firebrand | 2116 | Legendary Lore | NeedsMechanic: tomes | https://wiki.guildwars2.com/wiki/Legendary_Lore (read 2026-09-13: Tome skills gain margin bonuses (boons per tome)) |
 | Firebrand | 2148 | Imbued Haste | facts |  |
-| Firebrand | 2105 | Stoic Demeanor | NoRecord |  |
-| Firebrand | 2179 | Quickfire | NoRecord |  |
-| Firebrand | 2159 | Loremaster | NoRecord |  |
-| Luminary | 2381 | Luminary | NoRecord |  |
-| Luminary | 2410 | Shimmering Stances | NoRecord |  |
-| Luminary | 2417 | Resolute Blessing | NoRecord |  |
-| Luminary | 2329 | Persistent Blessing | NoRecord |  |
+| Firebrand | 2105 | Stoic Demeanor | record | https://wiki.guildwars2.com/wiki/Stoic_Demeanor (read 2026-09-13: Immobilize a foe: Resistance 2 s to nearby allies; ICD 5 s in WvW; disable trigger and tome passive are NeedsMechanic) |
+| Firebrand | 2179 | Quickfire | NeedsMechanic: ashes | https://wiki.guildwars2.com/wiki/Quickfire (read 2026-09-13: Granting quickness also grants Ashes of the Just; retain Justice passive) |
+| Firebrand | 2159 | Loremaster | NeedsMechanic: pages | https://wiki.guildwars2.com/wiki/Loremaster (read 2026-09-13: Retain Resolve passive; generate pages faster) |
+| Luminary | 2381 | Luminary | NeedsMechanic: radiant forge | https://wiki.guildwars2.com/wiki/Luminary (read 2026-09-13: Access to Radiant Forge and stance skills) |
+| Luminary | 2410 | Shimmering Stances | record | https://wiki.guildwars2.com/wiki/Shimmering_Stances (read 2026-09-13: Stance skills: Protection 3 s to affected allies) |
+| Luminary | 2417 | Resolute Blessing | NeedsMechanic: radiant forge | https://wiki.guildwars2.com/wiki/Resolute_Blessing (read 2026-09-13: Luminary's Blessing reduces incoming condition damage) |
+| Luminary | 2329 | Persistent Blessing | NeedsMechanic: radiant forge | https://wiki.guildwars2.com/wiki/Persistent_Blessing (read 2026-09-13: Refresh blessing and heal on Radiant Forge exit) |
 | Luminary | 2394 | Light's Gift | facts |  |
-| Luminary | 2330 | Resplendent Weaponry | NoRecord |  |
-| Luminary | 2401 | Purging Light | NoRecord |  |
-| Luminary | 2419 | Empowered Armaments | NoRecord |  |
-| Luminary | 2435 | Radiant Armaments | NoRecord |  |
-| Luminary | 2368 | Illuminating Inspiration | NoRecord |  |
-| Luminary | 2328 | Sovereign of Light | NoRecord |  |
-| Luminary | 2388 | Master-at-Arms | NoRecord |  |
-| Willbender | 2200 | Willbender Training | NoRecord |  |
+| Luminary | 2330 | Resplendent Weaponry | NeedsMechanic: radiant forge | https://wiki.guildwars2.com/wiki/Resplendent_Weaponry (read 2026-09-13: Boons to allies when equipping a radiant weapon) |
+| Luminary | 2401 | Purging Light | NeedsMechanic: light aura | https://wiki.guildwars2.com/wiki/Purging_Light (read 2026-09-13: Light aura on heal; cleanse allies when granting yourself light aura) |
+| Luminary | 2419 | Empowered Armaments | NeedsMechanic: radiant forge | https://wiki.guildwars2.com/wiki/Empowered_Armaments (read 2026-09-13: Strike damage when equipping a radiant weapon) |
+| Luminary | 2435 | Radiant Armaments | NeedsMechanic: radiant forge | https://wiki.guildwars2.com/wiki/Radiant_Armaments (read 2026-09-13: Bonus by radiant weapon; lingers after forge exit) |
+| Luminary | 2368 | Illuminating Inspiration | NeedsMechanic: radiant forge | https://wiki.guildwars2.com/wiki/Illuminating_Inspiration (read 2026-09-13: Virtue recharge when equipping a radiant weapon) |
+| Luminary | 2328 | Sovereign of Light | NeedsMechanic: light aura | https://wiki.guildwars2.com/wiki/Sovereign_of_Light (read 2026-09-13: Light aura on Radiant Forge enter; detonate on Luminary skills) |
+| Luminary | 2388 | Master-at-Arms | NeedsMechanic: radiant forge | https://wiki.guildwars2.com/wiki/Master-at-Arms (read 2026-09-13: Virtue use recharges matching radiant weapon skills) |
+| Willbender | 2200 | Willbender Training | NeedsMechanic: physical | https://wiki.guildwars2.com/wiki/Willbender_Training (read 2026-09-13: Virtues become movement-based; access to Physical skills) |
 | Willbender | 2191 | Searing Pact | facts |  |
 | Willbender | 2190 | Power for Power | facts |  |
 | Willbender | 2187 | Conceited Curate | facts |  |
-| Willbender | 2222 | Righteous Sprint | NoRecord |  |
-| Willbender | 2197 | Restorative Virtues | NoRecord |  |
-| Willbender | 2210 | Holy Reckoning | NoRecord |  |
-| Willbender | 2199 | Vanguard Tactics | NoRecord |  |
-| Willbender | 2189 | Lethal Tempo | NoRecord |  |
-| Willbender | 2195 | Phoenix Protocol | NoRecord |  |
+| Willbender | 2222 | Righteous Sprint | record | https://wiki.guildwars2.com/wiki/Righteous_Sprint (read 2026-09-13: Swiftness 5 s when you activate a Virtue; +25% movement speed is NeedsMechanic movement skill) |
+| Willbender | 2197 | Restorative Virtues | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Restorative_Virtues (read 2026-09-13: Virtue triggers reduce weapon cooldowns; vigor on Flowing Resolve) |
+| Willbender | 2210 | Holy Reckoning | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Holy_Reckoning (read 2026-09-13: Virtue triggers grant might; fury on Rushing Justice) |
+| Willbender | 2199 | Vanguard Tactics | NeedsMechanic: shadowstep | https://wiki.guildwars2.com/wiki/Vanguard_Tactics (read 2026-09-13: Courage grants resistance; shadowstep grants resolution and protection) |
+| Willbender | 2189 | Lethal Tempo | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Lethal_Tempo (read 2026-09-13: Damage stacks on virtue activate or passive trigger) |
+| Willbender | 2195 | Phoenix Protocol | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Phoenix_Protocol (read 2026-09-13: Boons on Resolve trigger and Flowing Resolve; modified resolve duration) |
 | Willbender | 2201 | Tyrant's Momentum | facts |  |
-| Willbender | 2198 | Deathless Courage | NoRecord |  |
+| Willbender | 2198 | Deathless Courage | NeedsMechanic: virtues | https://wiki.guildwars2.com/wiki/Deathless_Courage (read 2026-09-13: Incoming damage reduction while Courage is active) |
 
 ## Mesmer
 
