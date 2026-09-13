@@ -60,6 +60,9 @@ pub struct DamageModifiers {
     /// parser executed them. A trait whose facts all fell into `unparsed`
     /// is not consumed.
     pub consumed_trait_ids: Vec<u32>,
+    /// Target-conditional percents (vs-target / vs-disabled / PerFoeStack).
+    /// Parsed here, evaluated at resolve — never in `total_strike_mult`.
+    pub deferred_target: Vec<DeferredTargetModifier>,
 }
 
 /// One flattened, health-gated strike clause and where it came from.
@@ -70,6 +73,36 @@ pub struct ConditionalClause {
     pub value: f64,
     pub above: bool,
     pub percent: f64,
+}
+
+/// What a deferred target-conditional percent needs on the live foe at resolve.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TargetGate {
+    /// Named foe condition must be present ("vs. Vulnerability").
+    Condition(String),
+    /// Foe is hard-disabled ("vs. disabled foes").
+    Disabled,
+    /// Scales with foe stacks of `condition`, capped at `max` (PerFoeStack).
+    PerStack { condition: String, max: u32 },
+}
+
+/// Damage axis a deferred target modifier multiplies at resolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetModAxis {
+    Strike,
+    Condition,
+    Both,
+}
+
+/// Target-conditional percent captured at parse and evaluated only against
+/// live [`crate::rotation::combat_model::TargetState`] at skill land.
+/// Never folded into [`DamageModifiers::total_strike_mult`] / condi mult.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeferredTargetModifier {
+    pub gate: TargetGate,
+    /// Percentage points as written on the fact (10.0 = +10%).
+    pub percent: f64,
+    pub axis: TargetModAxis,
 }
 
 impl DamageModifiers {
@@ -119,7 +152,8 @@ impl DamageModifiers {
             && self.boon_duration_pct.is_empty()
             && self.trait_boon_duration_pct.is_empty()
             && self.healing_pct.is_empty()
-            && self.crit_chance_pct.is_empty())
+            && self.crit_chance_pct.is_empty()
+            && self.deferred_target.is_empty())
     }
 
     /// Total multiplicative condition damage modifier for a specific condition.
@@ -742,6 +776,8 @@ pub fn extract_damage_modifiers(
             competitive,
         );
         dst.unparsed.extend(src.unparsed);
+        dst.conditional_strike.extend(src.conditional_strike);
+        dst.deferred_target.extend(src.deferred_target);
     }
 
     let mut mods = DamageModifiers::default();
@@ -853,6 +889,10 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
     else {
         return;
     };
+    if let Some(deferred) = parse_deferred_target_modifier(text, *pct) {
+        mods.deferred_target.push(deferred);
+        return;
+    }
     match interpret_percent_fact(text, *pct) {
         PercentInterp::Skip => {}
         PercentInterp::Classified(class, points) => {
@@ -1087,6 +1127,161 @@ fn apply_percent_class(
     }
 }
 
+/// Capture vs-target / vs-disabled / PerFoeStack percents for resolve-time
+/// evaluation. Standing extractors must not fold these into DamageModifiers
+/// strike/condi buckets (Phase 3 invariant).
+pub(crate) fn parse_deferred_target_modifier(
+    text: &str,
+    percent: f64,
+) -> Option<DeferredTargetModifier> {
+    let t = strip_gw2_markup(text).trim().to_lowercase();
+    if percent.abs() < 0.001 {
+        return None;
+    }
+    let axis = deferred_target_axis(&t)?;
+
+    // Per-stack / for-each-stack (PerFoeStack shape).
+    if t.contains("per stack") || t.contains("for each stack") || t.contains("per foe stack") {
+        if let Some(condition) = named_condition_in_text(&t) {
+            let max = crate::data::boon_condition_formulas::conditions()
+                .max_stacks(&condition)
+                .unwrap_or(25);
+            return Some(DeferredTargetModifier {
+                gate: TargetGate::PerStack { condition, max },
+                percent,
+                axis,
+            });
+        }
+    }
+
+    let vs =
+        t.contains("vs.") || t.contains("versus") || t.contains(" against ") || t.contains("vs ");
+    if !vs {
+        return None;
+    }
+
+    // vs. disabled — checked before foe_cc_trigger would hide it.
+    if t.contains("disabled") || t.contains("disable") {
+        return Some(DeferredTargetModifier {
+            gate: TargetGate::Disabled,
+            percent,
+            axis,
+        });
+    }
+
+    if let Some(condition) = named_condition_in_text(&t) {
+        return Some(DeferredTargetModifier {
+            gate: TargetGate::Condition(condition),
+            percent,
+            axis,
+        });
+    }
+    None
+}
+
+fn deferred_target_axis(hay: &str) -> Option<TargetModAxis> {
+    if hay.contains("critical") || hay.contains("crit chance") || hay.contains("crit damage") {
+        // Crit gates stay on the normalized-effects / ConditionalSpec path.
+        return None;
+    }
+    let condi = hay.contains("condition damage")
+        || hay.contains("condition dmg")
+        || (hay.contains("condition") && !hay.contains("strike"));
+    let strike = hay.contains("strike") || hay.contains("power damage");
+    if strike && condi {
+        return Some(TargetModAxis::Both);
+    }
+    if strike {
+        return Some(TargetModAxis::Strike);
+    }
+    if condi {
+        return Some(TargetModAxis::Condition);
+    }
+    // Generic "damage vs …" applies to strike and condition (wiki Vulnerability).
+    if hay.contains("damage") || hay.contains("dmg") {
+        return Some(TargetModAxis::Both);
+    }
+    None
+}
+
+fn named_condition_in_text(hay: &str) -> Option<String> {
+    // Adjective / alias forms first so "vulnerable" maps to Vulnerability.
+    const ALIASES: &[(&str, &str)] = &[
+        ("vulnerable", "Vulnerability"),
+        ("vulnerability", "Vulnerability"),
+        ("bleeding", "Bleeding"),
+        ("burning", "Burning"),
+        ("poisoned", "Poisoned"),
+        ("poison", "Poisoned"),
+        ("torment", "Torment"),
+        ("confusion", "Confusion"),
+        ("confused", "Confusion"),
+        ("chilled", "Chilled"),
+        ("chill", "Chilled"),
+        ("crippled", "Crippled"),
+        ("cripple", "Crippled"),
+        ("weakness", "Weakness"),
+        ("weakened", "Weakness"),
+        ("blinded", "Blinded"),
+        ("blind", "Blinded"),
+        ("immobile", "Immobile"),
+        ("immobilized", "Immobile"),
+        ("immobilize", "Immobile"),
+        ("slow", "Slow"),
+        ("fear", "Fear"),
+        ("feared", "Fear"),
+        ("taunt", "Taunt"),
+    ];
+    for (needle, canonical) in ALIASES {
+        if hay.contains(needle) {
+            return Some((*canonical).to_string());
+        }
+    }
+    None
+}
+
+/// Resolve deferred target modifiers against live foe state.
+/// Returns a multiplicative factor for the requested axis (1.0 = no bonus).
+pub fn deferred_target_multiplier(
+    deferred: &[DeferredTargetModifier],
+    target: &crate::rotation::combat_model::TargetState,
+    now_ms: u32,
+    axis: TargetModAxis,
+) -> f64 {
+    let mut mult = 1.0;
+    for spec in deferred {
+        if !axis_matches(spec.axis, axis) {
+            continue;
+        }
+        let holds = match &spec.gate {
+            TargetGate::Condition(name) => target.stacks_of(name, now_ms) > 0,
+            TargetGate::Disabled => target.is_disabled(now_ms),
+            TargetGate::PerStack { condition, max } => {
+                target.stacks_of(condition, now_ms).min(*max) > 0
+            }
+        };
+        if !holds {
+            continue;
+        }
+        let stacks = match &spec.gate {
+            TargetGate::PerStack { condition, max } => {
+                target.stacks_of(condition, now_ms).min(*max) as f64
+            }
+            _ => 1.0,
+        };
+        mult *= 1.0 + stacks * spec.percent / 100.0;
+    }
+    mult
+}
+
+fn axis_matches(spec: TargetModAxis, want: TargetModAxis) -> bool {
+    match want {
+        TargetModAxis::Strike => matches!(spec, TargetModAxis::Strike | TargetModAxis::Both),
+        TargetModAxis::Condition => matches!(spec, TargetModAxis::Condition | TargetModAxis::Both),
+        TargetModAxis::Both => true,
+    }
+}
+
 fn percent_is_vs_target(rest_after_percent: &str) -> bool {
     let head: String = rest_after_percent.chars().take(48).collect();
     let t = head.to_lowercase();
@@ -1179,6 +1374,10 @@ pub(crate) fn parse_percent_clauses(mods: &mut DamageModifiers, text: &str) -> b
     for clause in crate::text_util::percent_clauses(text) {
         let hay = &clause.hay;
         if percent_text_is_ignored(hay) {
+            continue;
+        }
+        if let Some(deferred) = parse_deferred_target_modifier(hay, clause.value) {
+            mods.deferred_target.push(deferred);
             continue;
         }
         if percent_is_vs_target(&clause.after) {
@@ -3252,5 +3451,140 @@ mod tests {
         pve_strike.sort_by(|a, b| a.partial_cmp(b).unwrap());
         assert_eq!(pve_strike, vec![0.10, 0.25]);
         assert_eq!(pve.strike_add_pct, vec![0.15]);
+    }
+
+    // --- Phase 3 Kent probe B (Success [5]) ---
+
+    #[test]
+    fn kent_b_deferred_vs_target_resolve_not_static_modifiers() {
+        use crate::rotation::combat_model::{EnemyDummy, TargetState};
+
+        let cache: HashMap<u32, Trait> = [(
+            9001u32,
+            percent_trait(
+                9001,
+                "Kent Vs Target",
+                &[
+                    ("Strike Damage vs. Vulnerability", 10.0),
+                    ("Strike Damage vs. disabled foes", 15.0),
+                    ("Condition Damage per stack of Vulnerability", 2.0),
+                ],
+            ),
+        )]
+        .into_iter()
+        .collect();
+        let items = HashMap::new();
+        let mods = extract_damage_modifiers(
+            &[9001],
+            None,
+            &[],
+            None,
+            &cache,
+            &items,
+            &BalanceContext::pve(),
+        );
+        assert!(
+            mods.strike_pct.is_empty() && mods.strike_add_pct.is_empty(),
+            "vs-target must not land in static strike buckets: {:?}",
+            mods.strike_pct
+        );
+        assert!(
+            mods.condition_pct.is_empty() && mods.condition_add_pct.is_empty(),
+            "PerFoeStack must not land in static condi buckets: {:?}",
+            mods.condition_pct
+        );
+        assert!(
+            (mods.total_strike_mult() - 1.0).abs() < 1e-9,
+            "static total_strike_mult must stay 1.0"
+        );
+        assert!(
+            (mods.total_condi_mult() - 1.0).abs() < 1e-9,
+            "static total_condi_mult must stay 1.0"
+        );
+        assert_eq!(mods.deferred_target.len(), 3, "{:?}", mods.deferred_target);
+
+        let open = TargetState::from_seed(EnemyDummy::open());
+        let vuln =
+            TargetState::from_seed(EnemyDummy::open()).with_condition_stacks("Vulnerability", 5);
+        let mut disabled = TargetState::from_seed(EnemyDummy::open());
+        disabled.extend_disable(5_000);
+
+        let vs_cond = mods
+            .deferred_target
+            .iter()
+            .find(|d| matches!(d.gate, TargetGate::Condition(_)))
+            .expect("vs. Vulnerability");
+        let vs_dis = mods
+            .deferred_target
+            .iter()
+            .find(|d| matches!(d.gate, TargetGate::Disabled))
+            .expect("vs. disabled");
+        let per = mods
+            .deferred_target
+            .iter()
+            .find(|d| matches!(d.gate, TargetGate::PerStack { .. }))
+            .expect("PerFoeStack");
+
+        assert!(
+            (deferred_target_multiplier(
+                std::slice::from_ref(vs_cond),
+                &open,
+                0,
+                TargetModAxis::Strike
+            ) - 1.0)
+                .abs()
+                < 1e-9
+        );
+        assert!(
+            (deferred_target_multiplier(
+                std::slice::from_ref(vs_cond),
+                &vuln,
+                0,
+                TargetModAxis::Strike
+            ) - 1.10)
+                .abs()
+                < 1e-9
+        );
+        assert!(
+            (deferred_target_multiplier(
+                std::slice::from_ref(vs_dis),
+                &open,
+                0,
+                TargetModAxis::Strike
+            ) - 1.0)
+                .abs()
+                < 1e-9
+        );
+        assert!(
+            (deferred_target_multiplier(
+                std::slice::from_ref(vs_dis),
+                &disabled,
+                0,
+                TargetModAxis::Strike
+            ) - 1.15)
+                .abs()
+                < 1e-9
+        );
+        // 5 stacks * 2% = +10% on condition axis
+        assert!(
+            (deferred_target_multiplier(
+                std::slice::from_ref(per),
+                &vuln,
+                0,
+                TargetModAxis::Condition
+            ) - 1.10)
+                .abs()
+                < 1e-9
+        );
+        assert!(
+            (deferred_target_multiplier(
+                std::slice::from_ref(per),
+                &open,
+                0,
+                TargetModAxis::Condition
+            ) - 1.0)
+                .abs()
+                < 1e-9
+        );
     }
 }

@@ -15,7 +15,7 @@ use crate::data::normalized_effects::{Prerequisite, ScaleBy};
 use crate::data::quality::{CoverageEntry, FactualValue};
 use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
 
-use super::combat_model::{corrupt_into, EnemyDummy};
+use super::combat_model::{corrupt_into, EnemyDummy, TargetState, TimedFoeCondition};
 use super::simulator::{
     alacrity_cd_advance_ms, condition_tick_damage, crit_chance_fraction, reference_armor, SimParams,
 };
@@ -513,13 +513,8 @@ struct TimedBuff {
     expires_at_ms: u32,
 }
 
-#[derive(Debug, Clone)]
-struct TimedCondition {
-    name: String,
-    stacks: u32,
-    expires_at_ms: u32,
-    next_tick_ms: u32,
-}
+/// Player-incoming conditions share the foe ledger shape (Phase 3).
+type TimedCondition = TimedFoeCondition;
 
 struct BarrierLayer {
     amount: f64,
@@ -723,13 +718,10 @@ struct Timeline<'a> {
     scheduled_hits: Vec<ScheduledHit>,
     defenses: Vec<TimedDefense>,
     buffs: Vec<TimedBuff>,
-    outgoing_conditions: Vec<TimedCondition>,
+    /// Shared live foe ledger (Phase 3 TargetState).
+    target: TargetState,
     incoming_conditions: Vec<TimedCondition>,
     combo_field: Option<ComboFieldState>,
-    enemy_protection: bool,
-    enemy_stability: bool,
-    enemy_disabled_until_ms: u32,
-    enemy_health: f64,
     target_reached_at_ms: Option<u32>,
     player_health: f64,
     barrier: VecDeque<BarrierLayer>,
@@ -917,10 +909,16 @@ impl<'a> Timeline<'a> {
             skills,
             params,
             // ponytail: no-target dummy uses +inf so events keep firing and target_reached stays false
-            enemy_health: profile.target_health.unwrap_or(f64::INFINITY),
+            target: {
+                let mut t = TargetState::from_seed(enemy);
+                if let Some(hp) = profile.target_health {
+                    t.hp = Some(hp);
+                } else if t.hp.is_none() {
+                    t.hp = Some(f64::INFINITY);
+                }
+                t
+            },
             player_health: params.max_health,
-            enemy_protection: enemy.protection,
-            enemy_stability: enemy.stability,
             profile,
             now_ms: 0,
             next_action_ms: 0,
@@ -935,10 +933,8 @@ impl<'a> Timeline<'a> {
             scheduled_hits: Vec::new(),
             defenses: Vec::new(),
             buffs: Vec::new(),
-            outgoing_conditions: Vec::new(),
             incoming_conditions: Vec::new(),
             combo_field: None,
-            enemy_disabled_until_ms: 0,
             target_reached_at_ms: None,
             barrier: VecDeque::new(),
             protected_run_ms: 0,
@@ -1606,13 +1602,13 @@ impl<'a> Timeline<'a> {
                 priority += 900_000.0;
             }
             // Strip Stability/Protection before trying to CC or dump damage.
-            if has_strip && (self.enemy_stability || self.enemy_protection) {
+            if has_strip && (self.target.stability || self.target.protection) {
                 priority += 800_000.0;
             }
-            if has_control && !self.enemy_stability {
+            if has_control && !self.target.stability {
                 priority += 700_000.0;
             }
-            if has_control && self.enemy_stability {
+            if has_control && self.target.stability {
                 priority -= 500_000.0;
             }
             // Sprint 3 (specs/007-trait-triggers): the shroud is the build.
@@ -1747,7 +1743,7 @@ impl<'a> Timeline<'a> {
     }
 
     fn process_enemy_events(&mut self) {
-        if self.enemy_health <= 0.0 {
+        if !self.enemy_hp_alive() {
             return;
         }
         while self
@@ -1764,7 +1760,7 @@ impl<'a> Timeline<'a> {
             // A disabled opponent cannot continue a queued attack/cast. Existing
             // conditions still tick separately, but new strikes, CC, strips and
             // condition applications are lost during the control window.
-            if self.enemy_disabled_until_ms > self.now_ms {
+            if self.target.disabled_until_ms > self.now_ms {
                 continue;
             }
             match event.kind {
@@ -1997,11 +1993,11 @@ impl<'a> Timeline<'a> {
     fn remove_enemy_boons(&mut self, count: u32) -> Vec<&'static str> {
         let mut stripped = Vec::new();
         for _ in 0..count {
-            if self.enemy_stability {
-                self.enemy_stability = false;
+            if self.target.stability {
+                self.target.stability = false;
                 stripped.push("Stability");
-            } else if self.enemy_protection {
-                self.enemy_protection = false;
+            } else if self.target.protection {
+                self.target.protection = false;
                 stripped.push("Protection");
             } else {
                 break;
@@ -2114,7 +2110,7 @@ impl<'a> Timeline<'a> {
         let might = self.buff_stacks("Might") as f64;
         let condition_damage = self.params.condition_damage
             + might * crate::data::boon_condition_formulas::boons().might_condi_per_stack();
-        for condition in &mut self.outgoing_conditions {
+        for condition in &mut self.target.conditions {
             if condition.next_tick_ms <= self.now_ms
                 && condition.next_tick_ms <= condition.expires_at_ms
             {
@@ -2137,7 +2133,16 @@ impl<'a> Timeline<'a> {
             }
         }
         if outgoing_damage > 0.0 {
-            self.record_damage(outgoing_damage, self.control_owned());
+            let incoming_mult = self
+                .target
+                .vulnerability_multiplier(self.now_ms, &self.params.mode)
+                * crate::combat::deferred_target_multiplier(
+                    &self.params.deferred_target,
+                    &self.target,
+                    self.now_ms,
+                    crate::combat::TargetModAxis::Condition,
+                );
+            self.record_damage(outgoing_damage * incoming_mult, self.control_owned());
         }
 
         let mut incoming_damage = 0.0;
@@ -2169,7 +2174,8 @@ impl<'a> Timeline<'a> {
             }
             self.absorb_damage(incoming_damage);
         }
-        self.outgoing_conditions
+        self.target
+            .conditions
             .retain(|condition| condition.expires_at_ms > self.now_ms);
         self.incoming_conditions
             .retain(|condition| condition.expires_at_ms > self.now_ms);
@@ -2202,9 +2208,18 @@ impl<'a> Timeline<'a> {
                         self.crit_damage_conditional_pct(),
                     )
                     * self.params.strike_mult;
-                if self.enemy_protection {
+                if self.target.protection {
                     damage *= self.protection_multiplier;
                 }
+                damage *= self
+                    .target
+                    .vulnerability_multiplier(self.now_ms, &self.params.mode);
+                damage *= crate::combat::deferred_target_multiplier(
+                    &self.params.deferred_target,
+                    &self.target,
+                    self.now_ms,
+                    crate::combat::TargetModAxis::Strike,
+                );
                 damage *= self.strike_conditional_mult();
                 self.record_damage(damage, protected);
                 if self.trace_enabled {
@@ -2328,10 +2343,10 @@ impl<'a> Timeline<'a> {
             SkillEffect::CrowdControl {
                 kind, duration_ms, ..
             } => {
-                if !self.enemy_stability {
-                    let previous_end = self.enemy_disabled_until_ms.max(self.now_ms);
-                    let new_end = self.enemy_disabled_until_ms.max(self.at(*duration_ms));
-                    self.enemy_disabled_until_ms = new_end;
+                if !self.target.stability {
+                    let previous_end = self.target.disabled_until_ms.max(self.now_ms);
+                    let new_end = self.target.disabled_until_ms.max(self.at(*duration_ms));
+                    self.target.disabled_until_ms = new_end;
                     self.control_landed_ms += new_end.saturating_sub(previous_end);
                 }
                 // Wiki `Fear` (read 2026-09-08): "Fear is a condition ... Fear
@@ -2674,7 +2689,7 @@ impl<'a> Timeline<'a> {
         source_skill: Option<u32>,
         protected: bool,
     ) {
-        self.outgoing_conditions.push(TimedCondition {
+        self.target.conditions.push(TimedFoeCondition {
             name: name.into(),
             stacks,
             expires_at_ms: self.at(duration_ms),
@@ -2939,10 +2954,10 @@ impl<'a> Timeline<'a> {
             }
         }
         if let Some(condition) = &prerequisite.foe_condition {
-            let carried = self
-                .outgoing_conditions
-                .iter()
-                .any(|c| c.name.eq_ignore_ascii_case(condition) && c.expires_at_ms > self.now_ms);
+            let carried =
+                self.target.conditions.iter().any(|c| {
+                    c.name.eq_ignore_ascii_case(condition) && c.expires_at_ms > self.now_ms
+                });
             if !carried {
                 return Err(format!("foe not {condition}"));
             }
@@ -2956,7 +2971,7 @@ impl<'a> Timeline<'a> {
             let Some(&percent) = resolved(&gate.percent) else {
                 return Err("foe health gate unresolved".into());
             };
-            let ratio = self.enemy_health / target;
+            let ratio = self.enemy_hp() / target;
             let holds = if gate.above {
                 ratio > percent / 100.0
             } else {
@@ -3374,7 +3389,7 @@ impl<'a> Timeline<'a> {
     }
 
     fn control_owned(&self) -> bool {
-        self.enemy_disabled_until_ms > self.now_ms
+        self.target.disabled_until_ms > self.now_ms
             || self.has_defense(CoverKind::Stability)
             || self.has_defense(CoverKind::Invulnerability)
             || self.has_defense(CoverKind::Evade)
@@ -3390,7 +3405,7 @@ impl<'a> Timeline<'a> {
             .map(|defense| defense.expires_at_ms.saturating_sub(self.now_ms))
             .max()
             .unwrap_or(0);
-        defense.max(self.enemy_disabled_until_ms.saturating_sub(self.now_ms))
+        defense.max(self.target.disabled_until_ms.saturating_sub(self.now_ms))
     }
 
     fn has_defense(&self, kind: CoverKind) -> bool {
@@ -3481,13 +3496,35 @@ impl<'a> Timeline<'a> {
         self.healing += self.player_health - before;
     }
 
+    fn enemy_hp(&self) -> f64 {
+        self.target.hp.unwrap_or(0.0)
+    }
+
+    fn enemy_hp_alive(&self) -> bool {
+        self.target.hp.map(|h| h > 0.0).unwrap_or(false)
+    }
+
+    fn apply_to_enemy_hp(&mut self, amount: f64) -> f64 {
+        let Some(hp) = self.target.hp.as_mut() else {
+            return 0.0;
+        };
+        if *hp <= 0.0 {
+            return 0.0;
+        }
+        let applied = amount.min(*hp);
+        *hp -= applied;
+        applied
+    }
+
     fn record_damage(&mut self, amount: f64, protected: bool) {
-        if amount <= 0.0 || self.enemy_health <= 0.0 {
+        if amount <= 0.0 || !self.enemy_hp_alive() {
             return;
         }
-        let applied = amount.min(self.enemy_health);
-        self.enemy_health -= applied;
-        if self.enemy_health <= 0.0 && self.target_reached_at_ms.is_none() {
+        let applied = self.apply_to_enemy_hp(amount);
+        if applied <= 0.0 {
+            return;
+        }
+        if !self.enemy_hp_alive() && self.target_reached_at_ms.is_none() {
             self.target_reached_at_ms = Some(self.now_ms);
         }
         self.damage_events.push(DamageEvent {
@@ -3593,7 +3630,7 @@ impl<'a> Timeline<'a> {
         let sustain_margin = (self.healing + self.barrier_absorbed + self.avoided_damage
             - self.incoming_damage)
             / (self.profile.duration_ms as f64 / 1_000.0).max(1.0);
-        let target_reached = self.profile.target_health.is_some() && self.enemy_health <= 0.0;
+        let target_reached = self.profile.target_health.is_some() && !self.enemy_hp_alive();
         let sequence = secured_sequence_summary(
             &self.secured_tick_times,
             &self.protected_actions,
@@ -3882,13 +3919,15 @@ impl PrerequisiteView {
         Self {
             in_shroud: timeline.in_shroud.is_some(),
             foe_conditions: timeline
-                .outgoing_conditions
+                .target
+                .conditions
                 .iter()
                 .filter(|c| c.expires_at_ms > timeline.now_ms)
                 .map(|c| c.name.clone())
                 .collect(),
             foe_stacks: timeline
-                .outgoing_conditions
+                .target
+                .conditions
                 .iter()
                 .filter(|c| c.expires_at_ms > timeline.now_ms)
                 .map(|c| (c.name.clone(), c.stacks))
@@ -3897,7 +3936,7 @@ impl PrerequisiteView {
                 .profile
                 .target_health
                 .filter(|h| *h > 0.0)
-                .map(|target| timeline.enemy_health / target),
+                .map(|target| timeline.enemy_hp() / target),
         }
     }
 
@@ -4903,7 +4942,7 @@ mod tests {
             true,
             Vec::new(),
         );
-        timeline.outgoing_conditions.push(TimedCondition {
+        timeline.target.conditions.push(TimedFoeCondition {
             name: "Bleeding".into(),
             stacks: 1,
             expires_at_ms: 4_000,
@@ -4921,7 +4960,7 @@ mod tests {
             .map(|event| event.amount)
             .sum();
         assert!((total - one_tick * 4.0).abs() < 0.001);
-        assert!(timeline.outgoing_conditions.is_empty());
+        assert!(timeline.target.conditions.is_empty());
     }
 
     #[test]
@@ -5831,7 +5870,7 @@ mod tests {
             true,
             Vec::new(),
         );
-        timeline.outgoing_conditions.push(TimedCondition {
+        timeline.target.conditions.push(TimedFoeCondition {
             name: "Bleeding".into(),
             stacks: 1,
             expires_at_ms: 1_500,
@@ -5852,7 +5891,7 @@ mod tests {
             "expected 1.5 ticks ({}) got {total}",
             one_tick * 1.5
         );
-        assert!(timeline.outgoing_conditions.is_empty());
+        assert!(timeline.target.conditions.is_empty());
     }
 
     #[test]
@@ -5953,18 +5992,18 @@ mod tests {
             true,
             Vec::new(),
         );
-        timeline.enemy_protection = true;
+        timeline.target.protection = true;
         timeline.apply_skill_effect(1, &SkillEffect::CorruptBoons, false);
-        assert!(!timeline.enemy_stability);
-        assert_eq!(timeline.outgoing_conditions[0].name, "Fear");
+        assert!(!timeline.target.stability);
+        assert_eq!(timeline.target.conditions[0].name, "Fear");
         timeline.apply_skill_effect(1, &SkillEffect::StealBoons, false);
-        assert!(!timeline.enemy_protection);
+        assert!(!timeline.target.protection);
         assert!(timeline.has_buff("Protection"));
-        let conditions = timeline.outgoing_conditions.len();
+        let conditions = timeline.target.conditions.len();
         let buffs = timeline.buffs.len();
         timeline.apply_skill_effect(1, &SkillEffect::CorruptBoons, false);
         timeline.apply_skill_effect(1, &SkillEffect::StealBoons, false);
-        assert_eq!(timeline.outgoing_conditions.len(), conditions);
+        assert_eq!(timeline.target.conditions.len(), conditions);
         assert_eq!(timeline.buffs.len(), buffs);
     }
 }
@@ -8296,7 +8335,7 @@ mod necro_experiments {
         );
         if low_health {
             // The foe starts under the 50 % gates the Spite records read.
-            timeline.enemy_health = 10_000.0;
+            timeline.target.hp = Some(10_000.0);
         }
         // Diagnostic run: the production cap would cut a 40 s catalogue
         // fight short of its shroud exit.

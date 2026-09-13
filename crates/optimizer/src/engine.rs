@@ -1177,6 +1177,8 @@ pub struct PreparedRotation {
     /// `params.strike_mult`; the WvW timeline divides out the ones whose
     /// threshold record it executes (R4).
     pub conditional_strike: Vec<combat::ConditionalClause>,
+    /// Target-conditional percents (Phase 3); also on `params.deferred_target`.
+    pub deferred_target: Vec<combat::DeferredTargetModifier>,
     /// Traits the parser consumed a fact from (US4): executed from facts, so
     /// the coverage line never names them.
     pub consumed_trait_ids: Vec<u32>,
@@ -1342,11 +1344,13 @@ pub fn prepare_validated_rotation(
         armor: derived.armor,
         mode: mode.clone(),
         intent: None,
+        deferred_target: mods.deferred_target.clone(),
     };
 
     Some(PreparedRotation {
         opener: Vec::new(),
         conditional_strike: mods.conditional_strike.clone(),
+        deferred_target: mods.deferred_target.clone(),
         consumed_trait_ids: mods.consumed_trait_ids.clone(),
         skills: rotation_skills,
         params,

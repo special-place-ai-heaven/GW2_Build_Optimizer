@@ -459,6 +459,28 @@ impl ConditionFormulas {
         self.map.get(canonical).and_then(|c| c.max_stacks)
     }
 
+    /// Vulnerability incoming-damage increase per stack from `conditions.json`.
+    pub fn vulnerability_incoming_pct_per_stack(&self, mode: &GameMode) -> f64 {
+        let mode_key = mode_to_key(mode);
+        let Some(cond) = self.map.get("Vulnerability") else {
+            return 0.01;
+        };
+        match cond.formulas.get(mode_key) {
+            Some(ModeFormula::NonDamage(map)) => map
+                .get("incoming_damage_pct_per_stack")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.01),
+            _ => 0.01,
+        }
+    }
+
+    /// Vulnerability intensity cap from `conditions.json` (`max_stacks`, default 25).
+    pub fn vulnerability_max_stacks(&self) -> u32 {
+        self.map
+            .get("Vulnerability")
+            .and_then(|c| c.max_stacks)
+            .unwrap_or(25)
+    }
     /// Torment tick damage with explicit mode and movement state.
     /// `moving`: true = target is moving, false = stationary.
     pub fn torment_tick(&self, condition_damage: f64, mode: GameMode, moving: bool) -> f64 {

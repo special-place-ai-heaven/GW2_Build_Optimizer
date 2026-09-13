@@ -2009,6 +2009,7 @@ fn rotation_sim_params(
         armor: derived.armor,
         mode,
         intent: None,
+        deferred_target: Vec::new(),
     }
 }
 
