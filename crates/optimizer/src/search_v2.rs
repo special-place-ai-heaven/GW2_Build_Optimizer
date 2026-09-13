@@ -1717,13 +1717,6 @@ fn swap_elite_spec(
     if locks.specs[2].is_some() {
         return Vec::new();
     }
-    // A Revenant elite swap changes the legend package, and nothing here can
-    // rebuild one (refill_bar and the skill operators are legend-blind); the
-    // candidate would ship with an empty bar. Skipped, and said so in the
-    // ledger, rather than burning evaluations on a kit that cannot win.
-    if profession_name == "Revenant" {
-        return Vec::new();
-    }
     let Some(profession) = db.profession(profession_name) else {
         return Vec::new();
     };
@@ -1822,7 +1815,11 @@ fn retarget_after_elite_swap(
             build.skills.elite = None;
         }
     }
-    refill_bar(build, db, &profession.name, weights);
+    if profession.name == "Revenant" {
+        retarget_revenant_legends_after_swap(build, db);
+    } else {
+        refill_bar(build, db, &profession.name, weights);
+    }
     build.skills.profession =
         crate::rotation::builder::profession_skills_for_build(db, &profession.name, &equipped);
 
@@ -1846,6 +1843,47 @@ fn retarget_after_elite_swap(
             })
             .unwrap_or_default();
     }
+}
+
+/// After an elite swap: drop legends that fail `legend_available`, keep
+/// legal ones, pad to 2 (same sort as `fill_revenant_legends`), apply the
+/// active package, and honor the aquatic keep/copy rule.
+fn retarget_revenant_legends_after_swap(build: &mut ValidatedBuild, db: &GameDb) {
+    if db.legends.is_empty() {
+        return;
+    }
+    let spec_ids: Vec<u32> = build.specializations.iter().map(|s| s.spec_id).collect();
+
+    let mut ids: Vec<String> = build
+        .legends
+        .iter()
+        .filter(|id| db.legend_available(id, &spec_ids))
+        .cloned()
+        .collect();
+    crate::validation::pad_revenant_legends(&mut ids, db, &spec_ids);
+
+    if let Some(active) = ids.first() {
+        crate::validation::apply_legend_package(build, db, active);
+    }
+
+    // Empty aquatic stays empty (encoder copies terrestrial). Non-empty:
+    // keep legal, pad to 2; if none remain, copy terrestrial.
+    if !build.aquatic_legends.is_empty() {
+        let mut aquatic: Vec<String> = build
+            .aquatic_legends
+            .iter()
+            .filter(|id| db.legend_available(id, &spec_ids))
+            .cloned()
+            .collect();
+        if aquatic.is_empty() {
+            aquatic = ids.clone();
+        } else {
+            crate::validation::pad_revenant_legends(&mut aquatic, db, &spec_ids);
+        }
+        build.aquatic_legends = aquatic;
+    }
+
+    build.legends = ids;
 }
 
 fn skill_gated_out(id: u32, db: &GameDb, equipped: &[u32]) -> bool {
@@ -3485,8 +3523,25 @@ mod tests {
         }
     }
 
-    #[test]
-    fn revenant_elite_swap_is_not_attempted() {
+    fn rev_legend(
+        id: &str,
+        code: u32,
+        heal: u32,
+        elite: u32,
+        utilities: [u32; 3],
+        swap: u32,
+    ) -> gw2_api::models::Legend {
+        gw2_api::models::Legend {
+            id: id.into(),
+            code: Some(code),
+            swap,
+            heal,
+            elite,
+            utilities: utilities.to_vec(),
+        }
+    }
+
+    fn revenant_elite_db() -> GameDb {
         let mut db = empty_db();
         db.specializations.insert(52, spec_line(52, "Herald", true));
         db.specializations
@@ -3505,7 +3560,50 @@ mod tests {
                 icon_big: None,
             },
         );
-        let build = ValidatedBuild {
+        db.legends.insert(
+            "Legend1".into(),
+            rev_legend("Legend1", 1, 10, 19, [11, 12, 13], 1001),
+        );
+        db.legends.insert(
+            "Legend2".into(),
+            rev_legend("Legend2", 2, 20, 29, [21, 22, 23], 1002),
+        );
+        db.legends.insert(
+            "Legend5".into(),
+            rev_legend("Legend5", 5, 50, 59, [51, 52, 53], 1005),
+        );
+        db.skills
+            .insert(1001, bar_skill(1001, "Profession_1", None));
+        db.skills
+            .insert(1002, bar_skill(1002, "Profession_1", None));
+        db.skills
+            .insert(1005, bar_skill(1005, "Profession_1", Some(52)));
+        for (id, name) in [
+            (10u32, "Heal One"),
+            (11, "Util A"),
+            (12, "Util B"),
+            (13, "Util C"),
+            (19, "Elite One"),
+            (20, "Heal Two"),
+            (21, "Util X"),
+            (22, "Util Y"),
+            (23, "Util Z"),
+            (29, "Elite Two"),
+            (50, "Heal Glint"),
+            (51, "Facet A"),
+            (52, "Facet B"),
+            (53, "Facet C"),
+            (59, "Elite Glint"),
+        ] {
+            let mut skill = bar_skill(id, "Utility", None);
+            skill.name = name.into();
+            db.skills.insert(id, skill);
+        }
+        db
+    }
+
+    fn herald_seed(legends: Vec<String>, aquatic: Vec<String>) -> ValidatedBuild {
+        ValidatedBuild {
             specializations: vec![ValidatedSpec {
                 spec_id: 52,
                 name: "Herald".into(),
@@ -3514,17 +3612,148 @@ mod tests {
                 trait_names: vec!["a".into(), "b".into(), "c".into()],
                 all_trait_ids: vec![1, 4, 7],
             }],
+            legends,
+            aquatic_legends: aquatic,
             ..Default::default()
-        };
-        let candidate = make_candidate(build);
-        assert!(swap_elite_spec(
+        }
+    }
+
+    fn package_ids(build: &ValidatedBuild) -> (Option<u32>, Vec<u32>, Option<u32>) {
+        (
+            build.skills.heal.as_ref().map(|h| h.0),
+            build
+                .skills
+                .utilities
+                .iter()
+                .filter_map(|u| u.as_ref().map(|p| p.0))
+                .collect(),
+            build.skills.elite.as_ref().map(|e| e.0),
+        )
+    }
+
+    /// Ada Kent probe Success [4]: before this path a Rev elite swap was
+    /// skipped (empty / legend-less bar). After, the neighbor is admitted
+    /// with two legal legends and the active package on the bar.
+    #[test]
+    fn revenant_elite_swap_admits_neighbor_with_legends_and_package() {
+        let db = revenant_elite_db();
+        let candidate = make_candidate(herald_seed(Vec::new(), Vec::new()));
+        assert!(
+            candidate.validated.legends.is_empty(),
+            "probe before: legend-less seed"
+        );
+        assert!(candidate.validated.skills.heal.is_none());
+
+        let swapped = swap_elite_spec(
             &candidate,
             &db,
             "Revenant",
             &BuildLocks::default(),
-            &OptimizationWeights::default()
-        )
-        .is_empty());
+            &OptimizationWeights::default(),
+        );
+        let renegade = swapped
+            .iter()
+            .find(|b| b.specializations.iter().any(|s| s.elite && s.spec_id == 63))
+            .expect("Renegade neighbor must be admitted");
+        assert_eq!(
+            renegade.legends,
+            vec!["Legend1".to_string(), "Legend2".to_string()]
+        );
+        assert_eq!(
+            package_ids(renegade),
+            (Some(10), vec![11, 12, 13], Some(19))
+        );
+        assert!(
+            renegade.aquatic_legends.is_empty(),
+            "empty aquatic stays empty so the encoder copies terrestrial"
+        );
+
+        let neighbors = generate_neighbors(
+            &candidate,
+            &db,
+            "Revenant",
+            &BuildLocks::default(),
+            &OptimizationWeights::default(),
+        );
+        assert!(
+            neighbors
+                .iter()
+                .any(|b| b.specializations.iter().any(|s| s.elite && s.spec_id == 63)),
+            "generate_neighbors must admit the Rev elite swap"
+        );
+    }
+
+    /// Herald (Legend5) is illegal on Renegade: drop it, keep the legal
+    /// legend, pad to 2, apply the surviving active package.
+    #[test]
+    fn revenant_elite_swap_drops_herald_legend() {
+        let db = revenant_elite_db();
+        let candidate = make_candidate(herald_seed(
+            vec!["Legend5".into(), "Legend1".into()],
+            vec!["Legend5".into(), "Legend1".into()],
+        ));
+        let swapped = swap_elite_spec(
+            &candidate,
+            &db,
+            "Revenant",
+            &BuildLocks::default(),
+            &OptimizationWeights::default(),
+        );
+        let renegade = swapped
+            .iter()
+            .find(|b| b.specializations.iter().any(|s| s.elite && s.spec_id == 63))
+            .expect("Renegade neighbor");
+        assert_eq!(
+            renegade.legends,
+            vec!["Legend1".to_string(), "Legend2".to_string()],
+            "Herald legend dropped, legal kept, padded"
+        );
+        assert_eq!(
+            package_ids(renegade),
+            (Some(10), vec![11, 12, 13], Some(19))
+        );
+        assert_eq!(
+            renegade.aquatic_legends,
+            vec!["Legend1".to_string(), "Legend2".to_string()],
+            "aquatic keep legal + pad"
+        );
+        assert!(
+            swap_utility_skills(&candidate, &db, "Revenant").is_empty(),
+            "independent Rev utility operator stays off"
+        );
+        assert!(
+            swap_heal_skills(&candidate, &db, "Revenant").is_empty(),
+            "independent Rev heal operator stays off"
+        );
+        assert!(
+            swap_elite_skills(&candidate, &db, "Revenant").is_empty(),
+            "independent Rev elite-skill operator stays off"
+        );
+    }
+
+    #[test]
+    fn revenant_elite_swap_respects_locked_elite() {
+        let db = revenant_elite_db();
+        let candidate = make_candidate(herald_seed(Vec::new(), Vec::new()));
+        let locked = BuildLocks {
+            specs: [None, None, Some(52)],
+            trait_locks: HashMap::new(),
+            gear_locks: HashMap::new(),
+            food: None,
+            utility: None,
+            infusion_locks: HashMap::new(),
+        };
+        assert!(
+            swap_elite_spec(
+                &candidate,
+                &db,
+                "Revenant",
+                &locked,
+                &OptimizationWeights::default()
+            )
+            .is_empty(),
+            "locked elite must not swap"
+        );
     }
 
     #[test]
