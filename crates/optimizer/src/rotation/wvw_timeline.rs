@@ -20,6 +20,9 @@ use super::simulator::{
     alacrity_cd_advance_ms, condition_tick_damage, crit_chance_fraction, reference_armor, SimParams,
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
+use super::trait_skill::{
+    catalog_from_skills, resolve_trait_skill, skill_effects_from_status_operation,
+};
 use super::trigger_bus::{
     land_foe_disable, BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST,
 };
@@ -601,6 +604,8 @@ struct ProcSpec {
     scale_by: Option<ScaleBy>,
     /// `Heal`: added to `value` as coefficient x healing power.
     healing_power_coefficient: f64,
+    /// E2: lesser skill to cast when this proc fires (cast scheduler).
+    cast_skill_id: Option<u32>,
 }
 
 /// A rune or relic strike bonus that holds only while its prerequisite does
@@ -802,6 +807,8 @@ struct Timeline<'a> {
     trigger_bus: TriggerBus,
     endurance: EndurancePool,
     dodge_action: DodgeAction,
+    /// E2: lesser skill SkillEffects keyed by cast_skill_id.
+    cast_skill_catalog: HashMap<u32, Vec<SkillEffect>>,
     /// E0: OnThreshold fired once for the 50% health crossing.
     threshold_50_emitted: bool,
     protection_multiplier: f64,
@@ -996,6 +1003,7 @@ impl<'a> Timeline<'a> {
             trigger_bus: TriggerBus::new(),
             endurance: EndurancePool::new_full(),
             dodge_action: DodgeAction::new(),
+            cast_skill_catalog: catalog_from_skills(skills),
             threshold_50_emitted: false,
             protection_multiplier: crate::data::boon_condition_formulas::boons()
                 .protection_multiplier(),
@@ -1222,6 +1230,14 @@ impl<'a> Timeline<'a> {
                 continue;
             }
 
+            if let Some(cast_id) = effect.cast_skill_id {
+                if let Some(op) = effect.status_operation.as_ref() {
+                    let effects = skill_effects_from_status_operation(op);
+                    if !effects.is_empty() {
+                        self.cast_skill_catalog.entry(cast_id).or_insert(effects);
+                    }
+                }
+            }
             self.proc_specs.push(ProcSpec {
                 source_type: effect.source_type.clone(),
                 source_id: effect.source_id,
@@ -1271,6 +1287,7 @@ impl<'a> Timeline<'a> {
                     .and_then(resolved)
                     .copied()
                     .unwrap_or(0.0),
+                cast_skill_id: effect.cast_skill_id,
             });
         }
     }
@@ -3320,7 +3337,7 @@ impl<'a> Timeline<'a> {
             if p <= 0.0 {
                 continue;
             }
-            let (category, value, duration_ms, operation, name) = {
+            let (category, value, duration_ms, operation, name, cast_skill_id) = {
                 let proc_spec = &mut self.proc_specs[idx];
                 proc_spec.mass += p;
                 if proc_spec.mass >= 1.0 - 1e-9 {
@@ -3334,102 +3351,119 @@ impl<'a> Timeline<'a> {
                     proc_spec.duration_ms,
                     proc_spec.operation.clone(),
                     proc_spec.source_name.clone(),
+                    proc_spec.cast_skill_id,
                 )
             };
-            let fired = match category {
-                EffectCategory::StrikeDamagePct if value > 2.0 && duration_ms > 0 => {
-                    // Sprint 3 (US3): a percent with a duration is a timed
-                    // strike bonus (Soul Barbs, Dread), one spec per source,
-                    // refreshed by every firing.
-                    let until_ms = self.now_ms.saturating_add(duration_ms);
-                    match self
-                        .conditional_specs
-                        .iter_mut()
-                        .find(|spec| spec.source_name == name)
-                    {
-                        Some(spec) => spec.kind = ConditionalKind::Timed { until_ms },
-                        None => self.conditional_specs.push(ConditionalSpec {
-                            source_name: name.clone(),
-                            kind: ConditionalKind::Timed { until_ms },
-                            percent: value,
-                            crit_damage: false,
-                            crit_chance: false,
-                            active: false,
-                            stacks: 0,
-                            expires_at_ms: 0,
-                        }),
+            // E2 cast scheduler: apply lesser SkillEffects; do not emit OnElite
+            // here — elite already emitted at cast start. CrowdControl inside
+            // the lesser still goes through land_foe_disable.
+            let fired = if let Some(cast_id) = cast_skill_id {
+                if let Some(effects) = resolve_trait_skill(cast_id, &self.cast_skill_catalog) {
+                    let effects = effects.to_vec();
+                    for effect in &effects {
+                        self.apply_skill_effect(cast_id, effect, protected);
                     }
-                    self.update_conditionals();
-                    true
-                }
-                EffectCategory::StrikeDamagePct => {
-                    // A coefficient (≤ 2.0) is a flame-blast style proc on
-                    // the unequipped weapon strength that cannot crit (wiki
-                    // `Superior Sigil of Fire`, read 2026-09-08); a percent
-                    // is a share of the held weapon's strike as before.
-                    let proc_damage = if value <= 2.0 {
-                        UNEQUIPPED_WEAPON_STRENGTH * self.params.power / reference_armor()
-                            * value
-                            * self.params.strike_mult
-                    } else {
-                        self.params.weapon_strength * self.params.power / reference_armor()
-                            * as_ratio(value)
-                    };
-                    self.record_damage(proc_damage * p, protected);
-                    true
-                }
-                EffectCategory::AppliesBoon
-                | EffectCategory::AppliesCondition
-                | EffectCategory::RemovesBoon
-                | EffectCategory::CorruptsBoon
-                | EffectCategory::RemovesCondition
-                | EffectCategory::ConvertsConditionToBoon
-                | EffectCategory::TransfersCondition => {
-                    self.apply_operation(operation.as_ref(), p, &name);
-                    true
-                }
-                EffectCategory::OutgoingHealingPct if duration_ms > 0 => {
-                    self.heal(value.max(0.0) * p);
-                    true
-                }
-                // Sprint 3 (US2): life force and healing from trait records.
-                EffectCategory::GainsLifeForce | EffectCategory::Heal => {
-                    let spec = &self.proc_specs[idx];
-                    let scale = match spec.scale_by {
-                        Some(ScaleBy::ConditionsRemoved) => {
-                            (self.conditions_cleansed - cleansed_before) as f64
-                        }
-                        None => 1.0,
-                    };
-                    let coefficient = spec.healing_power_coefficient;
-                    if matches!(category, EffectCategory::GainsLifeForce) {
-                        self.gain_life_force_percent(value * scale * p, &name);
-                    } else {
-                        let amount = (value + coefficient * self.params.healing_power) * scale;
-                        self.heal(amount.max(0.0) * p);
-                        // An area heal (Life from Death): the allies in range
-                        // are counted (FR-003a).
-                        if let Some(op) = operation
-                            .as_ref()
-                            .filter(|op| matches!(op.target_side, TargetSide::Ally))
-                        {
-                            let targets = op
-                                .target_count
-                                .as_ref()
-                                .and_then(resolved)
-                                .copied()
-                                .unwrap_or(1);
-                            let extra = self.ally_fan_out(targets, &name) - 1;
-                            self.ally_healing += extra as f64 * amount.max(0.0) * p;
-                        }
-                    }
-                    true
-                }
-                _ => {
-                    let source_type = self.proc_specs[idx].source_type.clone();
-                    let source_id = self.proc_specs[idx].source_id;
-                    self.note_unmodeled_proc(&source_type, source_id, &name);
+                    !effects.is_empty()
+                } else {
+                    self.note_unmodeled(format!("{name} (trait skill {cast_id} unresolved)"));
                     false
+                }
+            } else {
+                match category {
+                    EffectCategory::StrikeDamagePct if value > 2.0 && duration_ms > 0 => {
+                        // Sprint 3 (US3): a percent with a duration is a timed
+                        // strike bonus (Soul Barbs, Dread), one spec per source,
+                        // refreshed by every firing.
+                        let until_ms = self.now_ms.saturating_add(duration_ms);
+                        match self
+                            .conditional_specs
+                            .iter_mut()
+                            .find(|spec| spec.source_name == name)
+                        {
+                            Some(spec) => spec.kind = ConditionalKind::Timed { until_ms },
+                            None => self.conditional_specs.push(ConditionalSpec {
+                                source_name: name.clone(),
+                                kind: ConditionalKind::Timed { until_ms },
+                                percent: value,
+                                crit_damage: false,
+                                crit_chance: false,
+                                active: false,
+                                stacks: 0,
+                                expires_at_ms: 0,
+                            }),
+                        }
+                        self.update_conditionals();
+                        true
+                    }
+                    EffectCategory::StrikeDamagePct => {
+                        // A coefficient (≤ 2.0) is a flame-blast style proc on
+                        // the unequipped weapon strength that cannot crit (wiki
+                        // `Superior Sigil of Fire`, read 2026-09-08); a percent
+                        // is a share of the held weapon's strike as before.
+                        let proc_damage = if value <= 2.0 {
+                            UNEQUIPPED_WEAPON_STRENGTH * self.params.power / reference_armor()
+                                * value
+                                * self.params.strike_mult
+                        } else {
+                            self.params.weapon_strength * self.params.power / reference_armor()
+                                * as_ratio(value)
+                        };
+                        self.record_damage(proc_damage * p, protected);
+                        true
+                    }
+                    EffectCategory::AppliesBoon
+                    | EffectCategory::AppliesCondition
+                    | EffectCategory::RemovesBoon
+                    | EffectCategory::CorruptsBoon
+                    | EffectCategory::RemovesCondition
+                    | EffectCategory::ConvertsConditionToBoon
+                    | EffectCategory::TransfersCondition => {
+                        self.apply_operation(operation.as_ref(), p, &name);
+                        true
+                    }
+                    EffectCategory::OutgoingHealingPct if duration_ms > 0 => {
+                        self.heal(value.max(0.0) * p);
+                        true
+                    }
+                    // Sprint 3 (US2): life force and healing from trait records.
+                    EffectCategory::GainsLifeForce | EffectCategory::Heal => {
+                        let spec = &self.proc_specs[idx];
+                        let scale = match spec.scale_by {
+                            Some(ScaleBy::ConditionsRemoved) => {
+                                (self.conditions_cleansed - cleansed_before) as f64
+                            }
+                            None => 1.0,
+                        };
+                        let coefficient = spec.healing_power_coefficient;
+                        if matches!(category, EffectCategory::GainsLifeForce) {
+                            self.gain_life_force_percent(value * scale * p, &name);
+                        } else {
+                            let amount = (value + coefficient * self.params.healing_power) * scale;
+                            self.heal(amount.max(0.0) * p);
+                            // An area heal (Life from Death): the allies in range
+                            // are counted (FR-003a).
+                            if let Some(op) = operation
+                                .as_ref()
+                                .filter(|op| matches!(op.target_side, TargetSide::Ally))
+                            {
+                                let targets = op
+                                    .target_count
+                                    .as_ref()
+                                    .and_then(resolved)
+                                    .copied()
+                                    .unwrap_or(1);
+                                let extra = self.ally_fan_out(targets, &name) - 1;
+                                self.ally_healing += extra as f64 * amount.max(0.0) * p;
+                            }
+                        }
+                        true
+                    }
+                    _ => {
+                        let source_type = self.proc_specs[idx].source_type.clone();
+                        let source_id = self.proc_specs[idx].source_id;
+                        self.note_unmodeled_proc(&source_type, source_id, &name);
+                        false
+                    }
                 }
             };
             if fired {
@@ -4268,7 +4302,7 @@ mod tests {
     /// E0 Kent: EndurancePool → DodgeAction → bus OnDodge → dodge traits execute.
     #[test]
     fn kent_e0_causal_dodge_fires_expeditious_dodger() {
-        use crate::data::normalized_effects::{effects, SourceType, TriggerRule};
+        use crate::data::normalized_effects::{effects, SourceType};
 
         let effects_wvw = effects().effects_for_mode("WvW");
         let dodge_records: Vec<&_> = effects_wvw
@@ -4345,7 +4379,7 @@ mod tests {
     /// E1 Kent: disable inactive vs active changes Dazzling Vulnerability via OnDisableFoe.
     #[test]
     fn kent_e1_causal_disable_inactive_vs_active_changes_dazzling() {
-        use crate::data::normalized_effects::{effects, SourceType, TriggerRule};
+        use crate::data::normalized_effects::{effects, SourceType};
 
         let effects_wvw = effects().effects_for_mode("WvW");
         let disable_records: Vec<&_> = effects_wvw
@@ -4456,6 +4490,106 @@ mod tests {
         assert!(
             executing >= 3,
             ">=3 disable-trigger traits must execute; got {executing}; {:?}",
+            live_report.trait_fire_counts
+        );
+    }
+
+    /// E2 Kent: elite + Final Shielding casts Lesser Arcane Shield; inactive has none.
+    #[test]
+    fn kent_e2_causal_trait_skill_inactive_vs_active_changes_arcane_shield() {
+        use crate::data::normalized_effects::{effects, SourceType};
+
+        let effects_wvw = effects().effects_for_mode("WvW");
+        let trait_skill_records: Vec<&_> = effects_wvw
+            .iter()
+            .filter(|e| {
+                e.source_type == SourceType::Trait
+                    && e.cast_skill_id.is_some()
+                    && e.coverage.is_none()
+                    && matches!(e.source_id, 257 | 1368 | 654)
+            })
+            .collect();
+        assert!(
+            trait_skill_records.len() >= 3,
+            "E2 must ship >=3 executable trait-skill records; got {}",
+            trait_skill_records.len()
+        );
+
+        let skills = [
+            skill(1, SkillSlot::Elite, 250, 1_000, vec![]),
+            skill(2, SkillSlot::Heal, 250, 1_000, vec![]),
+        ];
+        let mut heal = skills[1].clone();
+        heal.slot_name = Some("Heal".into());
+        let skills = [skills[0].clone(), heal];
+        let params = params();
+        let active: Vec<&_> = trait_skill_records;
+
+        let mut live = Timeline::new(
+            &skills,
+            &params,
+            profile(4_000, vec![]),
+            open_enemy(false),
+            &active,
+            &[],
+            true,
+            Vec::new(),
+        );
+        live.run();
+        let live_report = live.report();
+        let fired = live_report
+            .trait_fire_counts
+            .get("Final Shielding")
+            .copied()
+            .unwrap_or(0);
+        assert!(
+            fired >= 1,
+            "Final Shielding must execute via OnElite cast; fires={fired}; counts={:?}",
+            live_report.trait_fire_counts
+        );
+        assert!(
+            live.has_buff("Arcane Shield") || live.has_defense(CoverKind::Block),
+            "lesser Arcane Shield effects must land"
+        );
+
+        let mut inactive = Timeline::new(
+            &skills,
+            &params,
+            profile(4_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            Vec::new(),
+        );
+        inactive.run();
+        let inactive_report = inactive.report();
+        assert_eq!(
+            inactive_report
+                .trait_fire_counts
+                .get("Final Shielding")
+                .copied()
+                .unwrap_or(0),
+            0
+        );
+        assert!(
+            !inactive.has_buff("Arcane Shield") && !inactive.has_defense(CoverKind::Block),
+            "no trait => no lesser Arcane Shield"
+        );
+
+        // ICD: two elites inside 300 s ICD => one Final Shielding fire.
+        assert_eq!(
+            fired, 1,
+            "Final Shielding ICD 300 s must hold to one fire; got {fired}"
+        );
+
+        let executing = ["Final Shielding", "Defy Pain", "Protector's Restoration"]
+            .iter()
+            .filter(|n| live_report.trait_fire_counts.get(**n).copied().unwrap_or(0) >= 1)
+            .count();
+        assert!(
+            executing >= 3,
+            ">=3 formerly NeedsMechanic trait-skill traits must execute; got {executing}; {:?}",
             live_report.trait_fire_counts
         );
     }
@@ -5505,6 +5639,7 @@ mod tests {
             healing_power_coefficient: None,
             derived_from: Vec::new(),
             coverage: None,
+            cast_skill_id: None,
         }
     }
 
@@ -6363,6 +6498,7 @@ mod tests {
             healing_power_coefficient: None,
             derived_from: Vec::new(),
             coverage: None,
+            cast_skill_id: None,
         };
         let params = params();
         let timeline = Timeline::new(

@@ -3002,6 +3002,39 @@ mod tests {
         assert_eq!(blocked.target.disabled_until_ms, 0);
     }
 
+    /// E2 Kent: flow sim and WvW share resolve_trait_skill (cast scheduler).
+    #[test]
+    fn kent_e2_flow_shares_resolve_trait_skill() {
+        use super::super::trait_skill::{resolve_trait_skill, skill_effects_from_status_operation};
+        use crate::data::normalized_effects::{
+            AmountMode, OperationType, StatusOperation, TargetScope, TargetSide,
+        };
+        use crate::data::quality::FactualValue;
+        use std::collections::HashMap;
+
+        let op = StatusOperation {
+            operation_type: OperationType::AppliesBoon,
+            target_side: TargetSide::Self_,
+            status_kind: "Arcane Shield".into(),
+            amount_mode: AmountMode::Stacks,
+            amount_value: FactualValue::Resolved(3.0),
+            base_duration_ms: Some(FactualValue::Resolved(5_000)),
+            target_scope: TargetScope::Self_,
+            target_count: None,
+            internal_cooldown_ms: None,
+            source_duration_multiplier: None,
+        };
+        let effects = skill_effects_from_status_operation(&op);
+        let mut catalog = HashMap::new();
+        catalog.insert(25_579u32, effects);
+        let resolved = resolve_trait_skill(25_579, &catalog).expect("shared resolve");
+        assert!(
+            !resolved.is_empty(),
+            "resolve_trait_skill must return lesser SkillEffects"
+        );
+        assert!(resolve_trait_skill(1, &catalog).is_none());
+    }
+
     fn phase4_combo_skill(
         id: u32,
         name: &str,
