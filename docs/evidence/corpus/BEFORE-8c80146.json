@@ -1,0 +1,45 @@
+{
+  "labels": {
+    "ledger_claimed": {
+      "Great": 24,
+      "Average": 25,
+      "Meta": 26,
+      "Good": 53
+    },
+    "scraped_builds": 740,
+    "present": false
+  },
+  "tip_sha": "8c80146ed71c75f437a5df8aa4d1c296c91d5735",
+  "verdict": "DOCUMENTED_GAP_PLUS_BEST_AVAILABLE",
+  "metrics": {
+    "spearman": null,
+    "meta_ge_average_pairwise": null,
+    "reason_unchecked": "expert Meta/Great/Good/Average labels absent from scrape and disk; not invented"
+  },
+  "recorded_at_utc": "2026-09-13T11:52:29Z",
+  "scorer_changed": false,
+  "harness": {
+    "calibrate_viability": {
+      "scored": 582,
+      "is_viable": "489/582",
+      "command": "cargo run -p gw2-optimizer --example calibrate_viability",
+      "path": "crates/optimizer/examples/calibrate_viability.rs",
+      "log": "docs/evidence/corpus/calibrate_viability-8c80146.txt"
+    },
+    "flow_calibration": {
+      "logs": [
+        "docs/evidence/corpus/flow_calibration-pve-8c80146.txt",
+        "docs/evidence/corpus/flow_calibration-wvw-8c80146.txt",
+        "docs/evidence/corpus/flow_calibration-pvp-8c80146.txt"
+      ],
+      "command": "cargo run --release -p gw2-optimizer --example flow_calibration [PvE|WvW|PvP]",
+      "path": "crates/optimizer/examples/flow_calibration.rs",
+      "modes": [
+        "PvE",
+        "WvW",
+        "PvP"
+      ]
+    }
+  },
+  "version": "1.14.5"
+}
