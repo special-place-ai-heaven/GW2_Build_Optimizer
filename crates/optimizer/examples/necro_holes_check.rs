@@ -41,7 +41,7 @@ fn describe(v: &ValidatedBuild) -> String {
 }
 
 /// Every skill the rotation counts as a cleanse, with the count and cooldown
-/// the gate sees, so a CleanseRate note can be traced to its sources.
+/// the gate sees, so a CleanseRate / ControlCoverage note can be traced to its sources.
 fn print_cleanses(
     v: &ValidatedBuild,
     db: &GameDb,

@@ -89,10 +89,12 @@ pub struct ViabilityGateConfig {
     /// Whether self-Stability access is required.
     #[serde(default)]
     pub requires_stability: Option<bool>,
-    /// Minimum number of equipped skills with a cleanse effect.
+    /// Minimum number of equipped skills with a damaging-condition cleanse effect.
+    /// Feeds `ViabilityGate::CleanseRate` only; soft-control is `ControlCoverage`.
     #[serde(default)]
     pub min_cleanse_count: Option<u32>,
-    /// Minimum conditions-cleansed-per-20s rate (supports role).
+    /// Minimum damaging conditions cleansed per 20s (`CleanseRate`).
+    /// Resistance must not discount this floor; soft control is separate.
     #[serde(default)]
     pub min_cleanse_rate_per_20s: Option<f64>,
     /// Per-boon uptime floors (fraction 0.0–1.0).
