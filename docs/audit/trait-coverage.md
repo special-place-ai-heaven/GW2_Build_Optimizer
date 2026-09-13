@@ -2,7 +2,7 @@
 
 | Profession | Traits | facts | record | facts+record | PassiveNoEffect | NeedsMechanic | NoRecord | UnresolvedValue |
 |---|---|---|---|---|---|---|---|---|
-| Elementalist | 108 | 29 | 13 | 0 | 0 | 66 | 0 | 0 |
+| Elementalist | 108 | 29 | 16 | 0 | 0 | 63 | 0 | 0 |
 | Engineer | 108 | 32 | 13 | 0 | 0 | 63 | 0 | 0 |
 | Guardian | 108 | 35 | 14 | 0 | 0 | 59 | 0 | 0 |
 | Mesmer | 108 | 22 | 8 | 1 | 0 | 77 | 0 | 0 |
@@ -18,7 +18,7 @@
 |---|---|---|---|---|
 | Air | 221 | Zephyr's Speed | facts |  |
 | Air | 227 | Zephyr's Boon | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Zephyr%27s_Boon (read 2026-09-13: Fury and swiftness to allies you grant auras to) |
-| Air | 224 | One with Air | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/One_with_Air (read 2026-09-13: Superspeed when attuning to air) |
+| Air | 224 | One with Air | record | https://wiki.guildwars2.com/wiki/One_with_Air (read 2026-09-13: Superspeed 3 s when attuning to air) |
 | Air | 232 | Ferocious Winds | facts |  |
 | Air | 222 | Electric Discharge | facts |  |
 | Air | 229 | Inscription | NeedsMechanic: glyphs | https://wiki.guildwars2.com/wiki/Inscription_(trait) (read 2026-09-13: Glyphs grant attunement-based boons; resistance when attuning to air) |
@@ -28,7 +28,7 @@
 | Air | 226 | Bolt to the Heart | facts |  |
 | Air | 1503 | Fresh Air | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Fresh_Air (read 2026-09-13: Recharge air attunement on critical hit; ferocity when attuning to air) |
 | Air | 1672 | Lightning Rod | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Lightning_Rod (read 2026-09-13: Cast Lightning Rod trait skill when you disable a foe) |
-| Arcane | 268 | Arcane Prowess | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Arcane_Prowess (read 2026-09-13: Gain boons when you switch attunements) |
+| Arcane | 268 | Arcane Prowess | record | https://wiki.guildwars2.com/wiki/Arcane_Prowess (read 2026-09-13: Fury 2 s in WvW when you switch attunements) |
 | Arcane | 253 | Arcane Precision | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Arcane_Precision (read 2026-09-13: Critical strikes inflict an attunement-based condition) |
 | Arcane | 266 | Renewing Stamina | record | https://wiki.guildwars2.com/wiki/Renewing_Stamina (read 2026-09-13: Vigor 5 s when you critically strike a foe) |
 | Arcane | 1487 | Arcane Restoration | facts |  |
@@ -46,7 +46,7 @@
 | Earth | 289 | Elemental Shielding | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Elemental_Shielding (read 2026-09-13: Auras you grant to allies also grant protection) |
 | Earth | 279 | Earthen Blast | facts |  |
 | Earth | 275 | Strength of Stone | facts |  |
-| Earth | 281 | Rock Solid | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Rock_Solid (read 2026-09-13: Grant stability to nearby allies when attuning to earth) |
+| Earth | 281 | Rock Solid | record | https://wiki.guildwars2.com/wiki/Rock_Solid (read 2026-09-13: Stability 3 s when attuning to earth; radius 240) |
 | Earth | 277 | Earthen Blessing | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Earthen_Blessing (read 2026-09-13: Shorter movement-impairing conditions on you; restore endurance when you receive them; duration cut is NeedsMechanic incoming condition duration) |
 | Earth | 280 | Geomancer's Training | NeedsMechanic: recharge | https://wiki.guildwars2.com/wiki/Geomancer%27s_Training (read 2026-09-13: Reduced recharge on earth weapon skills; nearby incoming strike reduction) |
 | Earth | 1508 | Diamond Skin | NeedsMechanic: combo | https://wiki.guildwars2.com/wiki/Diamond_Skin (read 2026-09-13: Leap finisher cleanses self; blast finisher cleanses nearby allies) |
