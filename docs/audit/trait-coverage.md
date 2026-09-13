@@ -7,7 +7,7 @@
 | Guardian | 108 | 35 | 1 | 0 | 0 | 0 | 72 | 0 |
 | Mesmer | 108 | 22 | 0 | 1 | 0 | 0 | 85 | 0 |
 | Necromancer | 108 | 2 | 27 | 20 | 1 | 56 | 0 | 2 |
-| Ranger | 108 | 42 | 1 | 0 | 0 | 0 | 65 | 0 |
+| Ranger | 108 | 42 | 6 | 0 | 0 | 60 | 0 | 0 |
 | Revenant | 108 | 36 | 0 | 0 | 0 | 0 | 72 | 0 |
 | Thief | 108 | 42 | 0 | 0 | 0 | 0 | 66 | 0 |
 | Warrior | 108 | 38 | 1 | 1 | 0 | 0 | 68 | 0 |
@@ -582,113 +582,113 @@
 | Line | Id | Trait | State | Source |
 |---|---|---|---|---|
 | Beastmastery | 1900 | Pack Alpha | facts |  |
-| Beastmastery | 1861 | Go for the Eyes | NoRecord |  |
+| Beastmastery | 1861 | Go for the Eyes | NeedsMechanic: pet | https://wiki.guildwars2.com/wiki/Go_for_the_Eyes (read 2026-09-13: Beast abilities blind) |
 | Beastmastery | 1072 | Natural Healing | facts |  |
-| Beastmastery | 1606 | Resounding Timbre | NoRecord |  |
+| Beastmastery | 1606 | Resounding Timbre | NeedsMechanic: pet | https://wiki.guildwars2.com/wiki/Resounding_Timbre (read 2026-09-13: Commands copy boons to pet; merge extends) |
 | Beastmastery | 974 | Loud Whistle | facts |  |
-| Beastmastery | 975 | Wilting Strike | NoRecord |  |
-| Beastmastery | 1047 | Bestial Rage | NoRecord |  |
+| Beastmastery | 975 | Wilting Strike | NeedsMechanic: pet | https://wiki.guildwars2.com/wiki/Wilting_Strike (read 2026-09-13: Beast abilities inflict weakness) |
+| Beastmastery | 1047 | Bestial Rage | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Bestial_Rage (read 2026-09-13: might and fury on disable) |
 | Beastmastery | 970 | Honed Axes | facts |  |
 | Beastmastery | 1065 | Pet's Prowess | facts |  |
-| Beastmastery | 1945 | Beastly Warden | NoRecord |  |
-| Beastmastery | 968 | Zephyr's Speed | NoRecord |  |
-| Beastmastery | 1066 | Go for the Throat | NoRecord |  |
-| Marksmanship | 1010 | Opening Strike | NoRecord |  |
-| Marksmanship | 1021 | Stoneform | NoRecord |  |
-| Marksmanship | 1014 | Hunter's Gaze | NoRecord |  |
-| Marksmanship | 986 | Clarion Bond | NoRecord |  |
-| Marksmanship | 1009 | Alpha Focus | NoRecord |  |
+| Beastmastery | 1945 | Beastly Warden | NeedsMechanic: pet | https://wiki.guildwars2.com/wiki/Beastly_Warden (read 2026-09-13: Beast abilities taunt; ursine/porcine pet stats) |
+| Beastmastery | 968 | Zephyr's Speed | NeedsMechanic: pet swap | https://wiki.guildwars2.com/wiki/Zephyr%27s_Speed (read 2026-09-13: Lesser Quickening Zephyr on pet swap) |
+| Beastmastery | 1066 | Go for the Throat | NeedsMechanic: pet | https://wiki.guildwars2.com/wiki/Go_for_the_Throat (read 2026-09-13: Beast strike casts Lesser Sic 'Em) |
+| Marksmanship | 1010 | Opening Strike | NeedsMechanic: opening strike | https://wiki.guildwars2.com/wiki/Opening_Strike (read 2026-09-13: first strike on combat enter) |
+| Marksmanship | 1021 | Stoneform | record | https://wiki.guildwars2.com/wiki/Stoneform (read 2026-09-13: Signet activation: 8 s might x3 and 6 s fury in WvW/PvP; Lesser Signet of Stone on elite is NeedsMechanic trait skill) |
+| Marksmanship | 1014 | Hunter's Gaze | record | https://wiki.guildwars2.com/wiki/Hunter%27s_Gaze (read 2026-09-13: might on strike by foe health; record carries the below-75% 1-stack band (5 s, ICD 1)) |
+| Marksmanship | 986 | Clarion Bond | NeedsMechanic: pet swap | https://wiki.guildwars2.com/wiki/Clarion_Bond (read 2026-09-13: Lesser Call of the Wild on pet swap) |
+| Marksmanship | 1009 | Alpha Focus | NeedsMechanic: opening strike | https://wiki.guildwars2.com/wiki/Alpha_Focus (read 2026-09-13: Opening Strike cripples) |
 | Marksmanship | 1001 | Wolfsong | facts |  |
 | Marksmanship | 1000 | Farsighted | facts |  |
-| Marksmanship | 1070 | Moment of Clarity | NoRecord |  |
-| Marksmanship | 1011 | Precise Strike | NoRecord |  |
+| Marksmanship | 1070 | Moment of Clarity | NeedsMechanic: interrupt | https://wiki.guildwars2.com/wiki/Moment_of_Clarity (read 2026-09-13: attack of opportunity on interrupt; daze/stun duration) |
+| Marksmanship | 1011 | Precise Strike | NeedsMechanic: opening strike | https://wiki.guildwars2.com/wiki/Precise_Strike (read 2026-09-13: Opening Strike crit chance) |
 | Marksmanship | 996 | Predator's Onslaught | facts |  |
 | Marksmanship | 1015 | Remorseless | facts |  |
-| Marksmanship | 1698 | Lead the Wind | NoRecord |  |
-| Nature Magic | 1055 | Rejuvenation | NoRecord |  |
+| Marksmanship | 1698 | Lead the Wind | NeedsMechanic: recharge | https://wiki.guildwars2.com/wiki/Lead_the_Wind (read 2026-09-13: longbow/harpoon pierce and recharge; Point-Blank Shot boons) |
+| Nature Magic | 1055 | Rejuvenation | NeedsMechanic: pet | https://wiki.guildwars2.com/wiki/Rejuvenation (read 2026-09-13: Beast skills grant regeneration around ranger) |
 | Nature Magic | 1062 | Bountiful Hunter | facts |  |
 | Nature Magic | 978 | Wellspring | facts |  |
 | Nature Magic | 1060 | Allies' Aid | facts |  |
-| Nature Magic | 1056 | Fortifying Bond | NoRecord |  |
+| Nature Magic | 1056 | Fortifying Bond | NeedsMechanic: pet | https://wiki.guildwars2.com/wiki/Fortifying_Bond (read 2026-09-13: boons shared with pet) |
 | Nature Magic | 1054 | Evasive Purity | facts |  |
-| Nature Magic | 965 | Spirited Arrival | NoRecord |  |
+| Nature Magic | 965 | Spirited Arrival | NeedsMechanic: pet swap | https://wiki.guildwars2.com/wiki/Spirited_Arrival (read 2026-09-13: boons on pet swap) |
 | Nature Magic | 964 | Windborne Notes | facts |  |
 | Nature Magic | 1059 | Lingering Magic | facts |  |
-| Nature Magic | 1038 | Nature's Vengeance | NoRecord |  |
-| Nature Magic | 1988 | Protective Ward | NoRecord |  |
+| Nature Magic | 1038 | Nature's Vengeance | NeedsMechanic: spirits | https://wiki.guildwars2.com/wiki/Nature%27s_Vengeance (read 2026-09-13: spirits slam again) |
+| Nature Magic | 1988 | Protective Ward | NeedsMechanic: pet swap | https://wiki.guildwars2.com/wiki/Protective_Ward (read 2026-09-13: Lesser Guard on pet swap) |
 | Nature Magic | 1697 | Invigorating Bond | facts |  |
-| Skirmishing | 1080 | Tail Wind | NoRecord |  |
+| Skirmishing | 1080 | Tail Wind | NeedsMechanic: weapon swap | https://wiki.guildwars2.com/wiki/Tail_Wind (read 2026-09-13: swiftness on weapon swap) |
 | Skirmishing | 1069 | Sharpened Edges | record | https://wiki.guildwars2.com/wiki/Sharpened_Edges |
-| Skirmishing | 1067 | Primal Reflexes | NoRecord |  |
-| Skirmishing | 1075 | Trapper's Expertise | NoRecord |  |
-| Skirmishing | 1083 | Furious Grip | NoRecord |  |
+| Skirmishing | 1067 | Primal Reflexes | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Primal_Reflexes (read 2026-09-13: vigor on evade) |
+| Skirmishing | 1075 | Trapper's Expertise | NeedsMechanic: traps | https://wiki.guildwars2.com/wiki/Trapper%27s_Expertise (read 2026-09-13: trap boon/condition duration; traps cripple) |
+| Skirmishing | 1083 | Furious Grip | NeedsMechanic: weapon swap | https://wiki.guildwars2.com/wiki/Furious_Grip (read 2026-09-13: fury on weapon swap) |
 | Skirmishing | 1016 | Fang and Claw | facts |  |
 | Skirmishing | 1700 | Strider's Strength | facts |  |
 | Skirmishing | 1846 | Hidden Barbs | facts |  |
 | Skirmishing | 1068 | Hunter's Tactics | facts |  |
-| Skirmishing | 1064 | Quick Draw | NoRecord |  |
+| Skirmishing | 1064 | Quick Draw | NeedsMechanic: weapon swap | https://wiki.guildwars2.com/wiki/Quick_Draw (read 2026-09-13: quickness and next-weapon-skill recharge on swap) |
 | Skirmishing | 1912 | Light on your Feet | facts |  |
 | Skirmishing | 1888 | Vicious Quarry | facts |  |
-| Wilderness Survival | 1096 | Natural Vigor | NoRecord |  |
-| Wilderness Survival | 1098 | Child of Earth | NoRecord |  |
-| Wilderness Survival | 1086 | Oakheart Salve | NoRecord |  |
+| Wilderness Survival | 1096 | Natural Vigor | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Natural_Vigor (read 2026-09-13: endurance recovery +25%) |
+| Wilderness Survival | 1098 | Child of Earth | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Child_of_Earth (read 2026-09-13: Muddy Terrain on heal skill) |
+| Wilderness Survival | 1086 | Oakheart Salve | NeedsMechanic: incoming condition | https://wiki.guildwars2.com/wiki/Oakheart_Salve (read 2026-09-13: regen when struck by bleed/poison/burn; strike reduction while regenerating) |
 | Wilderness Survival | 1099 | Arachnophobia | facts |  |
-| Wilderness Survival | 1090 | Companion's Defense | NoRecord |  |
+| Wilderness Survival | 1090 | Companion's Defense | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Companion%27s_Defense (read 2026-09-13: protection on dodge for you and pet) |
 | Wilderness Survival | 1101 | Ambidexterity | facts |  |
 | Wilderness Survival | 2032 | Survival Instincts | facts |  |
-| Wilderness Survival | 1100 | Empathic Bond | NoRecord |  |
+| Wilderness Survival | 1100 | Empathic Bond | NeedsMechanic: pet swap | https://wiki.guildwars2.com/wiki/Empathic_Bond (read 2026-09-13: remove conditions on pet swap) |
 | Wilderness Survival | 1089 | Rugged Growth | facts |  |
-| Wilderness Survival | 1094 | Carnivore | NoRecord |  |
-| Wilderness Survival | 1699 | Wilderness Knowledge | NoRecord |  |
+| Wilderness Survival | 1094 | Carnivore | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Carnivore (read 2026-09-13: life steal on disable by you or pet) |
+| Wilderness Survival | 1699 | Wilderness Knowledge | record | https://wiki.guildwars2.com/wiki/Wilderness_Knowledge (read 2026-09-13: Survival skills: 4 s fury in WvW/PvP) |
 | Wilderness Survival | 1701 | Poison Master | facts |  |
 | Druid | 1874 | Celestial Being | facts |  |
-| Druid | 1868 | Druidic Clarity | NoRecord |  |
+| Druid | 1868 | Druidic Clarity | NeedsMechanic: celestial avatar | https://wiki.guildwars2.com/wiki/Druidic_Clarity (read 2026-09-13: celestial avatar enter cleanses allies) |
 | Druid | 2016 | Verdant Etching | facts |  |
-| Druid | 1935 | Blood Moon | NoRecord |  |
+| Druid | 1935 | Blood Moon | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Blood_Moon (read 2026-09-13: bleeding on immobilize or disable) |
 | Druid | 1862 | Live Vicariously | facts |  |
-| Druid | 2053 | Celestial Shadow | NoRecord |  |
-| Druid | 2001 | Grace of the Land | NoRecord |  |
-| Druid | 2056 | Natural Balance | NoRecord |  |
-| Druid | 1992 | Natural Mender | NoRecord |  |
+| Druid | 2053 | Celestial Shadow | NeedsMechanic: celestial avatar | https://wiki.guildwars2.com/wiki/Celestial_Shadow (read 2026-09-13: stealth and superspeed on leaving celestial avatar) |
+| Druid | 2001 | Grace of the Land | record | https://wiki.guildwars2.com/wiki/Grace_of_the_Land (read 2026-09-13: Celestial Avatar skills: 4 s might x2 to 5 allies in WvW (no alacrity in competitive)) |
+| Druid | 2056 | Natural Balance | NeedsMechanic: celestial avatar | https://wiki.guildwars2.com/wiki/Natural_Balance (read 2026-09-13: condition damage/duration buff on celestial enter/exit) |
+| Druid | 1992 | Natural Mender | record | https://wiki.guildwars2.com/wiki/Natural_Mender (read 2026-09-13: +15% healing to others in WvW/PvP; astral force while out of celestial is NeedsMechanic) |
 | Druid | 2057 | Cultivated Synergy | facts |  |
-| Druid | 2058 | Lingering Light | NoRecord |  |
+| Druid | 2058 | Lingering Light | NeedsMechanic: celestial avatar | https://wiki.guildwars2.com/wiki/Lingering_Light (read 2026-09-13: healing and celestial recharge while in form) |
 | Druid | 2055 | Eclipse | facts |  |
-| Galeshot | 2359 | Teachings of the Tengu | NoRecord |  |
-| Galeshot | 2402 | Joy of Movement | NoRecord |  |
-| Galeshot | 2370 | Feel the Rush | NoRecord |  |
-| Galeshot | 2360 | Wuthering Wind | NoRecord |  |
+| Galeshot | 2359 | Teachings of the Tengu | NeedsMechanic: wind force | https://wiki.guildwars2.com/wiki/Teachings_of_the_Tengu (read 2026-09-13: Cyclone Bow and Wind Force / Hawkeye) |
+| Galeshot | 2402 | Joy of Movement | NeedsMechanic: squall | https://wiki.guildwars2.com/wiki/Joy_of_Movement (read 2026-09-13: Squalls remove movement and damaging conditions) |
+| Galeshot | 2370 | Feel the Rush | NeedsMechanic: movement skill | https://wiki.guildwars2.com/wiki/Feel_the_Rush (read 2026-09-13: movement skills grant swiftness and endurance) |
+| Galeshot | 2360 | Wuthering Wind | NeedsMechanic: wind force | https://wiki.guildwars2.com/wiki/Wuthering_Wind (read 2026-09-13: after Bluster, pet attack creates wind swell) |
 | Galeshot | 2363 | Bird of Prey | facts |  |
 | Galeshot | 2408 | Flock Together | facts |  |
-| Galeshot | 2413 | Perilous Skies | NoRecord |  |
-| Galeshot | 2396 | Thrill of the Catch | NoRecord |  |
-| Galeshot | 2341 | Jetstream | NoRecord |  |
-| Galeshot | 2425 | Cloudburst | NoRecord |  |
-| Galeshot | 2336 | Gale Force | NoRecord |  |
-| Galeshot | 2372 | Shrike | NoRecord |  |
-| Soulbeast | 2151 | Elevated Bond | NoRecord |  |
-| Soulbeast | 2134 | Fresh Reinforcement | NoRecord |  |
-| Soulbeast | 2071 | Live Fast | NoRecord |  |
-| Soulbeast | 2072 | Unstoppable Union | NoRecord |  |
+| Galeshot | 2413 | Perilous Skies | NeedsMechanic: skill replace | https://wiki.guildwars2.com/wiki/Perilous_Skies (read 2026-09-13: Quarry's Peril replaced by Pelt) |
+| Galeshot | 2396 | Thrill of the Catch | NeedsMechanic: arrows | https://wiki.guildwars2.com/wiki/Thrill_of_the_Catch (read 2026-09-13: restore arrows on disable) |
+| Galeshot | 2341 | Jetstream | NeedsMechanic: wind force | https://wiki.guildwars2.com/wiki/Jetstream (read 2026-09-13: base movement speed; Hawkeye superspeed) |
+| Galeshot | 2425 | Cloudburst | NeedsMechanic: wind force | https://wiki.guildwars2.com/wiki/Cloudburst (read 2026-09-13: Bluster/Hawkeye cooldown and ally boons) |
+| Galeshot | 2336 | Gale Force | NeedsMechanic: wind force | https://wiki.guildwars2.com/wiki/Gale_Force (read 2026-09-13: Wind Force stacking speed/damage; Hawkeye converts) |
+| Galeshot | 2372 | Shrike | NeedsMechanic: arrows | https://wiki.guildwars2.com/wiki/Shrike (read 2026-09-13: missile-hit volley restores an arrow) |
+| Soulbeast | 2151 | Elevated Bond | NeedsMechanic: transform | https://wiki.guildwars2.com/wiki/Elevated_Bond (read 2026-09-13: Stances access and beastmode merge) |
+| Soulbeast | 2134 | Fresh Reinforcement | NeedsMechanic: transform | https://wiki.guildwars2.com/wiki/Fresh_Reinforcement (read 2026-09-13: entering beastmode copies pet boons) |
+| Soulbeast | 2071 | Live Fast | NeedsMechanic: pet | https://wiki.guildwars2.com/wiki/Live_Fast (read 2026-09-13: Beast ability grants fury and quickness) |
+| Soulbeast | 2072 | Unstoppable Union | NeedsMechanic: transform | https://wiki.guildwars2.com/wiki/Unstoppable_Union (read 2026-09-13: protection on beastmode enter/exit) |
 | Soulbeast | 2156 | Furious Strength | facts |  |
-| Soulbeast | 2119 | Second Skin | NoRecord |  |
-| Soulbeast | 2085 | Essence of Speed | NoRecord |  |
+| Soulbeast | 2119 | Second Skin | NeedsMechanic: protection state | https://wiki.guildwars2.com/wiki/Second_Skin (read 2026-09-13: less condition damage while you have protection) |
+| Soulbeast | 2085 | Essence of Speed | NeedsMechanic: boon extension | https://wiki.guildwars2.com/wiki/Essence_of_Speed (read 2026-09-13: gaining quickness extends other boons) |
 | Soulbeast | 2161 | Predator's Cunning | facts |  |
-| Soulbeast | 2127 | Twice as Vicious | NoRecord |  |
+| Soulbeast | 2127 | Twice as Vicious | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Twice_as_Vicious (read 2026-09-13: disable grants timed strike/condition damage) |
 | Soulbeast | 2155 | Eternal Bond | facts |  |
-| Soulbeast | 2128 | Leader of the Pack | NoRecord |  |
+| Soulbeast | 2128 | Leader of the Pack | NeedsMechanic: stance duration | https://wiki.guildwars2.com/wiki/Leader_of_the_Pack (read 2026-09-13: Stance duration on self and allies) |
 | Soulbeast | 2143 | Oppressive Superiority | facts |  |
-| Untamed | 2268 | Unleashed Power | NoRecord |  |
-| Untamed | 2297 | Debilitating Blows | NoRecord |  |
+| Untamed | 2268 | Unleashed Power | NeedsMechanic: unleash | https://wiki.guildwars2.com/wiki/Unleashed_Power (read 2026-09-13: Cantrips and Unleash; pet unleashed skills) |
+| Untamed | 2297 | Debilitating Blows | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Debilitating_Blows (read 2026-09-13: disable applies conditions by unleash state) |
 | Untamed | 2277 | Nature's Shield | facts |  |
 | Untamed | 2301 | Blinding Outburst | facts |  |
 | Untamed | 2286 | Natural Fortitude | facts |  |
-| Untamed | 2263 | Enhancing Impact | NoRecord |  |
-| Untamed | 2287 | Cleansing Unleash | NoRecord |  |
-| Untamed | 2278 | Corrupting Vines | NoRecord |  |
+| Untamed | 2263 | Enhancing Impact | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Enhancing_Impact (read 2026-09-13: disable grants boons by unleash state) |
+| Untamed | 2287 | Cleansing Unleash | NeedsMechanic: unleash | https://wiki.guildwars2.com/wiki/Cleansing_Unleash (read 2026-09-13: remove conditions on unleash) |
+| Untamed | 2278 | Corrupting Vines | NeedsMechanic: unleash | https://wiki.guildwars2.com/wiki/Corrupting_Vines (read 2026-09-13: Rending Vines convert; Unleashed Ambush strips) |
 | Untamed | 2269 | Vow of the Untamed | facts |  |
-| Untamed | 2271 | Let Loose | NoRecord |  |
-| Untamed | 2283 | Biorhythm | NoRecord |  |
-| Untamed | 2274 | Ferocious Symbiosis | NoRecord |  |
+| Untamed | 2271 | Let Loose | NeedsMechanic: unleash | https://wiki.guildwars2.com/wiki/Let_Loose (read 2026-09-13: Unleashed Ambush ally boons; weapon-swap refresh) |
+| Untamed | 2283 | Biorhythm | NeedsMechanic: unleash | https://wiki.guildwars2.com/wiki/Biorhythm (read 2026-09-13: biorhythm stacks on unleash) |
+| Untamed | 2274 | Ferocious Symbiosis | NeedsMechanic: pet | https://wiki.guildwars2.com/wiki/Ferocious_Symbiosis (read 2026-09-13: you and pet grant damage/movespeed on strikes) |
 
 ## Revenant
 
