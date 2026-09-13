@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 pub mod balance_overrides;
 pub mod boon_condition_formulas;
 pub mod cleanse_sources;
+pub mod combos;
 #[cfg(test)]
 mod consistency_tests;
 pub mod fight_population;
@@ -184,6 +185,9 @@ pub fn initialize() -> DataState {
         errors.extend(errs);
     }
     if let Err(errs) = cleanse_sources::try_load_cleanse_sources() {
+        errors.extend(errs);
+    }
+    if let Err(errs) = combos::try_load_combos() {
         errors.extend(errs);
     }
 
