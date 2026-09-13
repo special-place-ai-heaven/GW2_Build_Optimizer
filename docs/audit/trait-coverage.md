@@ -3,7 +3,7 @@
 | Profession | Traits | facts | record | facts+record | PassiveNoEffect | NeedsMechanic | NoRecord | UnresolvedValue |
 |---|---|---|---|---|---|---|---|---|
 | Elementalist | 108 | 29 | 0 | 0 | 0 | 0 | 79 | 0 |
-| Engineer | 108 | 32 | 0 | 0 | 0 | 0 | 76 | 0 |
+| Engineer | 108 | 32 | 13 | 0 | 0 | 63 | 0 | 0 |
 | Guardian | 108 | 35 | 12 | 0 | 0 | 61 | 0 | 0 |
 | Mesmer | 108 | 22 | 0 | 1 | 0 | 0 | 85 | 0 |
 | Necromancer | 108 | 2 | 27 | 20 | 1 | 56 | 0 | 2 |
@@ -129,111 +129,111 @@
 
 | Line | Id | Trait | State | Source |
 |---|---|---|---|---|
-| Alchemy | 468 | Hidden Flask | NoRecord |  |
-| Alchemy | 396 | Invigorating Speed | NoRecord |  |
-| Alchemy | 509 | Protection Injection | NoRecord |  |
-| Alchemy | 521 | Health Insurance | NoRecord |  |
-| Alchemy | 487 | Transmute | NoRecord |  |
-| Alchemy | 520 | Comeback Cure | NoRecord |  |
-| Alchemy | 469 | Boiling Point | NoRecord |  |
-| Alchemy | 470 | Blast Zone | NoRecord |  |
+| Alchemy | 468 | Hidden Flask | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Hidden_Flask (read 2026-09-13: Drink Lesser Elixir B when struck below 75% health) |
+| Alchemy | 396 | Invigorating Speed | record | https://wiki.guildwars2.com/wiki/Invigorating_Speed (read 2026-09-13: Vigor 5 s when you gain swiftness; ICD 10 s in WvW/PvP; superspeed half is NeedsMechanic movement skill) |
+| Alchemy | 509 | Protection Injection | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Protection_Injection (read 2026-09-13: Protection 3 s when you are disabled; ICD 30 s in WvW/PvP) |
+| Alchemy | 521 | Health Insurance | NeedsMechanic: incoming healing | https://wiki.guildwars2.com/wiki/Health_Insurance (read 2026-09-13: +10% incoming healing; Med Kit outgoing heal bonus is NeedsMechanic kits) |
+| Alchemy | 487 | Transmute | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Transmute (read 2026-09-13: Drink Lesser Elixir C when you use a healing skill) |
+| Alchemy | 520 | Comeback Cure | record | https://wiki.guildwars2.com/wiki/Comeback_Cure (read 2026-09-13: Regeneration 1 s in WvW when a cleanse removes a condition from you; ally-cleanse regen is NeedsMechanic ally state) |
+| Alchemy | 469 | Boiling Point | record | https://wiki.guildwars2.com/wiki/Boiling_Point (read 2026-09-13: Fury 3 s in WvW/PvP when you gain might; ICD 1 s; stack threshold 5 is API fact (any might gates the record)) |
+| Alchemy | 470 | Blast Zone | NeedsMechanic: toolbelt | https://wiki.guildwars2.com/wiki/Blast_Zone (read 2026-09-13: Blast finisher when you use a healing skill associated tool-belt skill) |
 | Alchemy | 413 | Compounding Chemicals | facts |  |
-| Alchemy | 473 | HGH | NoRecord |  |
-| Alchemy | 1871 | Equal and Opposite Reaction | NoRecord |  |
+| Alchemy | 473 | HGH | record | https://wiki.guildwars2.com/wiki/HGH (read 2026-09-13: Elixirs: Might x3 for 8 s in WvW to nearby allies; elixir duration increase is NeedsMechanic boon extension) |
+| Alchemy | 1871 | Equal and Opposite Reaction | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Equal_and_Opposite_Reaction (read 2026-09-13: Quickness and stability when you disable an enemy; ICD 1 s in WvW) |
 | Alchemy | 1854 | Chain Reactivity | facts |  |
-| Explosives | 432 | Explosive Entrance | NoRecord |  |
-| Explosives | 514 | Grenadier | NoRecord |  |
-| Explosives | 525 | Short Fuse | NoRecord |  |
+| Explosives | 432 | Explosive Entrance | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Explosive_Entrance (read 2026-09-13: First attack on combat entry explodes; refreshes after dodge) |
+| Explosives | 514 | Grenadier | NeedsMechanic: kits | https://wiki.guildwars2.com/wiki/Grenadier (read 2026-09-13: Grenade blast radius; Lesser Grenade Barrage on heal skill) |
+| Explosives | 525 | Short Fuse | NeedsMechanic: explosion | https://wiki.guildwars2.com/wiki/Short_Fuse (read 2026-09-13: Fury when you hit with an explosion; ICD 3 s) |
 | Explosives | 1882 | Glass Cannon | facts |  |
-| Explosives | 517 | Steel-Packed Powder | NoRecord |  |
-| Explosives | 482 | Aim-Assisted Rocket | NoRecord |  |
-| Explosives | 1892 | Explosive Temper | NoRecord |  |
+| Explosives | 517 | Steel-Packed Powder | NeedsMechanic: explosion | https://wiki.guildwars2.com/wiki/Steel-Packed_Powder (read 2026-09-13: Explosions cause vulnerability) |
+| Explosives | 482 | Aim-Assisted Rocket | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Aim-Assisted_Rocket (read 2026-09-13: Missile hits launch a rocket; orbital after enough rockets) |
+| Explosives | 1892 | Explosive Temper | NeedsMechanic: explosion | https://wiki.guildwars2.com/wiki/Explosive_Temper (read 2026-09-13: Explosions grant stacking ferocity on hit) |
 | Explosives | 1944 | Blast Shield | facts |  |
 | Explosives | 429 | Shaped Charge | facts |  |
-| Explosives | 1541 | Grand Entrance | NoRecord |  |
-| Explosives | 505 | Shrapnel | NoRecord |  |
+| Explosives | 1541 | Grand Entrance | NeedsMechanic: explosion | https://wiki.guildwars2.com/wiki/Grand_Entrance (read 2026-09-13: Explosive Entrance grants resistance and crit chance) |
+| Explosives | 505 | Shrapnel | NeedsMechanic: explosion | https://wiki.guildwars2.com/wiki/Shrapnel (read 2026-09-13: Explosions have a chance to cripple and bleed) |
 | Explosives | 1947 | Big Boomer | facts |  |
-| Firearms | 515 | Serrated Steel | NoRecord |  |
+| Firearms | 515 | Serrated Steel | record | https://wiki.guildwars2.com/wiki/Serrated_Steel (read 2026-09-13: 33% chance on crit: Bleeding 1 s in WvW/PvP; bleeding duration increase is NeedsMechanic condition duration) |
 | Firearms | 1878 | Chemical Rounds | facts |  |
-| Firearms | 1930 | Sanguine Array | NoRecord |  |
+| Firearms | 1930 | Sanguine Array | record | https://wiki.guildwars2.com/wiki/Sanguine_Array (read 2026-09-13: Might 4 s when you inflict bleeding; no ICD) |
 | Firearms | 1914 | High Caliber | facts |  |
 | Firearms | 536 | Hematic Focus | facts |  |
-| Firearms | 1984 | Juggernaut | NoRecord |  |
+| Firearms | 1984 | Juggernaut | NeedsMechanic: kits | https://wiki.guildwars2.com/wiki/Juggernaut (read 2026-09-13: Might while wielding flamethrower; Napalm stability/fire aura; might duration) |
 | Firearms | 2006 | Thermal Vision | facts |  |
 | Firearms | 1923 | No Scope | facts |  |
 | Firearms | 516 | Modified Ammunition | facts |  |
-| Firearms | 510 | Heavy Metal | NoRecord |  |
+| Firearms | 510 | Heavy Metal | record | https://wiki.guildwars2.com/wiki/Heavy_Metal (read 2026-09-13: +5% critical chance against foes below 75% health) |
 | Firearms | 526 | Sharpshooter | facts |  |
-| Firearms | 433 | Incendiary Powder | NoRecord |  |
-| Inventions | 518 | Cleansing Synergy | NoRecord |  |
-| Inventions | 394 | Over Shield | NoRecord |  |
-| Inventions | 1901 | Automated Medical Response | NoRecord |  |
-| Inventions | 507 | Sapping Device | NoRecord |  |
-| Inventions | 508 | Reconstruction Enclosure | NoRecord |  |
-| Inventions | 1678 | Experimental Turrets | NoRecord |  |
+| Firearms | 433 | Incendiary Powder | record | https://wiki.guildwars2.com/wiki/Incendiary_Powder (read 2026-09-13: On crit: Burning 4 s in WvW/PvP; burning duration increase is NeedsMechanic condition duration) |
+| Inventions | 518 | Cleansing Synergy | record | https://wiki.guildwars2.com/wiki/Cleansing_Synergy (read 2026-09-13: Heal skill: Cleansing Pulse removes 1 condition from nearby allies; pulse regeneration is on the skill page) |
+| Inventions | 394 | Over Shield | NeedsMechanic: weapon-scoped | https://wiki.guildwars2.com/wiki/Over_Shield (read 2026-09-13: Shield skills grant ally protection; protection effectiveness on you) |
+| Inventions | 1901 | Automated Medical Response | NeedsMechanic: toolbelt | https://wiki.guildwars2.com/wiki/Automated_Medical_Response (read 2026-09-13: Regeneration to allies when you use heal-associated tool-belt skill) |
+| Inventions | 507 | Sapping Device | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Sapping_Device (read 2026-09-13: Weaken enemies when you disable or immobilize them) |
+| Inventions | 508 | Reconstruction Enclosure | record | https://wiki.guildwars2.com/wiki/Reconstruction_Enclosure (read 2026-09-13: Protection 3 s to nearby allies (5 targets) when you use a heal skill) |
+| Inventions | 1678 | Experimental Turrets | NeedsMechanic: turrets | https://wiki.guildwars2.com/wiki/Experimental_Turrets (read 2026-09-13: Turrets create reflective barrier and pulse boons) |
 | Inventions | 1834 | Soothing Detonation | facts |  |
-| Inventions | 445 | Mecha Legs | NoRecord |  |
+| Inventions | 445 | Mecha Legs | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Mecha_Legs (read 2026-09-13: Resistance when you dodge; 2 s in WvW/PvP) |
 | Inventions | 519 | Energy Amplifier | facts |  |
-| Inventions | 472 | Anticorrosion Plating | NoRecord |  |
-| Inventions | 1680 | Bunker Down | NoRecord |  |
-| Inventions | 1916 | Medical Dispersion Field | NoRecord |  |
-| Tools | 1979 | Optimized Activation | NoRecord |  |
-| Tools | 532 | Static Discharge | NoRecord |  |
-| Tools | 1997 | Reactive Lenses | NoRecord |  |
-| Tools | 531 | Power Wrench | NoRecord |  |
-| Tools | 1872 | Mechanized Deployment | NoRecord |  |
-| Tools | 512 | Streamlined Kits | NoRecord |  |
-| Tools | 1946 | Lock On | NoRecord |  |
+| Inventions | 472 | Anticorrosion Plating | NeedsMechanic: boon grant | https://wiki.guildwars2.com/wiki/Anticorrosion_Plating (read 2026-09-13: When you grant protection to an ally, cleanse a condition from them) |
+| Inventions | 1680 | Bunker Down | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Bunker_Down (read 2026-09-13: Proximity mine and med kit when you disable an enemy) |
+| Inventions | 1916 | Medical Dispersion Field | NeedsMechanic: percent heal | https://wiki.guildwars2.com/wiki/Medical_Dispersion_Field (read 2026-09-13: Store self-healing in combat and periodically heal nearby allies) |
+| Tools | 1979 | Optimized Activation | record | https://wiki.guildwars2.com/wiki/Optimized_Activation (read 2026-09-13: Vigor 2 s in WvW/PvP when you use a tool belt skill; Mech Command / Morph share the tool-belt slot) |
+| Tools | 532 | Static Discharge | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Static_Discharge (read 2026-09-13: Bolt of lightning whenever you use a tool belt skill) |
+| Tools | 1997 | Reactive Lenses | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Reactive_Lenses (read 2026-09-13: Activate Lesser Utility Goggles when using a healing skill) |
+| Tools | 531 | Power Wrench | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Power_Wrench (read 2026-09-13: Reduce elite recharge when you dodge) |
+| Tools | 1872 | Mechanized Deployment | record | https://wiki.guildwars2.com/wiki/Mechanized_Deployment (read 2026-09-13: Tool belt skills remove 1 condition; 15% tool-belt recharge is NeedsMechanic recharge) |
+| Tools | 512 | Streamlined Kits | NeedsMechanic: kits | https://wiki.guildwars2.com/wiki/Streamlined_Kits (read 2026-09-13: Equipping an engineering kit creates an attack/spell and grants swiftness) |
+| Tools | 1946 | Lock On | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Lock_On (read 2026-09-13: Stealth strike / disable triggers analysis trait skills) |
 | Tools | 1832 | Takedown Round | facts |  |
 | Tools | 1936 | Excessive Energy | facts |  |
-| Tools | 1856 | Kinetic Battery | NoRecord |  |
-| Tools | 523 | Adrenal Implant | NoRecord |  |
-| Tools | 1679 | Gadgeteer | NoRecord |  |
-| Amalgam | 2377 | Experimental Union | NoRecord |  |
-| Amalgam | 2366 | Stainless Steel | NoRecord |  |
+| Tools | 1856 | Kinetic Battery | NeedsMechanic: toolbelt | https://wiki.guildwars2.com/wiki/Kinetic_Battery (read 2026-09-13: Kinetic charges on tool-belt use; at max, quickness and damage) |
+| Tools | 523 | Adrenal Implant | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Adrenal_Implant (read 2026-09-13: Endurance regen increase; tool-belt recharge on dodge) |
+| Tools | 1679 | Gadgeteer | NeedsMechanic: gadgets | https://wiki.guildwars2.com/wiki/Gadgeteer (read 2026-09-13: Gadget skills are more powerful) |
+| Amalgam | 2377 | Experimental Union | NeedsMechanic: morph | https://wiki.guildwars2.com/wiki/Experimental_Union (read 2026-09-13: Elite unlock: morph skills replace tool belt; evolve merge) |
+| Amalgam | 2366 | Stainless Steel | record | https://wiki.guildwars2.com/wiki/Stainless_Steel (read 2026-09-13: Stance skills convert 1 condition to a boon in WvW/PvP; Evolve convert half is NeedsMechanic evolve) |
 | Amalgam | 2395 | Innervating Alloy | facts |  |
-| Amalgam | 2434 | Hardened Chrome | NoRecord |  |
+| Amalgam | 2434 | Hardened Chrome | NeedsMechanic: morph | https://wiki.guildwars2.com/wiki/Hardened_Chrome (read 2026-09-13: Morph skills and evolving grant protection) |
 | Amalgam | 2389 | Hybrid Vigor | facts |  |
-| Amalgam | 2383 | Carbolic Composition | NoRecord |  |
-| Amalgam | 2420 | Mercurial Tendencies | NoRecord |  |
-| Amalgam | 2349 | Silver Lining | NoRecord |  |
-| Amalgam | 2356 | Willing Host | NoRecord |  |
+| Amalgam | 2383 | Carbolic Composition | NeedsMechanic: morph | https://wiki.guildwars2.com/wiki/Carbolic_Composition (read 2026-09-13: Amalgam skills inflict poison on hit; poison duration increase) |
+| Amalgam | 2420 | Mercurial Tendencies | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Mercurial_Tendencies (read 2026-09-13: Disabling an enemy reduces Evolve cooldown) |
+| Amalgam | 2349 | Silver Lining | NeedsMechanic: morph | https://wiki.guildwars2.com/wiki/Silver_Lining (read 2026-09-13: Evolve no longer inherits strain bonuses; morphs grant them) |
+| Amalgam | 2356 | Willing Host | NeedsMechanic: morph | https://wiki.guildwars2.com/wiki/Willing_Host (read 2026-09-13: Using a morph skill increases your damage for a duration) |
 | Amalgam | 2406 | Symbiotic Synergy | facts |  |
-| Amalgam | 2387 | New Genes | NoRecord |  |
-| Amalgam | 2334 | Double Helix | NoRecord |  |
-| Holosmith | 2158 | Photon Projector | NoRecord |  |
-| Holosmith | 2114 | Light Density Amplifier | NoRecord |  |
-| Holosmith | 2157 | Prismatic Converter | NoRecord |  |
+| Amalgam | 2387 | New Genes | NeedsMechanic: morph | https://wiki.guildwars2.com/wiki/New_Genes (read 2026-09-13: Morph skills grant boons to allies) |
+| Amalgam | 2334 | Double Helix | NeedsMechanic: evolve | https://wiki.guildwars2.com/wiki/Double_Helix (read 2026-09-13: Evolve has two charges and increased attribute bonus) |
+| Holosmith | 2158 | Photon Projector | NeedsMechanic: photon forge | https://wiki.guildwars2.com/wiki/Photon_Projector (read 2026-09-13: Elite unlock: Photon Forge replaces tool belt 5; Exceed skills) |
+| Holosmith | 2114 | Light Density Amplifier | NeedsMechanic: heat | https://wiki.guildwars2.com/wiki/Light_Density_Amplifier (read 2026-09-13: Photon Forge reduces incoming damage but increases passive heat) |
+| Holosmith | 2157 | Prismatic Converter | NeedsMechanic: heat | https://wiki.guildwars2.com/wiki/Prismatic_Converter (read 2026-09-13: Deactivate Photon Forge converts conditions to boons by heat) |
 | Holosmith | 2106 | Solar Focusing Lens | facts |  |
 | Holosmith | 2135 | Heat Therapy | facts |  |
-| Holosmith | 2103 | Crystal Configuration: Storm | NoRecord |  |
+| Holosmith | 2103 | Crystal Configuration: Storm | NeedsMechanic: photon forge | https://wiki.guildwars2.com/wiki/Crystal_Configuration:_Storm (read 2026-09-13: Photon Forge skill 1 fires explosive projectiles; extra heat) |
 | Holosmith | 2152 | Crystal Configuration: Eclipse | facts |  |
-| Holosmith | 2091 | Crystal Configuration: Zephyr | NoRecord |  |
+| Holosmith | 2091 | Crystal Configuration: Zephyr | NeedsMechanic: photon forge | https://wiki.guildwars2.com/wiki/Crystal_Configuration:_Zephyr (read 2026-09-13: Holo Leap cleanses move-impair, superspeed, cripple) |
 | Holosmith | 2122 | Laser's Edge | facts |  |
-| Holosmith | 2066 | Thermal Release Valve | NoRecord |  |
-| Holosmith | 2137 | Enhanced Capacity Storage Unit | NoRecord |  |
-| Holosmith | 2064 | Photonic Blasting Module | NoRecord |  |
-| Mechanist | 2291 | Mechanical Genius | NoRecord |  |
-| Mechanist | 2282 | Mech Arms: Single-Edge Cutters | NoRecord |  |
-| Mechanist | 2296 | Mech Arms: High-Impact Drivers | NoRecord |  |
+| Holosmith | 2066 | Thermal Release Valve | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Thermal_Release_Valve (read 2026-09-13: Dodge vents heat as an attack and grants vigor) |
+| Holosmith | 2137 | Enhanced Capacity Storage Unit | NeedsMechanic: heat | https://wiki.guildwars2.com/wiki/Enhanced_Capacity_Storage_Unit (read 2026-09-13: Higher heat capacity; might while above 100% heat) |
+| Holosmith | 2064 | Photonic Blasting Module | NeedsMechanic: heat | https://wiki.guildwars2.com/wiki/Photonic_Blasting_Module (read 2026-09-13: Overheat blasts nearby foes; reduced tool-belt penalty) |
+| Mechanist | 2291 | Mechanical Genius | NeedsMechanic: mech | https://wiki.guildwars2.com/wiki/Mechanical_Genius (read 2026-09-13: Elite unlock: Jade Mech fights at your side) |
+| Mechanist | 2282 | Mech Arms: Single-Edge Cutters | NeedsMechanic: mech | https://wiki.guildwars2.com/wiki/Mech_Arms:_Single-Edge_Cutters (read 2026-09-13: Unlocks Rolling Smash; mech attacks apply bleeding) |
+| Mechanist | 2296 | Mech Arms: High-Impact Drivers | NeedsMechanic: mech | https://wiki.guildwars2.com/wiki/Mech_Arms:_High-Impact_Drivers (read 2026-09-13: Unlocks Explosive Knuckle; mech attacks generate ally might) |
 | Mechanist | 2279 | Mech Arms: Jade Cannons | facts |  |
-| Mechanist | 2266 | Mech Fighter | NoRecord |  |
+| Mechanist | 2266 | Mech Fighter | NeedsMechanic: mech | https://wiki.guildwars2.com/wiki/Mech_Fighter (read 2026-09-13: Mech uses Rocket Punch on weapon skill 3; toughness/vitality inherit) |
 | Mechanist | 2270 | Mech Frame: Conductive Alloys | facts |  |
-| Mechanist | 2276 | Mech Frame: Channeling Conduits | NoRecord |  |
-| Mechanist | 2294 | Mech Frame: Variable Mass Distributor | NoRecord |  |
-| Mechanist | 2267 | Exigency Protocols | NoRecord |  |
-| Mechanist | 2292 | Mech Core: Jade Dynamo | NoRecord |  |
+| Mechanist | 2276 | Mech Frame: Channeling Conduits | NeedsMechanic: mech | https://wiki.guildwars2.com/wiki/Mech_Frame:_Channeling_Conduits (read 2026-09-13: Unlocks Crisis Zone; barrier grants a boon) |
+| Mechanist | 2294 | Mech Frame: Variable Mass Distributor | NeedsMechanic: mech | https://wiki.guildwars2.com/wiki/Mech_Frame:_Variable_Mass_Distributor (read 2026-09-13: Unlocks Core Reactor Shot; mech precision inherit) |
+| Mechanist | 2267 | Exigency Protocols | NeedsMechanic: mech | https://wiki.guildwars2.com/wiki/Exigency_Protocols (read 2026-09-13: Mech below half health gains damage reduction and regeneration) |
+| Mechanist | 2292 | Mech Core: Jade Dynamo | NeedsMechanic: mech | https://wiki.guildwars2.com/wiki/Mech_Core:_Jade_Dynamo (read 2026-09-13: Unlocks Jade Mortar; Mech Command grants quickness and reduced recharge) |
 | Mechanist | 2281 | Mech Core: Barrier Engine | facts |  |
-| Mechanist | 2298 | Mech Core: J-Drive | NoRecord |  |
-| Scrapper | 1959 | Function Gyro | NoRecord |  |
-| Scrapper | 1917 | Gyroscopic Acceleration | NoRecord |  |
+| Mechanist | 2298 | Mech Core: J-Drive | NeedsMechanic: mech | https://wiki.guildwars2.com/wiki/Mech_Core:_J-Drive (read 2026-09-13: Unlocks Sky Circus; bombardment while dismissed; signet passives) |
+| Scrapper | 1959 | Function Gyro | NeedsMechanic: gyros | https://wiki.guildwars2.com/wiki/Function_Gyro (read 2026-09-13: Elite unlock: Function Gyro replaces tool belt 5; Gyro skills) |
+| Scrapper | 1917 | Gyroscopic Acceleration | NeedsMechanic: gyros | https://wiki.guildwars2.com/wiki/Gyroscopic_Acceleration (read 2026-09-13: Gyros grant superspeed / leap enhancements) |
 | Scrapper | 1971 | System Shocker | facts |  |
-| Scrapper | 1867 | Mass Momentum | NoRecord |  |
-| Scrapper | 2014 | Speed of Synergy | NoRecord |  |
-| Scrapper | 1954 | Rapid Regeneration | NoRecord |  |
-| Scrapper | 1999 | Expert Examination | NoRecord |  |
+| Scrapper | 1867 | Mass Momentum | NeedsMechanic: gyros | https://wiki.guildwars2.com/wiki/Mass_Momentum (read 2026-09-13: Might while you have stability; Function Gyro applies ally stability) |
+| Scrapper | 2014 | Speed of Synergy | NeedsMechanic: movement skill | https://wiki.guildwars2.com/wiki/Speed_of_Synergy (read 2026-09-13: Heal grants superspeed around you; heal tool-belt grants personal superspeed) |
+| Scrapper | 1954 | Rapid Regeneration | NeedsMechanic: percent heal | https://wiki.guildwars2.com/wiki/Rapid_Regeneration (read 2026-09-13: Regenerate health while affected by swiftness or superspeed) |
+| Scrapper | 1999 | Expert Examination | NeedsMechanic: gyros | https://wiki.guildwars2.com/wiki/Expert_Examination (read 2026-09-13: Function Gyro and heal tool-belt grant protection to allies) |
 | Scrapper | 1860 | Object in Motion | facts |  |
-| Scrapper | 1877 | Impact Savant | NoRecord |  |
+| Scrapper | 1877 | Impact Savant | NeedsMechanic: barrier | https://wiki.guildwars2.com/wiki/Impact_Savant (read 2026-09-13: Percentage of strike damage converted into barrier) |
 | Scrapper | 1981 | Ex Machina | facts |  |
 | Scrapper | 2052 | Kinetic Accelerators | facts |  |
 | Scrapper | 1849 | Applied Force | facts |  |
