@@ -113,6 +113,43 @@ impl DataCache {
             .map(|m| m.build)
     }
 
+    /// Update `CacheEntry.build` (and `fetched_at`) without changing `data`.
+    ///
+    /// Ada FOLD3: when every cached row still equals the live row, Refresh must
+    /// not rewrite the data payload; stamping the live build lets the next
+    /// `RefreshMode::Default` take the same-build skip. If `build` already
+    /// matches, this is a no-op (no disk write).
+    pub fn stamp_build(&self, key: &str, build: u32) -> Result<(), CacheError> {
+        let path = self.path_for(key);
+        if !path.exists() {
+            return Err(CacheError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("cache key '{key}' missing"),
+            )));
+        }
+        let file = std::fs::File::open(&path)?;
+        let reader = BufReader::new(file);
+        let mut entry: CacheEntry<serde_json::Value> = serde_json::from_reader(reader)?;
+        if entry.build == build {
+            return Ok(());
+        }
+        entry.build = build;
+        entry.fetched_at = Utc::now();
+        let tmp_path = self.base_path.join(format!("{}.tmp", key));
+        let result = (|| -> Result<(), CacheError> {
+            let file = std::fs::File::create(&tmp_path)?;
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer(&mut writer, &entry)?;
+            writer.flush()?;
+            std::fs::rename(&tmp_path, &path)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp_path);
+        }
+        result
+    }
+
     pub fn delete(&self, key: &str) {
         let path = self.path_for(key);
         std::fs::remove_file(&path).ok();
@@ -308,6 +345,19 @@ mod tests {
         assert!(cache.is_stale("stale_test", 101)); // different build
         assert!(cache.is_stale("nonexistent", 100)); // missing file
 
+        let _ = cache.clear_all();
+    }
+
+    #[test]
+    fn stamp_build_updates_build_keeps_data() {
+        let cache = temp_cache();
+        cache.save("stamp_me", &vec![1u32, 2, 3], 100).unwrap();
+        cache.stamp_build("stamp_me", 101).unwrap();
+        assert_eq!(cache.cached_build("stamp_me"), Some(101));
+        let loaded: Option<Vec<u32>> = cache.load("stamp_me").unwrap();
+        assert_eq!(loaded, Some(vec![1, 2, 3]));
+        // Same build: no-op success.
+        cache.stamp_build("stamp_me", 101).unwrap();
         let _ = cache.clear_all();
     }
 

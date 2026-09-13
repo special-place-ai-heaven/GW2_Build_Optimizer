@@ -1,5 +1,18 @@
 //! Full data download orchestration.
 //! Downloads all game data endpoints and caches them locally.
+//!
+//! Ada FOLD3 (SCHEMA N): Refresh is idempotent per KEPT catalog key.
+//! - `RefreshMode::Default` + same `CacheEntry.build` as live `/v2/build`:
+//!   skip body fetches **and** id-list probes for that key.
+//! - Build mismatch / `Verify`: refresh KEPT only, compare-before-write.
+//! - Items keep-set stays the existing type+rarity filter; Refresh never
+//!   body-fetches the discarded bulk when `items.json` already exists.
+
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 use crate::cache::DataCache;
 use crate::client::{with_cancel_bridge, ApiError, Gw2Client};
@@ -19,7 +32,30 @@ pub struct DownloadProgress {
     pub inner_total: usize,
 }
 
+/// How Refresh Game Data treats KEPT catalogs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RefreshMode {
+    /// Skip a KEPT key when `CacheEntry.build == live /v2/build`.
+    /// On build mismatch, incremental refresh + compare-before-write.
+    #[default]
+    Default,
+    /// Refetch KEPT catalogs and compare even when the build matches.
+    /// Still never walks discarded (non-keep) item bodies when `items.json` exists.
+    Verify,
+}
+
 const TOTAL_STEPS: usize = 10;
+const ITEMS_IDS_KEY: &str = "items.ids";
+
+const RELEVANT_TYPES: &[&str] = &[
+    "Armor",
+    "Weapon",
+    "Trinket",
+    "Back",
+    "UpgradeComponent",
+    "Relic",
+];
+const RELEVANT_RARITIES: &[&str] = &["Exotic", "Ascended", "Legendary"];
 
 fn report(
     on_progress: &mut impl FnMut(DownloadProgress),
@@ -47,28 +83,333 @@ fn propagate_icon_step<T>(result: Result<T, ApiError>) -> Result<T, ApiError> {
     result
 }
 
+fn needs_catalog_refresh(cache: &DataCache, key: &str, build: u32, mode: RefreshMode) -> bool {
+    match mode {
+        RefreshMode::Default => cache.is_stale(key, build),
+        RefreshMode::Verify => true,
+    }
+}
+
+fn values_eq<T: Serialize>(a: &T, b: &T) -> bool {
+    match (serde_json::to_value(a), serde_json::to_value(b)) {
+        (Ok(va), Ok(vb)) => va == vb,
+        _ => false,
+    }
+}
+
+fn item_is_kept(item: &models::Item) -> bool {
+    RELEVANT_TYPES.contains(&item.item_type.as_str())
+        && RELEVANT_RARITIES.contains(&item.rarity.as_str())
+}
+
+fn cache_err(e: impl ToString) -> ApiError {
+    ApiError::Cache(e.to_string())
+}
+
+fn save_or_stamp<T: Serialize>(
+    cache: &DataCache,
+    key: &str,
+    data: &T,
+    build: u32,
+    data_changed: bool,
+) -> Result<(), ApiError> {
+    if data_changed || !cache.exists(key) {
+        cache.save(key, data, build).map_err(cache_err)
+    } else {
+        // All rows equal: do not rewrite the data payload; stamp build so the
+        // next Default pass is a same-build skip.
+        cache.stamp_build(key, build).map_err(cache_err)
+    }
+}
+
+/// Ids to body-fetch on an items Refresh when `items.json` already exists.
+///
+/// `previous_live` is the last persisted `/v2/items` id list (`items.ids`).
+/// `cached_keep` is ids currently stored in `items.json`.
+/// Fetch set = (live \ previous) ∪ (cached ∩ live) — never the discarded bulk.
+pub(crate) fn items_refresh_fetch_ids(
+    live_ids: &[u32],
+    previous_live: &[u32],
+    cached_keep: &[u32],
+) -> Vec<u32> {
+    let previous: HashSet<u32> = previous_live.iter().copied().collect();
+    let cached: HashSet<u32> = cached_keep.iter().copied().collect();
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for &id in live_ids {
+        let is_new = !previous.contains(&id);
+        let is_surviving_cached = cached.contains(&id);
+        if (is_new || is_surviving_cached) && seen.insert(id) {
+            out.push(id);
+        }
+    }
+    out
+}
+
+/// Merge fetched item bodies into the kept vec. Equal rows reuse `old`.
+/// Vanished cached ids (not in `live_ids`) are dropped.
+/// Returns `(merged, any_logical_change)`.
+pub(crate) fn merge_kept_items(
+    old: &[models::Item],
+    fetched: Vec<models::Item>,
+    live_ids: &[u32],
+) -> (Vec<models::Item>, bool) {
+    let live_set: HashSet<u32> = live_ids.iter().copied().collect();
+    let mut fetched_map: HashMap<u32, models::Item> = fetched
+        .into_iter()
+        .filter(item_is_kept)
+        .map(|i| (i.id, i))
+        .collect();
+
+    let mut changed = false;
+    let mut merged = Vec::with_capacity(old.len());
+    let mut emitted = HashSet::new();
+
+    for old_item in old {
+        if !live_set.contains(&old_item.id) {
+            changed = true;
+            continue;
+        }
+        emitted.insert(old_item.id);
+        match fetched_map.remove(&old_item.id) {
+            Some(new_item) if values_eq(old_item, &new_item) => {
+                merged.push(old_item.clone());
+            }
+            Some(new_item) => {
+                changed = true;
+                merged.push(new_item);
+            }
+            None => merged.push(old_item.clone()),
+        }
+    }
+
+    for &id in live_ids {
+        if emitted.contains(&id) {
+            continue;
+        }
+        if let Some(item) = fetched_map.remove(&id) {
+            changed = true;
+            merged.push(item);
+        }
+    }
+
+    (merged, changed)
+}
+
+fn merge_by_id<K, T>(old: Vec<T>, new_rows: Vec<T>, id_of: impl Fn(&T) -> K) -> (Vec<T>, bool)
+where
+    K: Eq + Hash + Clone,
+    T: Serialize + Clone,
+{
+    let old_map: HashMap<K, T> = old
+        .into_iter()
+        .map(|r| {
+            let id = id_of(&r);
+            (id, r)
+        })
+        .collect();
+    let old_len = old_map.len();
+    let mut merged = Vec::with_capacity(new_rows.len());
+    let mut equal_reused = 0usize;
+    let mut seen_new = HashSet::new();
+
+    for new_row in new_rows {
+        let id = id_of(&new_row);
+        seen_new.insert(id.clone());
+        if let Some(old_row) = old_map.get(&id) {
+            if values_eq(old_row, &new_row) {
+                merged.push(old_row.clone());
+                equal_reused += 1;
+            } else {
+                merged.push(new_row);
+            }
+        } else {
+            merged.push(new_row);
+        }
+    }
+
+    let vanished = old_map.keys().any(|k| !seen_new.contains(k));
+    let all_equal = !vanished && equal_reused == merged.len() && merged.len() == old_len;
+    (merged, !all_equal)
+}
+
+fn refresh_fetch_all_catalog<T, K>(
+    client: &Gw2Client,
+    cache: &DataCache,
+    key: &str,
+    endpoint: &str,
+    build: u32,
+    id_of: impl Fn(&T) -> K,
+) -> Result<(), ApiError>
+where
+    T: DeserializeOwned + Serialize + Clone + Send,
+    K: Eq + Hash + Clone,
+{
+    let old: Vec<T> = cache.load(key).map_err(cache_err)?.unwrap_or_default();
+    let new_rows: Vec<T> = client.fetch_all(endpoint)?;
+    let (merged, changed) = merge_by_id(old, new_rows, id_of);
+    save_or_stamp(cache, key, &merged, build, changed)
+}
+
+fn refresh_ids_all_catalog<T, K>(
+    client: &Gw2Client,
+    cache: &DataCache,
+    key: &str,
+    endpoint: &str,
+    params: &[(&str, &str)],
+    build: u32,
+    id_of: impl Fn(&T) -> K,
+) -> Result<(), ApiError>
+where
+    T: DeserializeOwned + Serialize + Clone,
+    K: Eq + Hash + Clone,
+{
+    let old: Vec<T> = cache.load(key).map_err(cache_err)?.unwrap_or_default();
+    let new_rows: Vec<T> = client.get_with_params(endpoint, params)?;
+    let (merged, changed) = merge_by_id(old, new_rows, id_of);
+    save_or_stamp(cache, key, &merged, build, changed)
+}
+
+fn parse_u32_ids(raw: &[serde_json::Value]) -> Vec<u32> {
+    raw.iter()
+        .filter_map(|v| v.as_u64().map(|n| n as u32))
+        .collect()
+}
+
+fn install_items(
+    client: &Gw2Client,
+    cache: &DataCache,
+    build: u32,
+    step: usize,
+    on_progress: &mut impl FnMut(DownloadProgress),
+) -> Result<(), ApiError> {
+    on_progress(DownloadProgress {
+        current_step: step,
+        total_steps: TOTAL_STEPS,
+        step_name: "Items (equipment)".to_string(),
+        done: false,
+        detail: Some("fetching item IDs...".into()),
+        inner_done: 0,
+        inner_total: 0,
+    });
+    let ids: Vec<serde_json::Value> = client.get("items")?;
+    let live_ids = parse_u32_ids(&ids);
+
+    let (raw_items, skipped): (Vec<serde_json::Value>, Vec<serde_json::Value>) = client
+        .fetch_by_ids_with_skips("items", &ids, |fetched, total| {
+            on_progress(DownloadProgress {
+                current_step: step,
+                total_steps: TOTAL_STEPS,
+                step_name: "Items (equipment)".to_string(),
+                done: false,
+                detail: Some(format!("{fetched} / {total} items fetched")),
+                inner_done: fetched,
+                inner_total: total,
+            });
+        })?;
+
+    let mut equipment_items: Vec<models::Item> = Vec::with_capacity(ids.len() / 20);
+    for val in raw_items {
+        if let Ok(item) = serde_json::from_value::<models::Item>(val) {
+            if item_is_kept(&item) {
+                equipment_items.push(item);
+            }
+        }
+    }
+
+    cache
+        .save("items", &equipment_items, build)
+        .map_err(cache_err)?;
+    cache
+        .save("items.skipped", &skipped, build)
+        .map_err(cache_err)?;
+    cache
+        .save(ITEMS_IDS_KEY, &live_ids, build)
+        .map_err(cache_err)?;
+    Ok(())
+}
+
+fn refresh_items(
+    client: &Gw2Client,
+    cache: &DataCache,
+    build: u32,
+    step: usize,
+    on_progress: &mut impl FnMut(DownloadProgress),
+) -> Result<(), ApiError> {
+    let old: Vec<models::Item> = cache.load("items").map_err(cache_err)?.unwrap_or_default();
+
+    on_progress(DownloadProgress {
+        current_step: step,
+        total_steps: TOTAL_STEPS,
+        step_name: "Items (equipment)".to_string(),
+        done: false,
+        detail: Some("fetching item IDs...".into()),
+        inner_done: 0,
+        inner_total: 0,
+    });
+    let live_raw: Vec<serde_json::Value> = client.get("items")?;
+    let live_ids = parse_u32_ids(&live_raw);
+
+    let previous: Vec<u32> = match cache.load::<Vec<u32>>(ITEMS_IDS_KEY).map_err(cache_err)? {
+        Some(ids) => ids,
+        // Upgrade path: no id snapshot yet. Treat live as already-seen so we
+        // only revalidate the keep-set (never body-fetch the discarded bulk).
+        None => live_ids.clone(),
+    };
+    let cached_keep: Vec<u32> = old.iter().map(|i| i.id).collect();
+    let fetch_ids = items_refresh_fetch_ids(&live_ids, &previous, &cached_keep);
+    let fetch_vals: Vec<serde_json::Value> =
+        fetch_ids.iter().map(|id| serde_json::json!(*id)).collect();
+
+    let (raw_items, skipped): (Vec<serde_json::Value>, Vec<serde_json::Value>) = client
+        .fetch_by_ids_with_skips("items", &fetch_vals, |fetched, total| {
+            on_progress(DownloadProgress {
+                current_step: step,
+                total_steps: TOTAL_STEPS,
+                step_name: "Items (equipment)".to_string(),
+                done: false,
+                detail: Some(format!("{fetched} / {total} items fetched")),
+                inner_done: fetched,
+                inner_total: total,
+            });
+        })?;
+
+    let fetched: Vec<models::Item> = raw_items
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect();
+    let (merged, changed) = merge_kept_items(&old, fetched, &live_ids);
+    save_or_stamp(cache, "items", &merged, build, changed)?;
+    cache
+        .save("items.skipped", &skipped, build)
+        .map_err(cache_err)?;
+    cache
+        .save(ITEMS_IDS_KEY, &live_ids, build)
+        .map_err(cache_err)?;
+    Ok(())
+}
+
 /// Download all game data, calling `on_progress` after each endpoint.
-/// Skips endpoints that are already cached at the current build.
-/// Returns the game build number on success.
+/// Skips endpoints that are already cached at the current build when
+/// `mode` is [`RefreshMode::Default`]. Returns the game build number on success.
 ///
 /// `cancelled` is checked between steps *and* bridged into `client`'s cancel
-/// flag (see `with_cancel_bridge`), because the waits worth interrupting —
-/// retry backoff, rate-limit sleeps — happen inside `client` while this thread
+/// flag (see `with_cancel_bridge`), because the waits worth interrupting -
+/// retry backoff, rate-limit sleeps - happen inside `client` while this thread
 /// is blocked and cannot poll anything.
 pub fn download_all(
     client: &Gw2Client,
     cache: &DataCache,
     cancelled: impl Fn() -> bool + Sync,
+    mode: RefreshMode,
     on_progress: impl FnMut(DownloadProgress),
 ) -> Result<u32, ApiError> {
-    // Fail before the first request rather than after it, and arm the client
-    // synchronously so an already-cancelled caller needs no watchdog at all.
     if cancelled() {
         client.cancel();
         return Err(ApiError::Cancelled);
     }
     with_cancel_bridge(client, &cancelled, || {
-        download_steps(client, cache, &cancelled, on_progress)
+        download_steps(client, cache, &cancelled, mode, on_progress)
     })
 }
 
@@ -78,6 +419,7 @@ fn download_steps(
     client: &Gw2Client,
     cache: &DataCache,
     cancelled: &impl Fn() -> bool,
+    mode: RefreshMode,
     mut on_progress: impl FnMut(DownloadProgress),
 ) -> Result<u32, ApiError> {
     let check = || {
@@ -92,146 +434,115 @@ fn download_steps(
     let mut step = 0;
 
     check()?;
-    if cache.is_stale("itemstats", build) {
-        let data: Vec<models::ItemStat> = client.fetch_all("itemstats")?;
-        cache
-            .save("itemstats", &data, build)
-            .map_err(|e| ApiError::Cache(e.to_string()))?;
+    if needs_catalog_refresh(cache, "itemstats", build, mode) {
+        refresh_fetch_all_catalog::<models::ItemStat, _>(
+            client,
+            cache,
+            "itemstats",
+            "itemstats",
+            build,
+            |r| r.id,
+        )?;
     }
     report(&mut on_progress, &mut step, "Item stats", None);
 
     check()?;
-    if cache.is_stale("specializations", build) {
-        let data: Vec<models::Specialization> = client.fetch_all("specializations")?;
-        cache
-            .save("specializations", &data, build)
-            .map_err(|e| ApiError::Cache(e.to_string()))?;
+    if needs_catalog_refresh(cache, "specializations", build, mode) {
+        refresh_fetch_all_catalog::<models::Specialization, _>(
+            client,
+            cache,
+            "specializations",
+            "specializations",
+            build,
+            |r| r.id,
+        )?;
     }
     report(&mut on_progress, &mut step, "Specializations", None);
 
     check()?;
-    if cache.is_stale("traits", build) {
-        let data: Vec<models::Trait> = client.fetch_all("traits")?;
-        cache
-            .save("traits", &data, build)
-            .map_err(|e| ApiError::Cache(e.to_string()))?;
+    if needs_catalog_refresh(cache, "traits", build, mode) {
+        refresh_fetch_all_catalog::<models::Trait, _>(
+            client,
+            cache,
+            "traits",
+            "traits",
+            build,
+            |r| r.id,
+        )?;
     }
     report(&mut on_progress, &mut step, "Traits", None);
 
     check()?;
-    if cache.is_stale("skills", build) {
-        let data: Vec<models::Skill> = client.fetch_all("skills")?;
-        cache
-            .save("skills", &data, build)
-            .map_err(|e| ApiError::Cache(e.to_string()))?;
+    if needs_catalog_refresh(cache, "skills", build, mode) {
+        refresh_fetch_all_catalog::<models::Skill, _>(
+            client,
+            cache,
+            "skills",
+            "skills",
+            build,
+            |r| r.id,
+        )?;
     }
     report(&mut on_progress, &mut step, "Skills", None);
 
     // Schema version that includes skills_by_palette.
     check()?;
-    if cache.is_stale("professions", build) {
-        let data: Vec<models::Profession> = client.get_with_params(
+    if needs_catalog_refresh(cache, "professions", build, mode) {
+        refresh_ids_all_catalog::<models::Profession, _>(
+            client,
+            cache,
+            "professions",
             "professions",
             &[("ids", "all"), ("v", "2019-12-19T00:00:00.000Z")],
+            build,
+            |r| r.id.clone(),
         )?;
-        cache
-            .save("professions", &data, build)
-            .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Professions", None);
 
     // Schema version that includes template `code`.
     check()?;
-    if cache.is_stale("legends", build) {
-        let data: Vec<models::Legend> = client.get_with_params(
+    if needs_catalog_refresh(cache, "legends", build, mode) {
+        refresh_ids_all_catalog::<models::Legend, _>(
+            client,
+            cache,
+            "legends",
             "legends",
             &[("ids", "all"), ("v", "2019-12-19T00:00:00.000Z")],
+            build,
+            |r| r.id.clone(),
         )?;
-        cache
-            .save("legends", &data, build)
-            .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Legends", None);
 
     check()?;
-    if cache.is_stale("pets", build) {
-        let data: Vec<models::Pet> = client.fetch_all("pets")?;
-        cache
-            .save("pets", &data, build)
-            .map_err(|e| ApiError::Cache(e.to_string()))?;
+    if needs_catalog_refresh(cache, "pets", build, mode) {
+        refresh_fetch_all_catalog::<models::Pet, _>(client, cache, "pets", "pets", build, |r| {
+            r.id
+        })?;
     }
     report(&mut on_progress, &mut step, "Pets", None);
 
     check()?;
-    if cache.is_stale("pvp_amulets", build) {
-        let data: Vec<models::PvpAmulet> = client.fetch_all("pvp/amulets")?;
-        cache
-            .save("pvp_amulets", &data, build)
-            .map_err(|e| ApiError::Cache(e.to_string()))?;
+    if needs_catalog_refresh(cache, "pvp_amulets", build, mode) {
+        refresh_fetch_all_catalog::<models::PvpAmulet, _>(
+            client,
+            cache,
+            "pvp_amulets",
+            "pvp/amulets",
+            build,
+            |r| r.id,
+        )?;
     }
     report(&mut on_progress, &mut step, "PvP Amulets", None);
 
-    // Equipment-relevant types only; ~100k items. Batched fetch_by_ids with
-    // lenient per-item deserialization.
     check()?;
-    if cache.is_stale("items", build) {
-        let relevant_types = [
-            "Armor",
-            "Weapon",
-            "Trinket",
-            "Back",
-            "UpgradeComponent",
-            "Relic",
-        ];
-        let relevant_rarities = ["Exotic", "Ascended", "Legendary"];
-
-        on_progress(DownloadProgress {
-            current_step: step,
-            total_steps: TOTAL_STEPS,
-            step_name: "Items (equipment)".to_string(),
-            done: false,
-            detail: Some("fetching item IDs...".into()),
-            inner_done: 0,
-            inner_total: 0,
-        });
-        let ids: Vec<serde_json::Value> = client.get("items")?;
-
-        // Fetch all items as raw JSON values with live progress updates.
-        // Singleton 5xx ids are skip-listed so a hole is not written as success.
-        let (raw_items, skipped): (Vec<serde_json::Value>, Vec<serde_json::Value>) = client
-            .fetch_by_ids_with_skips("items", &ids, |fetched, total| {
-                on_progress(DownloadProgress {
-                    current_step: step,
-                    total_steps: TOTAL_STEPS,
-                    step_name: "Items (equipment)".to_string(),
-                    done: false,
-                    detail: Some(format!("{} / {} items fetched", fetched, total)),
-                    inner_done: fetched,
-                    inner_total: total,
-                });
-            })?;
-
-        // Filter to equipment-relevant items with lenient deserialization.
-        // Consume `raw_items` by-value via into_iter so each rejected Value drops
-        // before the next iteration — only the ~5k surviving Items are retained
-        // for `cache.save`.
-        let mut equipment_items: Vec<models::Item> = Vec::with_capacity(ids.len() / 20); // ~5% of items expected
-        for val in raw_items {
-            if let Ok(item) = serde_json::from_value::<models::Item>(val) {
-                if relevant_types.contains(&item.item_type.as_str())
-                    && relevant_rarities.contains(&item.rarity.as_str())
-                {
-                    equipment_items.push(item);
-                }
-            }
+    if needs_catalog_refresh(cache, "items", build, mode) {
+        if cache.exists("items") {
+            refresh_items(client, cache, build, step, &mut on_progress)?;
+        } else {
+            install_items(client, cache, build, step, &mut on_progress)?;
         }
-
-        cache
-            .save("items", &equipment_items, build)
-            .map_err(|e| ApiError::Cache(e.to_string()))?;
-        cache
-            .save("items.skipped", &skipped, build)
-            .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Items (equipment)", None);
 
@@ -239,8 +550,6 @@ fn download_steps(
     check()?;
     let urls = crate::graphics::collect_from_cache(cache);
     let gfx = cache.graphics_dir();
-    // Per-icon skips stay inside download_missing. Cancelled stays
-    // terminal; Cache and any other Err fail the refresh.
     propagate_icon_step(crate::graphics::download_missing(
         client,
         &gfx,
@@ -266,16 +575,18 @@ fn download_steps(
     Ok(build)
 }
 
-/// Game data plus official name packs (de/es/fr/zh). One bar; skips packs that match `build`.
+/// Game data plus official name packs (de/es/fr/zh). One bar; skips packs that match `build`
+/// unless `mode` is [`RefreshMode::Verify`].
 pub fn download_game_and_names(
     client: &Gw2Client,
     cache: &DataCache,
     cancelled: impl Fn() -> bool + Sync,
+    mode: RefreshMode,
     mut on_progress: impl FnMut(DownloadProgress),
 ) -> Result<u32, ApiError> {
     const NAME_STEPS: usize = 4;
     let total = TOTAL_STEPS + NAME_STEPS;
-    let build = download_all(client, cache, &cancelled, |p| {
+    let build = download_all(client, cache, &cancelled, mode, |p| {
         on_progress(DownloadProgress {
             current_step: p.current_step,
             total_steps: total,
@@ -301,7 +612,12 @@ pub fn download_game_and_names(
             inner_done: 0,
             inner_total: 0,
         });
-        if cache.is_stale(&crate::localize::cache_key(lang), build) {
+        let key = crate::localize::cache_key(lang);
+        let refresh_pack = match mode {
+            RefreshMode::Default => cache.is_stale(&key, build),
+            RefreshMode::Verify => true,
+        };
+        if refresh_pack {
             crate::localize::download(cache, lang, &cancelled, |msg| {
                 let (inner_done, inner_total) = parse_items_progress(msg);
                 on_progress(DownloadProgress {
@@ -356,6 +672,25 @@ mod tests {
         ))
     }
 
+    fn sample_item(id: u32, name: &str, item_type: &str, rarity: &str) -> models::Item {
+        models::Item {
+            id,
+            name: name.to_string(),
+            description: None,
+            icon: None,
+            item_type: item_type.to_string(),
+            rarity: rarity.to_string(),
+            level: 80,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: Vec::new(),
+            game_types: Vec::new(),
+            restrictions: Vec::new(),
+            details: None,
+        }
+    }
+
     /// A caller that is already cancelled must not reach the network, must not
     /// report a step, and must leave the client cancelled so any wait it is
     /// asked for later aborts instead of sleeping out a retry ladder.
@@ -373,6 +708,7 @@ mod tests {
             &client,
             &cache,
             move || watched.load(Ordering::Relaxed),
+            RefreshMode::Default,
             |_| steps += 1,
         )
         .expect_err("a cancelled download must not succeed");
@@ -387,7 +723,7 @@ mod tests {
         );
         assert!(
             elapsed < Duration::from_secs(5),
-            "cancelled download took {elapsed:?} — it went to the network"
+            "cancelled download took {elapsed:?} - it went to the network"
         );
     }
 
@@ -422,6 +758,330 @@ mod tests {
             propagate_icon_step::<(u32, u32)>(Err(err)),
             Err(ApiError::Cache(_))
         ));
+    }
+
+    #[test]
+    fn parse_items_progress_reads_done_and_total() {
+        assert_eq!(parse_items_progress("items 40/200"), (40, 200));
+        assert_eq!(parse_items_progress("specializations"), (0, 0));
+    }
+
+    // --- Ada FOLD3 Kent bars -------------------------------------------------
+
+    #[test]
+    fn items_fetch_ids_is_new_union_cached_not_all_live() {
+        // live has commons 1..5 plus kept 10,11 and brand-new 99.
+        let live = vec![1, 2, 3, 4, 5, 10, 11, 99];
+        let previous = vec![1, 2, 3, 4, 5, 10, 11]; // 99 is new
+        let cached_keep = vec![10, 11];
+        let fetch = items_refresh_fetch_ids(&live, &previous, &cached_keep);
+        assert_eq!(fetch, vec![10, 11, 99]);
+        assert!(
+            !fetch.contains(&1),
+            "discarded commons must not be body-fetched"
+        );
+        assert_eq!(fetch.len(), 3, "not all-ids ({})", live.len());
+    }
+
+    #[test]
+    fn merge_kept_items_reuses_equal_row_drops_vanished() {
+        let old = vec![
+            sample_item(10, "Old Equal", "Armor", "Ascended"),
+            sample_item(11, "Will Change", "Weapon", "Exotic"),
+            sample_item(12, "Vanished", "Trinket", "Legendary"),
+        ];
+        let fetched = vec![
+            sample_item(10, "Old Equal", "Armor", "Ascended"), // equal
+            sample_item(11, "Changed", "Weapon", "Exotic"),    // unequal
+            sample_item(99, "Brand New", "Armor", "Ascended"), // new kept
+            sample_item(50, "Junk", "Consumable", "Basic"),    // filtered out
+        ];
+        let live = vec![10, 11, 99, 50];
+        let (merged, changed) = merge_kept_items(&old, fetched, &live);
+        assert!(changed);
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].id, 10);
+        assert_eq!(merged[0].name, "Old Equal"); // reused equal row
+        assert_eq!(merged[1].id, 11);
+        assert_eq!(merged[1].name, "Changed");
+        assert_eq!(merged[2].id, 99);
+        assert!(
+            merged.iter().all(|i| i.id != 12),
+            "vanished id must be dropped"
+        );
+        assert!(
+            merged.iter().all(|i| i.id != 50),
+            "non-keep must not be stored"
+        );
+    }
+
+    #[test]
+    fn merge_kept_items_all_equal_reports_unchanged() {
+        let old = vec![sample_item(10, "Same", "Armor", "Ascended")];
+        let fetched = vec![sample_item(10, "Same", "Armor", "Ascended")];
+        let (merged, changed) = merge_kept_items(&old, fetched, &[10]);
+        assert!(!changed);
+        assert_eq!(merged[0].name, "Same");
+    }
+
+    #[test]
+    fn save_or_stamp_skips_data_rewrite_when_unchanged() {
+        let dir = temp_cache_dir("stamp");
+        let cache = DataCache::new(&dir);
+        let data = vec![sample_item(1, "A", "Armor", "Exotic")];
+        cache.save("items", &data, 100).unwrap();
+        let path = dir.join("items.json");
+        let before = std::fs::read(&path).unwrap();
+
+        save_or_stamp(&cache, "items", &data, 101, false).unwrap();
+        assert_eq!(cache.cached_build("items"), Some(101));
+        let after = std::fs::read(&path).unwrap();
+        // Payload bytes for `data` stay; only build/fetched_at metadata moves.
+        // Full file changes, but loading data must match.
+        let loaded: Vec<models::Item> = cache.load("items").unwrap().unwrap();
+        assert_eq!(loaded[0].name, "A");
+        assert_ne!(before, after, "build stamp must update metadata");
+
+        // Same build + unchanged: no disk write.
+        let mid = std::fs::read(&path).unwrap();
+        save_or_stamp(&cache, "items", &data, 101, false).unwrap();
+        let end = std::fs::read(&path).unwrap();
+        assert_eq!(mid, end, "same-build stamp must be a no-op write");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn same_build_default_hits_only_build_endpoint() {
+        let dir = temp_cache_dir("same_build");
+        let cache = DataCache::new(&dir);
+        // Seed every KEPT catalog at build 42 with tiny empty/minimal payloads.
+        cache
+            .save("itemstats", &Vec::<models::ItemStat>::new(), 42)
+            .unwrap();
+        cache
+            .save("specializations", &Vec::<models::Specialization>::new(), 42)
+            .unwrap();
+        cache
+            .save("traits", &Vec::<models::Trait>::new(), 42)
+            .unwrap();
+        cache
+            .save("skills", &Vec::<models::Skill>::new(), 42)
+            .unwrap();
+        cache
+            .save("professions", &Vec::<models::Profession>::new(), 42)
+            .unwrap();
+        cache
+            .save("legends", &Vec::<models::Legend>::new(), 42)
+            .unwrap();
+        cache.save("pets", &Vec::<models::Pet>::new(), 42).unwrap();
+        cache
+            .save("pvp_amulets", &Vec::<models::PvpAmulet>::new(), 42)
+            .unwrap();
+        cache
+            .save("items", &Vec::<models::Item>::new(), 42)
+            .unwrap();
+        cache.save(ITEMS_IDS_KEY, &Vec::<u32>::new(), 42).unwrap();
+
+        let mut server = mockito::Server::new();
+        let build_mock = server
+            .mock("GET", "/build")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id":42}"#)
+            .expect_at_least(1)
+            .create();
+        // Any catalog probe would 500 / unmatched and fail the run.
+        let itemstats = server.mock("GET", "/itemstats").expect(0).create();
+        let items = server.mock("GET", "/items").expect(0).create();
+        let items_ids = server
+            .mock("GET", mockito::Matcher::Regex(r"^/items\?ids=.*".into()))
+            .expect(0)
+            .create();
+
+        let client = Gw2Client::without_key()
+            .unwrap()
+            .with_api_root(server.url());
+        let build = download_all(&client, &cache, || false, RefreshMode::Default, |_| {})
+            .expect("same-build Default must succeed");
+        assert_eq!(build, 42);
+        build_mock.assert();
+        itemstats.assert();
+        items.assert();
+        items_ids.assert();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn build_bump_items_fetches_new_union_cached_only() {
+        let dir = temp_cache_dir("bump_items");
+        let cache = DataCache::new(&dir);
+        let kept = sample_item(10, "Kept", "Armor", "Ascended");
+        cache.save("items", &vec![kept.clone()], 100).unwrap();
+        cache.save(ITEMS_IDS_KEY, &vec![1u32, 2, 10], 100).unwrap();
+        // Other catalogs same-build-skip at 101? No — build bump makes them stale.
+        // Seed them at 101 so only items is exercised for body counts... actually
+        // needs_catalog_refresh uses is_stale(key, live=101). Seed others at 101.
+        for key in [
+            "itemstats",
+            "specializations",
+            "traits",
+            "skills",
+            "professions",
+            "legends",
+            "pets",
+            "pvp_amulets",
+        ] {
+            // empty vec as json value — type erased via serde_json
+            cache
+                .save(key, &Vec::<serde_json::Value>::new(), 101)
+                .unwrap();
+        }
+
+        let mut server = mockito::Server::new();
+        let build_mock = server
+            .mock("GET", "/build")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id":101}"#)
+            .expect_at_least(1)
+            .create();
+        // live ids: commons 1,2 + kept 10 + new exotic 99 + new junk 3
+        let ids_mock = server
+            .mock("GET", "/items")
+            .match_query(mockito::Matcher::Missing)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"[1,2,3,10,99]"#)
+            .expect_at_least(1)
+            .create();
+        // fetch set = new{3,99} ∪ cached{10} = 3,10,99 (live order)
+        let bodies = server
+            .mock("GET", "/items")
+            .match_query(mockito::Matcher::Regex(r"ids=3,10,99".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"[{"id":3,"name":"Junk","type":"Consumable","rarity":"Basic","level":1},{"id":10,"name":"Kept","type":"Armor","rarity":"Ascended","level":80},{"id":99,"name":"New Gear","type":"Weapon","rarity":"Exotic","level":80}]"#,
+            )
+            .expect_at_least(1)
+            .create();
+        // Must NOT request bulk that starts with discarded id 1 (all-live walk).
+        let all_bodies = server
+            .mock("GET", "/items")
+            .match_query(mockito::Matcher::Regex(r"^ids=1,".into()))
+            .expect(0)
+            .create();
+
+        let client = Gw2Client::without_key()
+            .unwrap()
+            .with_api_root(server.url());
+        download_all(&client, &cache, || false, RefreshMode::Default, |_| {})
+            .expect("build-bump items refresh");
+        build_mock.assert();
+        ids_mock.assert();
+        bodies.assert();
+        all_bodies.assert();
+
+        let loaded: Vec<models::Item> = cache.load("items").unwrap().unwrap();
+        let ids: Vec<u32> = loaded.iter().map(|i| i.id).collect();
+        assert!(ids.contains(&10));
+        assert!(ids.contains(&99));
+        assert!(!ids.contains(&3), "non-keep new id must not be stored");
+        assert_eq!(cache.cached_build("items"), Some(101));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_mode_refetches_kept_on_same_build() {
+        let dir = temp_cache_dir("verify");
+        let cache = DataCache::new(&dir);
+        let stat = models::ItemStat {
+            id: 1,
+            name: "Berserker's".into(),
+            attributes: vec![],
+        };
+        cache.save("itemstats", &vec![stat], 42).unwrap();
+        for key in [
+            "specializations",
+            "traits",
+            "skills",
+            "professions",
+            "legends",
+            "pets",
+            "pvp_amulets",
+            "items",
+        ] {
+            cache
+                .save(key, &Vec::<serde_json::Value>::new(), 42)
+                .unwrap();
+        }
+        cache.save(ITEMS_IDS_KEY, &Vec::<u32>::new(), 42).unwrap();
+
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/build")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id":42}"#)
+            .create();
+        // Verify must probe itemstats even though build matches.
+        let ids = server
+            .mock("GET", "/itemstats")
+            .match_query(mockito::Matcher::Missing)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"[1]"#)
+            .expect_at_least(1)
+            .create();
+        let body = server
+            .mock("GET", "/itemstats")
+            .match_query(mockito::Matcher::Regex(r"ids=1".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"[{"id":1,"name":"Berserker's","attributes":[]}]"#)
+            .expect_at_least(1)
+            .create();
+        // Remaining catalogs: empty id lists.
+        for path in [
+            "/specializations",
+            "/traits",
+            "/skills",
+            "/pets",
+            "/pvp/amulets",
+            "/items",
+        ] {
+            server
+                .mock("GET", path)
+                .match_query(mockito::Matcher::Missing)
+                .with_status(200)
+                .with_header("content-type", "application/json")
+                .with_body("[]")
+                .create();
+        }
+        server
+            .mock("GET", "/professions")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("[]")
+            .create();
+        server
+            .mock("GET", "/legends")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("[]")
+            .create();
+
+        let client = Gw2Client::without_key()
+            .unwrap()
+            .with_api_root(server.url());
+        download_all(&client, &cache, || false, RefreshMode::Verify, |_| {})
+            .expect("Verify same-build");
+        ids.assert();
+        body.assert();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Live smoke test for the whole download path. Lives here rather than in
@@ -530,15 +1190,6 @@ mod tests {
             profs.len()
         );
 
-        println!(
-            "
-=== ALL ENDPOINTS OK ==="
-        );
-    }
-
-    #[test]
-    fn parse_items_progress_reads_done_and_total() {
-        assert_eq!(parse_items_progress("items 40/200"), (40, 200));
-        assert_eq!(parse_items_progress("specializations"), (0, 0));
+        println!("\n=== ALL ENDPOINTS OK ===");
     }
 }
