@@ -2,7 +2,7 @@
 
 | Profession | Traits | facts | record | facts+record | PassiveNoEffect | NeedsMechanic | NoRecord | UnresolvedValue |
 |---|---|---|---|---|---|---|---|---|
-| Elementalist | 108 | 29 | 0 | 0 | 0 | 0 | 79 | 0 |
+| Elementalist | 108 | 29 | 12 | 0 | 0 | 67 | 0 | 0 |
 | Engineer | 108 | 32 | 13 | 0 | 0 | 63 | 0 | 0 |
 | Guardian | 108 | 35 | 12 | 0 | 0 | 61 | 0 | 0 |
 | Mesmer | 108 | 22 | 0 | 1 | 0 | 0 | 85 | 0 |
@@ -17,113 +17,113 @@
 | Line | Id | Trait | State | Source |
 |---|---|---|---|---|
 | Air | 221 | Zephyr's Speed | facts |  |
-| Air | 227 | Zephyr's Boon | NoRecord |  |
-| Air | 224 | One with Air | NoRecord |  |
+| Air | 227 | Zephyr's Boon | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Zephyr%27s_Boon (read 2026-09-13: Fury and swiftness to allies you grant auras to) |
+| Air | 224 | One with Air | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/One_with_Air (read 2026-09-13: Superspeed when attuning to air) |
 | Air | 232 | Ferocious Winds | facts |  |
 | Air | 222 | Electric Discharge | facts |  |
-| Air | 229 | Inscription | NoRecord |  |
+| Air | 229 | Inscription | NeedsMechanic: glyphs | https://wiki.guildwars2.com/wiki/Inscription_(trait) (read 2026-09-13: Glyphs grant attunement-based boons; resistance when attuning to air) |
 | Air | 214 | Raging Storm | facts |  |
 | Air | 1502 | Stormsoul | facts |  |
 | Air | 223 | Aeromancer's Training | facts |  |
 | Air | 226 | Bolt to the Heart | facts |  |
-| Air | 1503 | Fresh Air | NoRecord |  |
-| Air | 1672 | Lightning Rod | NoRecord |  |
-| Arcane | 268 | Arcane Prowess | NoRecord |  |
-| Arcane | 253 | Arcane Precision | NoRecord |  |
-| Arcane | 266 | Renewing Stamina | NoRecord |  |
+| Air | 1503 | Fresh Air | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Fresh_Air (read 2026-09-13: Recharge air attunement on critical hit; ferocity when attuning to air) |
+| Air | 1672 | Lightning Rod | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Lightning_Rod (read 2026-09-13: Cast Lightning Rod trait skill when you disable a foe) |
+| Arcane | 268 | Arcane Prowess | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Arcane_Prowess (read 2026-09-13: Gain boons when you switch attunements) |
+| Arcane | 253 | Arcane Precision | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Arcane_Precision (read 2026-09-13: Critical strikes inflict an attunement-based condition) |
+| Arcane | 266 | Renewing Stamina | record | https://wiki.guildwars2.com/wiki/Renewing_Stamina (read 2026-09-13: Vigor 5 s when you critically strike a foe) |
 | Arcane | 1487 | Arcane Restoration | facts |  |
-| Arcane | 264 | Elemental Attunement | NoRecord |  |
-| Arcane | 265 | Arcane Resurrection | NoRecord |  |
-| Arcane | 1673 | Elemental Lockdown | NoRecord |  |
-| Arcane | 257 | Final Shielding | NoRecord |  |
+| Arcane | 264 | Elemental Attunement | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Elemental_Attunement (read 2026-09-13: Grant a boon to nearby allies when changing attunements) |
+| Arcane | 265 | Arcane Resurrection | NeedsMechanic: revive | https://wiki.guildwars2.com/wiki/Arcane_Resurrection (read 2026-09-13: Cast Geyser and gain an attunement aura when you begin reviving; Geyser partial revive) |
+| Arcane | 1673 | Elemental Lockdown | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Elemental_Lockdown (read 2026-09-13: Gain an attunement-based boon when you disable a foe) |
+| Arcane | 257 | Final Shielding | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Final_Shielding (read 2026-09-13: Cast Lesser Arcane Shield when you use an elite skill) |
 | Arcane | 2004 | Elemental Enchantment | facts |  |
-| Arcane | 238 | Evasive Arcana | NoRecord |  |
+| Arcane | 238 | Evasive Arcana | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Evasive_Arcana (read 2026-09-13: Cast an attunement-based skill when you dodge) |
 | Arcane | 263 | Arcane Lightning | facts |  |
-| Arcane | 1511 | Bountiful Power | NoRecord |  |
-| Earth | 278 | Stone Flesh | NoRecord |  |
-| Earth | 282 | Earth's Embrace | NoRecord |  |
+| Arcane | 1511 | Bountiful Power | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Bountiful_Power (read 2026-09-13: Charges on attunement change; burst of power (quickness/damage) at max stacks) |
+| Earth | 278 | Stone Flesh | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Stone_Flesh (read 2026-09-13: Strike damage taken reduced while attuned to earth) |
+| Earth | 282 | Earth's Embrace | record | https://wiki.guildwars2.com/wiki/Earth%27s_Embrace (read 2026-09-13: Resistance 4 s when you use a healing skill) |
 | Earth | 1507 | Serrated Stones | facts |  |
-| Earth | 289 | Elemental Shielding | NoRecord |  |
+| Earth | 289 | Elemental Shielding | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Elemental_Shielding (read 2026-09-13: Auras you grant to allies also grant protection) |
 | Earth | 279 | Earthen Blast | facts |  |
 | Earth | 275 | Strength of Stone | facts |  |
-| Earth | 281 | Rock Solid | NoRecord |  |
-| Earth | 277 | Earthen Blessing | NoRecord |  |
-| Earth | 280 | Geomancer's Training | NoRecord |  |
-| Earth | 1508 | Diamond Skin | NoRecord |  |
-| Earth | 287 | Written in Stone | NoRecord |  |
-| Earth | 1674 | Stone Heart | NoRecord |  |
+| Earth | 281 | Rock Solid | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Rock_Solid (read 2026-09-13: Grant stability to nearby allies when attuning to earth) |
+| Earth | 277 | Earthen Blessing | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Earthen_Blessing (read 2026-09-13: Shorter movement-impairing conditions on you; restore endurance when you receive them; duration cut is NeedsMechanic incoming condition duration) |
+| Earth | 280 | Geomancer's Training | NeedsMechanic: recharge | https://wiki.guildwars2.com/wiki/Geomancer%27s_Training (read 2026-09-13: Reduced recharge on earth weapon skills; nearby incoming strike reduction) |
+| Earth | 1508 | Diamond Skin | NeedsMechanic: combo | https://wiki.guildwars2.com/wiki/Diamond_Skin (read 2026-09-13: Leap finisher cleanses self; blast finisher cleanses nearby allies) |
+| Earth | 287 | Written in Stone | NeedsMechanic: signets | https://wiki.guildwars2.com/wiki/Written_in_Stone (read 2026-09-13: Signets keep passives while recharging; aura when you use a signet) |
+| Earth | 1674 | Stone Heart | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Stone_Heart (read 2026-09-13: Reduced strike damage after entering or exiting earth attunement) |
 | Fire | 320 | Empowering Flame | facts |  |
-| Fire | 296 | Burning Precision | NoRecord |  |
-| Fire | 328 | Conjurer | NoRecord |  |
-| Fire | 335 | Burning Fire | NoRecord |  |
-| Fire | 318 | Sunspot | NoRecord |  |
+| Fire | 296 | Burning Precision | record | https://wiki.guildwars2.com/wiki/Burning_Precision (read 2026-09-13: On crit: Burning 1 s in WvW/PvP; 33% chance and burning duration increase are NeedsMechanic condition duration / chance) |
+| Fire | 328 | Conjurer | NeedsMechanic: conjure | https://wiki.guildwars2.com/wiki/Conjurer (read 2026-09-13: Fire aura when an ally picks up a conjured weapon) |
+| Fire | 335 | Burning Fire | NeedsMechanic: trait skill | https://wiki.guildwars2.com/wiki/Burning_Fire (read 2026-09-13: Cast Lesser Cleansing Fire when you have 3 conditions) |
+| Fire | 318 | Sunspot | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Sunspot (read 2026-09-13: Fire aura and damage nearby foes when you attune to fire; also on overload) |
 | Fire | 325 | Burning Rage | facts |  |
-| Fire | 340 | Smothering Auras | NoRecord |  |
+| Fire | 340 | Smothering Auras | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Smothering_Auras (read 2026-09-13: Fire aura duration up; applying/transmuting auras cleanses conditions) |
 | Fire | 334 | Power Overwhelming | facts |  |
 | Fire | 319 | Pyromancer's Training | facts |  |
-| Fire | 1510 | Persisting Flames | NoRecord |  |
-| Fire | 294 | Pyromancer's Puissance | NoRecord |  |
+| Fire | 1510 | Persisting Flames | record | https://wiki.guildwars2.com/wiki/Persisting_Flames (read 2026-09-13: +2% strike damage for 15 s when you inflict burning (stack cap 5 is API fact); fire-field duration increase is NeedsMechanic fire field) |
+| Fire | 294 | Pyromancer's Puissance | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Pyromancer%27s_Puissance (read 2026-09-13: Might while using skills attuned to fire; Flame Expulsion on leave/overload) |
 | Fire | 1675 | Inferno | facts |  |
-| Water | 350 | Soothing Mist | NoRecord |  |
-| Water | 348 | Soothing Ice | NoRecord |  |
+| Water | 350 | Soothing Mist | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Soothing_Mist (read 2026-09-13: You and nearby allies recover health while attuned to water) |
+| Water | 348 | Soothing Ice | record | https://wiki.guildwars2.com/wiki/Soothing_Ice (read 2026-09-13: Regeneration 4 s when you use a healing skill; frost aura half is NeedsMechanic aura) |
 | Water | 363 | Piercing Shards | facts |  |
-| Water | 360 | Stop, Drop, and Roll | NoRecord |  |
+| Water | 360 | Stop, Drop, and Roll | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Stop,_Drop,_and_Roll (read 2026-09-13: Dodging removes burning and chilled from nearby allies) |
 | Water | 351 | Healing Ripple | facts |  |
-| Water | 364 | Soothing Disruption | NoRecord |  |
-| Water | 358 | Cleansing Wave | NoRecord |  |
+| Water | 364 | Soothing Disruption | record | https://wiki.guildwars2.com/wiki/Soothing_Disruption (read 2026-09-13: Cantrips: Regeneration 6 s; per-cantrip linked boons (vigor/fury/stability/resistance/aegis/protection) left as page-linked facts) |
+| Water | 358 | Cleansing Wave | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Cleansing_Wave (read 2026-09-13: Heal and cleanse conditions on self and nearby allies when attuning to water) |
 | Water | 349 | Flow like Water | facts |  |
-| Water | 1676 | Aquamancer's Training | NoRecord |  |
-| Water | 362 | Cleansing Water | NoRecord |  |
-| Water | 361 | Powerful Aura | NoRecord |  |
+| Water | 1676 | Aquamancer's Training | NeedsMechanic: recharge | https://wiki.guildwars2.com/wiki/Aquamancer%27s_Training (read 2026-09-13: Increased healing to other allies; reduced recharge on water weapon skills) |
+| Water | 362 | Cleansing Water | NeedsMechanic: ally state | https://wiki.guildwars2.com/wiki/Cleansing_Water (read 2026-09-13: Cleanse conditions from allies you grant regeneration to) |
+| Water | 361 | Powerful Aura | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Powerful_Aura (read 2026-09-13: Any aura you grant yourself is granted to nearby allies) |
 | Water | 2028 | Soothing Power | facts |  |
-| Catalyst | 2227 | Depth of Elements | NoRecord |  |
-| Catalyst | 2230 | Hardened Auras | NoRecord |  |
-| Catalyst | 2252 | Vicious Empowerment | NoRecord |  |
-| Catalyst | 2224 | Energized Elements | NoRecord |  |
-| Catalyst | 2250 | Elemental Empowerment | NoRecord |  |
-| Catalyst | 2247 | Empowering Auras | NoRecord |  |
-| Catalyst | 2249 | Evasive Empowerment | NoRecord |  |
-| Catalyst | 2234 | Spectacular Sphere | NoRecord |  |
-| Catalyst | 2231 | Elemental Epitome | NoRecord |  |
-| Catalyst | 2233 | Elemental Synergy | NoRecord |  |
-| Catalyst | 2241 | Empowered Empowerment | NoRecord |  |
-| Catalyst | 2251 | Sphere Specialist | NoRecord |  |
-| Evoker | 2344 | Evocation | NoRecord |  |
+| Catalyst | 2227 | Depth of Elements | NeedsMechanic: jade sphere | https://wiki.guildwars2.com/wiki/Depth_of_Elements (read 2026-09-13: Elemental energy on strike imbues Jade Sphere; access to Augments) |
+| Catalyst | 2230 | Hardened Auras | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Hardened_Auras (read 2026-09-13: Damage reduction increased when you grant yourself an aura) |
+| Catalyst | 2252 | Vicious Empowerment | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Vicious_Empowerment (read 2026-09-13: Elemental Empowerment and might when you disable or immobilize a foe; EE stacks are NeedsMechanic elemental empowerment) |
+| Catalyst | 2224 | Energized Elements | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Energized_Elements (read 2026-09-13: Gain energy and boons when you switch attunements) |
+| Catalyst | 2250 | Elemental Empowerment | NeedsMechanic: elemental empowerment | https://wiki.guildwars2.com/wiki/Elemental_Empowerment (read 2026-09-13: Gain Elemental Empowerment stacks while in combat) |
+| Catalyst | 2247 | Empowering Auras | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Empowering_Auras (read 2026-09-13: Increased outgoing damage when you grant yourself an aura) |
+| Catalyst | 2249 | Evasive Empowerment | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Evasive_Empowerment (read 2026-09-13: Elemental Empowerment and vigor when evading an attack) |
+| Catalyst | 2234 | Spectacular Sphere | NeedsMechanic: jade sphere | https://wiki.guildwars2.com/wiki/Spectacular_Sphere (read 2026-09-13: Larger Jade Sphere grants swiftness (WvW) and an attunement-based boon) |
+| Catalyst | 2231 | Elemental Epitome | NeedsMechanic: combo | https://wiki.guildwars2.com/wiki/Elemental_Epitome (read 2026-09-13: Attunement aura on combo; Elemental Empowerment when you grant yourself an aura) |
+| Catalyst | 2233 | Elemental Synergy | NeedsMechanic: combo | https://wiki.guildwars2.com/wiki/Elemental_Synergy (read 2026-09-13: Bonus effect when you finish a combo (once per attunement per interval)) |
+| Catalyst | 2241 | Empowered Empowerment | NeedsMechanic: elemental empowerment | https://wiki.guildwars2.com/wiki/Empowered_Empowerment (read 2026-09-13: Elemental Empowerment more effective; further bonus at max stacks) |
+| Catalyst | 2251 | Sphere Specialist | NeedsMechanic: jade sphere | https://wiki.guildwars2.com/wiki/Sphere_Specialist (read 2026-09-13: Jade Sphere boons last longer; gain energy while spheres are active) |
+| Evoker | 2344 | Evocation | NeedsMechanic: familiar | https://wiki.guildwars2.com/wiki/Evocation (read 2026-09-13: Specialize in an element; familiar and reduced attunement recharge) |
 | Evoker | 2391 | Fiery Might | facts |  |
-| Evoker | 2415 | Altruistic Aspect | NoRecord |  |
+| Evoker | 2415 | Altruistic Aspect | NeedsMechanic: meditations | https://wiki.guildwars2.com/wiki/Altruistic_Aspect (read 2026-09-13: Meditation skills grant boons to allies (per-skill linked boons)) |
 | Evoker | 2354 | Spirit's Succor | facts |  |
-| Evoker | 2382 | Enhanced Potency | NoRecord |  |
-| Evoker | 2342 | Familiar's Focus | NoRecord |  |
-| Evoker | 2380 | Familiar's Blessing | NoRecord |  |
-| Evoker | 2438 | Elemental Dynamo | NoRecord |  |
-| Evoker | 2351 | Familiar's Prowess | NoRecord |  |
-| Evoker | 2335 | Galvanic Enchantment | NoRecord |  |
-| Evoker | 2436 | Elemental Balance | NoRecord |  |
-| Evoker | 2437 | Specialized Elements | NoRecord |  |
-| Tempest | 2025 | Singularity | NoRecord |  |
-| Tempest | 1952 | Gale Song | NoRecord |  |
-| Tempest | 1962 | Latent Stamina | NoRecord |  |
-| Tempest | 1886 | Unstable Conduit | NoRecord |  |
+| Evoker | 2382 | Enhanced Potency | NeedsMechanic: familiar | https://wiki.guildwars2.com/wiki/Enhanced_Potency (read 2026-09-13: Improve a boon based on your familiar) |
+| Evoker | 2342 | Familiar's Focus | NeedsMechanic: familiar | https://wiki.guildwars2.com/wiki/Familiar%27s_Focus (read 2026-09-13: Familiar's Prowess is improved) |
+| Evoker | 2380 | Familiar's Blessing | NeedsMechanic: familiar | https://wiki.guildwars2.com/wiki/Familiar%27s_Blessing (read 2026-09-13: Grant boons to nearby allies when you use a familiar skill) |
+| Evoker | 2438 | Elemental Dynamo | NeedsMechanic: familiar | https://wiki.guildwars2.com/wiki/Elemental_Dynamo (read 2026-09-13: Gain one familiar charge when attuning to your selected element) |
+| Evoker | 2351 | Familiar's Prowess | NeedsMechanic: familiar | https://wiki.guildwars2.com/wiki/Familiar%27s_Prowess (read 2026-09-13: Temporary bonus after using a familiar skill) |
+| Evoker | 2335 | Galvanic Enchantment | NeedsMechanic: familiar | https://wiki.guildwars2.com/wiki/Galvanic_Enchantment (read 2026-09-13: After a familiar skill, next strike creates chain lightning) |
+| Evoker | 2436 | Elemental Balance | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Elemental_Balance (read 2026-09-13: Every second entry to selected attunement recharges the next weapon skill) |
+| Evoker | 2437 | Specialized Elements | NeedsMechanic: familiar | https://wiki.guildwars2.com/wiki/Specialized_Elements (read 2026-09-13: Cannot leave selected attunement; familiar recharge and weapon skill recharge on activate) |
+| Tempest | 2025 | Singularity | NeedsMechanic: overload | https://wiki.guildwars2.com/wiki/Singularity (read 2026-09-13: Attain singularity by remaining in an attunement; overload access; shouts) |
+| Tempest | 1952 | Gale Song | record | https://wiki.guildwars2.com/wiki/Gale_Song (read 2026-09-13: Protection 3 s to nearby allies (radius 300, 5 targets) when you use a healing skill) |
+| Tempest | 1962 | Latent Stamina | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Latent_Stamina (read 2026-09-13: Vigor to nearby allies when attuning to water; endurance to allies you grant vigor) |
+| Tempest | 1886 | Unstable Conduit | NeedsMechanic: overload | https://wiki.guildwars2.com/wiki/Unstable_Conduit (read 2026-09-13: Overloads grant an attunement-based aura) |
 | Tempest | 1938 | Gathered Focus | facts |  |
-| Tempest | 1891 | Tempestuous Aria | NoRecord |  |
-| Tempest | 1902 | Harmonious Conduit | NoRecord |  |
-| Tempest | 2015 | Invigorating Torrents | NoRecord |  |
-| Tempest | 1948 | Hardy Conduit | NoRecord |  |
-| Tempest | 1839 | Transcendent Tempest | NoRecord |  |
-| Tempest | 2033 | Lucid Singularity | NoRecord |  |
+| Tempest | 1891 | Tempestuous Aria | record | https://wiki.guildwars2.com/wiki/Tempestuous_Aria (read 2026-09-13: Shout: Might x3 for 6 s in WvW/PvP to nearby allies (5 targets); aura outgoing-damage half is NeedsMechanic aura) |
+| Tempest | 1902 | Harmonious Conduit | record | https://wiki.guildwars2.com/wiki/Harmonious_Conduit (read 2026-09-13: Overloads: Stability 4 s when starting an overload) |
+| Tempest | 2015 | Invigorating Torrents | NeedsMechanic: aura | https://wiki.guildwars2.com/wiki/Invigorating_Torrents (read 2026-09-13: Auras you grant also grant regeneration and vigor (WvW durations)) |
+| Tempest | 1948 | Hardy Conduit | record | https://wiki.guildwars2.com/wiki/Hardy_Conduit (read 2026-09-13: Overloads: Protection 3 s in WvW to nearby allies (radius 300, 5 targets); protection effectiveness increase is NeedsMechanic) |
+| Tempest | 1839 | Transcendent Tempest | NeedsMechanic: overload | https://wiki.guildwars2.com/wiki/Transcendent_Tempest (read 2026-09-13: Faster singularity; increased damage after successfully completing an overload) |
+| Tempest | 2033 | Lucid Singularity | NeedsMechanic: overload | https://wiki.guildwars2.com/wiki/Lucid_Singularity (read 2026-09-13: Boons to nearby allies while channeling and on completing an overload (might pulses in WvW)) |
 | Tempest | 1986 | Elemental Bastion | facts |  |
-| Weaver | 2109 | Weaver | NoRecord |  |
+| Weaver | 2109 | Weaver | NeedsMechanic: dual attack | https://wiki.guildwars2.com/wiki/Weaver (read 2026-09-13: Elite specialization unlock; dual attunement and dual attacks) |
 | Weaver | 2177 | Superior Elements | facts |  |
-| Weaver | 2165 | Elemental Pursuit | NoRecord |  |
-| Weaver | 2115 | Weaver's Prowess | NoRecord |  |
+| Weaver | 2165 | Elemental Pursuit | NeedsMechanic: disable trigger | https://wiki.guildwars2.com/wiki/Elemental_Pursuit (read 2026-09-13: Swiftness when you disable an enemy; swiftness effectiveness increase) |
+| Weaver | 2115 | Weaver's Prowess | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Weaver%27s_Prowess (read 2026-09-13: Resistance when you attune to a single element) |
 | Weaver | 2077 | Elemental Refreshment | facts |  |
 | Weaver | 2180 | Master's Fortitude | facts |  |
-| Weaver | 2061 | Swift Revenge | NoRecord |  |
-| Weaver | 2170 | Bolstered Elements | NoRecord |  |
-| Weaver | 2081 | Elemental Polyphony | NoRecord |  |
-| Weaver | 2131 | Elements of Rage | NoRecord |  |
-| Weaver | 2090 | Woven Stride | NoRecord |  |
-| Weaver | 2138 | Flow State | NoRecord |  |
+| Weaver | 2061 | Swift Revenge | NeedsMechanic: dual attack | https://wiki.guildwars2.com/wiki/Swift_Revenge (read 2026-09-13: Dual attacks grant element-based bonuses (might/cleanse/swiftness/endurance)) |
+| Weaver | 2170 | Bolstered Elements | record | https://wiki.guildwars2.com/wiki/Bolstered_Elements (read 2026-09-13: Stance: Protection 3 s; Lesser Stone Resonance on elite is NeedsMechanic trait skill) |
+| Weaver | 2081 | Elemental Polyphony | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Elemental_Polyphony (read 2026-09-13: Attributes based on current attunement; both when dual attuned) |
+| Weaver | 2131 | Elements of Rage | NeedsMechanic: attunement | https://wiki.guildwars2.com/wiki/Elements_of_Rage (read 2026-09-13: Damage bonus when attuned to a single element; access to Unravel) |
+| Weaver | 2090 | Woven Stride | record | https://wiki.guildwars2.com/wiki/Woven_Stride (read 2026-09-13: Regeneration 3 s when you gain swiftness; superspeed half is NeedsMechanic movement skill) |
+| Weaver | 2138 | Flow State | NeedsMechanic: dual attack | https://wiki.guildwars2.com/wiki/Flow_State (read 2026-09-13: Attunements and dual attack skills gain reduced recharge) |
 
 ## Engineer
 
