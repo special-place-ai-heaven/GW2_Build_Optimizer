@@ -3661,11 +3661,11 @@ impl<'a> Timeline<'a> {
         if self.disabled_until_ms > self.now_ms {
             return;
         }
-        if self
-            .incoming_conditions
-            .iter()
-            .any(|c| c.name.eq_ignore_ascii_case("Immobilize") && c.expires_at_ms > self.now_ms)
-        {
+        if self.incoming_conditions.iter().any(|c| {
+            crate::data::boon_condition_formulas::canonical_condition_name(&c.name)
+                .eq_ignore_ascii_case("Immobile")
+                && c.expires_at_ms > self.now_ms
+        }) {
             return;
         }
         if self
@@ -4291,6 +4291,52 @@ mod tests {
             ">=3 dodge-family traits must execute; got {executing}; {:?}",
             report.trait_fire_counts
         );
+    }
+
+    /// Immobilize / Immobilized must block dodge the same as canonical Immobile.
+    #[test]
+    fn immobile_aliases_block_dodge() {
+        let params = params();
+        for name in ["Immobile", "Immobilize", "Immobilized"] {
+            let mut timeline = Timeline::new(
+                &[],
+                &params,
+                profile(1_000, vec![]),
+                open_enemy(false),
+                &[],
+                &[],
+                true,
+                Vec::new(),
+            );
+            assert!(timeline.endurance.can_dodge(DODGE_COST));
+            timeline.incoming_conditions.push(TimedCondition {
+                name: name.into(),
+                stacks: 1,
+                expires_at_ms: 5_000,
+                next_tick_ms: 1_000,
+            });
+            timeline.tick_endurance_and_dodge();
+            assert_eq!(timeline.dodge_action.dodges, 0, "{name} must block dodge");
+            assert_eq!(
+                timeline.trigger_bus.count(BusEvent::OnDodge),
+                0,
+                "{name} must not emit OnDodge"
+            );
+        }
+        // Control: no immobilize -> dodge fires once.
+        let mut clear = Timeline::new(
+            &[],
+            &params,
+            profile(1_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            Vec::new(),
+        );
+        clear.tick_endurance_and_dodge();
+        assert_eq!(clear.dodge_action.dodges, 1);
+        assert_eq!(clear.trigger_bus.count(BusEvent::OnDodge), 1);
     }
 
     fn open_enemy(stability: bool) -> EnemyDummy {

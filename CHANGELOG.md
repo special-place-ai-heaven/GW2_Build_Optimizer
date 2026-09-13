@@ -8,7 +8,7 @@ NeedsMechanic Engine E0: shared TriggerBus + Endurance/Dodge family. SCHEMA CHAN
 
 ### TriggerBus + Endurance/Dodge
 
-- Shared `TriggerBus` events are OnDodge, OnDisableFoe, OnElite, and OnThreshold only; one bus is used by the flow simulator and the WvW timeline.
+- Shared `TriggerBus` events are OnDodge, OnDisableFoe, OnElite, and OnThreshold only. WvW timeline wires live Endurance/Dodge -> OnDodge; flow `SimState` holds the same types for a follow-up tick hookup.
 - `EndurancePool` + `DodgeAction` are the same dodge family (50 endurance per dodge, 5/s base regen). A successful dodge emits OnDodge so dodge-tagged trait records fire — no one-off trait-skill casts.
 - `TriggerRule` gains OnDodge / OnDisableFoe / OnElite / OnThreshold, extending the OnShroudEnter pattern in `normalized_effects.rs`.
 - Executable OnDodge records for Expeditious Dodger, Pumping Up, Resilient Roll, and Resolute Evasion (NeedsMechanic:dodge → record). OnDisableFoe may read TargetState disable; no second foe-condition map.

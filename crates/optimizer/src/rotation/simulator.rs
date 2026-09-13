@@ -318,7 +318,8 @@ struct ScheduledStrike {
 }
 
 struct SimState {
-    /// E0: shared with wvw_timeline (TriggerBus + Endurance/Dodge family).
+    /// E0: shared TriggerBus + Endurance/Dodge types with wvw_timeline.
+    /// Live try_dodge / OnDodge wiring is WvW-only today; flow tick hookup is follow-up.
     #[allow(dead_code)]
     trigger_bus: super::trigger_bus::TriggerBus,
     #[allow(dead_code)]
