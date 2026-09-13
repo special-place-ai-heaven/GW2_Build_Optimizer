@@ -319,8 +319,10 @@ pub fn assign_best_consumables(
         return;
     }
 
+    // One-sided locks must pin the locked id as Some(&Item) so scoring
+    // includes its contribution (None would treat the lock as zero).
     let food_choices: Vec<Option<&Item>> = if food_locked {
-        vec![None]
+        vec![validated.food.as_ref().and_then(|v| db.items.get(&v.id))]
     } else {
         let mut v: Vec<Option<&Item>> = Vec::with_capacity(foods.len() + 1);
         v.push(None);
@@ -328,7 +330,7 @@ pub fn assign_best_consumables(
         v
     };
     let util_choices: Vec<Option<&Item>> = if util_locked {
-        vec![None]
+        vec![validated.utility.as_ref().and_then(|v| db.items.get(&v.id))]
     } else {
         let mut v: Vec<Option<&Item>> = Vec::with_capacity(utils.len() + 1);
         v.push(None);
@@ -358,12 +360,19 @@ pub fn assign_best_consumables(
     }
 
     // Large catalog: independent passes stay additive and cheap.
+    // Approximation: food is chosen without free utilities (or with a pinned
+    // locked utility), then utility is chosen with the selected food pinned.
+    // Cross terms between free food and free utility are not jointly optimized.
     if !food_locked {
-        let empty_utils = [None];
+        let pinned_utils = [if util_locked {
+            validated.utility.as_ref().and_then(|v| db.items.get(&v.id))
+        } else {
+            None
+        }];
         let (food, _) = joint_argmax(
             validated,
             &food_choices,
-            &empty_utils,
+            &pinned_utils,
             db,
             profession_name,
             weights,
@@ -860,6 +869,193 @@ mod tests {
         assert!(
             !mods.strike_pct.is_empty() || !mods.strike_add_pct.is_empty(),
             "standing +5% Damage must fold: {mods:?}"
+        );
+    }
+
+    /// One-sided food lock must pin the locked item into scoring so the free
+    /// utility pick can change with locked food power (joint product <= 64).
+    #[test]
+    fn one_sided_food_lock_changes_free_utility_pick() {
+        let flat_util = test_consumable(
+            51,
+            "Flat Power Oil",
+            ConsumableKind::Enhancement,
+            &[("Power", 120)],
+            &["Pve"],
+            None,
+        );
+        let pct_util = test_consumable(
+            52,
+            "Percent Damage Oil",
+            ConsumableKind::Enhancement,
+            &[],
+            &["Pve"],
+            Some("+10% Damage"),
+        );
+        let tiny_food = test_consumable(
+            53,
+            "Tiny Locked Toast",
+            ConsumableKind::Nourishment,
+            &[("Power", 1)],
+            &["Pve"],
+            None,
+        );
+        let huge_food = test_consumable(
+            54,
+            "Huge Locked Stew",
+            ConsumableKind::Nourishment,
+            &[("Power", 20_000)],
+            &["Pve"],
+            None,
+        );
+        let db = db_with(vec![flat_util, pct_util, tiny_food, huge_food]);
+        let weights = power_weights();
+        let ctx = pve_ctx();
+        let scenario = pve_scenario();
+
+        let mut locks_tiny = BuildLocks::default();
+        locks_tiny.food = Some(53);
+        let mut build_tiny = ValidatedBuild::default();
+        assign_best_consumables(
+            &mut build_tiny,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks_tiny,
+        );
+        assert_eq!(build_tiny.food.as_ref().map(|i| i.id), Some(53));
+        let tiny_util = build_tiny.utility.as_ref().map(|i| i.id);
+
+        let mut locks_huge = BuildLocks::default();
+        locks_huge.food = Some(54);
+        let mut build_huge = ValidatedBuild::default();
+        assign_best_consumables(
+            &mut build_huge,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks_huge,
+        );
+        assert_eq!(build_huge.food.as_ref().map(|i| i.id), Some(54));
+        let huge_util = build_huge.utility.as_ref().map(|i| i.id);
+
+        assert_eq!(
+            tiny_util,
+            Some(51),
+            "tiny locked food: flat power util should win, got {tiny_util:?}"
+        );
+        assert_eq!(
+            huge_util,
+            Some(52),
+            "huge locked food: percent damage util should win, got {huge_util:?}"
+        );
+        assert_ne!(
+            tiny_util, huge_util,
+            "free-slot util pick must change with locked food power"
+        );
+    }
+
+    /// Large-catalog path (product > 64): locked utility must be pinned while
+    /// choosing food, same interaction as the joint one-sided lock case.
+    #[test]
+    fn large_catalog_one_sided_util_lock_changes_free_food_pick() {
+        let flat_food = test_consumable(
+            61,
+            "Flat Power Stew",
+            ConsumableKind::Nourishment,
+            &[("Power", 120)],
+            &["Pve"],
+            None,
+        );
+        let pct_food = test_consumable(
+            62,
+            "Percent Damage Stew",
+            ConsumableKind::Nourishment,
+            &[],
+            &["Pve"],
+            Some("+10% Damage"),
+        );
+        let tiny_util = test_consumable(
+            63,
+            "Tiny Locked Oil",
+            ConsumableKind::Enhancement,
+            &[("Power", 1)],
+            &["Pve"],
+            None,
+        );
+        let huge_util = test_consumable(
+            64,
+            "Huge Locked Oil",
+            ConsumableKind::Enhancement,
+            &[("Power", 20_000)],
+            &["Pve"],
+            None,
+        );
+        // 70 filler foods => food_choices = 73 (None + flat + pct + 70), util locked
+        // => product = 73 > 64, forcing the independent large-catalog path.
+        let mut items = vec![flat_food, pct_food, tiny_util, huge_util];
+        for i in 0..70 {
+            items.push(test_consumable(
+                1000 + i,
+                &format!("Filler Food {i}"),
+                ConsumableKind::Nourishment,
+                &[("Toughness", 1)],
+                &["Pve"],
+                None,
+            ));
+        }
+        let db = db_with(items);
+        let weights = power_weights();
+        let ctx = pve_ctx();
+        let scenario = pve_scenario();
+
+        let mut locks_tiny = BuildLocks::default();
+        locks_tiny.utility = Some(63);
+        let mut build_tiny = ValidatedBuild::default();
+        assign_best_consumables(
+            &mut build_tiny,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks_tiny,
+        );
+        assert_eq!(build_tiny.utility.as_ref().map(|i| i.id), Some(63));
+        let tiny_food = build_tiny.food.as_ref().map(|i| i.id);
+
+        let mut locks_huge = BuildLocks::default();
+        locks_huge.utility = Some(64);
+        let mut build_huge = ValidatedBuild::default();
+        assign_best_consumables(
+            &mut build_huge,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks_huge,
+        );
+        assert_eq!(build_huge.utility.as_ref().map(|i| i.id), Some(64));
+        let huge_food = build_huge.food.as_ref().map(|i| i.id);
+
+        assert_eq!(
+            tiny_food,
+            Some(61),
+            "tiny locked util: flat power food should win, got {tiny_food:?}"
+        );
+        assert_eq!(
+            huge_food,
+            Some(62),
+            "huge locked util: percent damage food should win, got {huge_food:?}"
+        );
+        assert_ne!(
+            tiny_food, huge_food,
+            "free-slot food pick must change with locked utility power"
         );
     }
 }
