@@ -1,0 +1,112 @@
+   Compiling gw2-core v1.14.5 (C:\AI_STUFF\PROGRAMMING\GW2_Build_Optimizer\crates\core)
+   Compiling gw2-api v1.14.5 (C:\AI_STUFF\PROGRAMMING\GW2_Build_Optimizer\crates\gw2api)
+   Compiling gw2-optimizer v1.14.5 (C:\AI_STUFF\PROGRAMMING\GW2_Build_Optimizer\crates\optimizer)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.32s
+     Running `target\debug\examples\calibrate_viability.exe`
+740 synced builds, 4702 skills, 660 palette entries in db
+  skills marked up on 328; chat code on 739, decodes 739,              palette resolves for 739
+scored 582 (205 with a published rotation line); skipped 0 with no three-spec plate, 158 that failed validation
+   rejected: guildjen Elementalist [Raid Healer] Set 2: 'Warhorn' requires Tempest (not equipped) ÔÇö weapon cannot be used
+   rejected: guildjen Elementalist [Fractal Power DPS] Set 2: 'Warhorn' requires Tempest (not equipped) ÔÇö weapon cannot be used
+   rejected: guildjen Elementalist [Raid Condi DPS] Set 2: 'Warhorn' requires Tempest (not equipped) ÔÇö weapon cannot be used
+   rejected: guildjen Elementalist [Fractal Power DPS] Set 2: 'Warhorn' requires Tempest (not equipped) ÔÇö weapon cannot be used
+   rejected: guildjen Elementalist [Open World Condi DPS] Set 2: 'Warhorn' requires Tempest (not equipped) ÔÇö weapon cannot be used
+
+is_viable (every gate):       489/582    84%
+blocking gates only:          489/582    84%   <- the rest are scored -1.0 by a gate blocks() says cannot refuse
+
+gate                        pass    fail   pass%
+CleanseRate                  155      38     80%
+EffectiveHealth              561      21     96%
+EncounterOutcome              45      95     32%
+HarasserStrip                 13     101     11%
+MobilityOut                   83       0    100%
+ProtectedExecution            37      87     30%
+ResourceLegality              96      28     77%
+SecureCompletion              90      50     64%
+StabilityAccess              186       7     96%
+StunbreakCount               169      24     88%
+SustainRecovery              120       4     97%
+
+whole-build pass rate by published role (worst first):
+  Cloud DPS                       0/7        0%
+  Cloud Tank                      0/2        0%
+  DPS                             0/21       0%
+  Damage                          0/1        0%
+  Duelist                         0/10       0%
+  Havoc Assassin                  0/4        0%
+  Havoc DPS                       0/3        0%
+  Power DPS                       0/1        0%
+  Roamer                          0/19       0%
+  Roaming Assassin                0/37       0%
+  Roaming Bruiser                 0/40       0%
+  Roaming Condi DPS               0/2        0%
+  Sidenoder                       0/3        0%
+  Zerg Boon DPS                   0/1        0%
+
+pass rate per gate per job family:
+gate                        SupportStrikeSpike  CondiRamp   Harasser   Disabler  Commander
+CleanseRate                     82%        67%       100%        85%          -          -
+EffectiveHealth                100%        96%        99%        93%          -          -
+EncounterOutcome                  -         0%          -        39%          -          -
+HarasserStrip                     -          -          -        11%          -          -
+MobilityOut                       -          -       100%       100%          -          -
+ProtectedExecution              57%         9%        50%        31%          -          -
+ResourceLegality                57%        83%       100%        79%          -          -
+SecureCompletion                  -        54%          -        67%          -          -
+StabilityAccess                 89%        94%       100%        99%          -          -
+StunbreakCount                  71%        86%        50%        93%          -          -
+SustainRecovery                 79%        96%       100%       100%          -          -
+
+what the corpus actually reaches, per family:
+family         n   hp p10   hp p25   hp p50   hp p90  repeatable
+Support       14       0%      11%      27%      41%          0%
+StrikeSpike    23       8%      22%      41%      74%         13%
+CondiRamp      2      13%      13%      15%      15%        100%
+Harasser      85      42%      52%      61%      86%         38%
+  Support  sustain margin/s   p10     -932  p50     -716  p90     -524
+  StrikeSpike sustain margin/s   p10    -3395  p50    -2561  p90     -304
+  CondiRamp sustain margin/s   p10    -1059  p50     -698  p90     -698
+  Harasser sustain margin/s   p10    -1288  p50     -701  p90     -112
+
+failing examples:
+  == CleanseRate
+     guildjen Elementalist [Duelist] cleanse_count=0, rate=0.0/20s (required count >=1, rate >=2.0/20s)
+     guildjen Elementalist [DPS] cleanse_count=0, rate=42.0/20s incl. 42.0 from sigils/rune/relic/traits (required count >=1, rate >=2.0/20s)
+     guildjen Elementalist [Roamer] cleanse_count=0, rate=2.0/20s incl. 2.0 from sigils/rune/relic/traits (required count >=1, rate >=2.0/20s)
+  == EffectiveHealth
+     guildjen Elementalist [Open World Power DPS] effective_health=9809 (required >=11000)
+     guildjen Elementalist [Open World Power DPS] effective_health=9809 (required >=11000)
+     guildjen Elementalist [Open World Power DPS] effective_health=9809 (required >=11000)
+  == EncounterOutcome
+     guildjen Elementalist [DPS] target threshold not reached by end of clock
+     guildjen Elementalist [Duelist] target threshold not reached by end of clock
+     guildjen Elementalist [DPS] target threshold not reached by end of clock
+  == HarasserStrip
+     guildjen Elementalist [Duelist] harasser/roam without cover-crack (strip/steal/corrupt)
+     guildjen Elementalist [Roamer] harasser/roam without cover-crack (strip/steal/corrupt)
+     guildjen Elementalist [Roamer] harasser/roam without cover-crack (strip/steal/corrupt)
+  == ProtectedExecution
+     guildjen Elementalist [Cloud DPS] chain completed=false, damage route=false, protected=400ms, actions=3, 2s spike=33902, sequence control=0ms, interrupted=1 (minimum 2000ms secured inside the sequence)
+     guildjen Elementalist [Roaming Assassin] chain completed=true, damage route=false, protected=2900ms, actions=5, 2s spike=1810, sequence control=0ms, interrupted=2 (minimum 2000ms secured inside the sequence)
+     guildjen Elementalist [Cloud DPS] chain completed=false, damage route=false, protected=150ms, actions=2, 2s spike=340, sequence control=0ms, interrupted=2 (minimum 2000ms secured inside the sequence)
+  == ResourceLegality
+     guildjen Mesmer [Havoc Support] resource-blocked priority actions=1
+     guildjen Mesmer [Havoc Support] resource-blocked priority actions=1
+     guildjen Mesmer [Roaming Bruiser] resource-blocked priority actions=1
+  == SecureCompletion
+     guildjen Elementalist [Duelist] no interrupt available for the target's recovery action
+     guildjen Elementalist [Roamer] no interrupt available for the target's recovery action
+     guildjen Elementalist [DPS] no interrupt available for the target's recovery action
+  == StabilityAccess
+     guildjen Ranger [Support] no cover (stability, evade, block, invuln, stealth) and no interrupt
+     guildjen Ranger [Cloud Support] no cover (stability, evade, block, invuln, stealth) and no interrupt
+     guildjen Revenant [DPS] no cover (stability, evade, block, invuln, stealth) and no interrupt
+  == StunbreakCount
+     guildjen Elementalist [Support] stunbreak_count=0 (required >=1)
+     guildjen Elementalist [Support] stunbreak_count=0 (required >=1)
+     guildjen Elementalist [Havoc Support] stunbreak_count=0 (required >=1)
+  == SustainRecovery
+     guildjen Elementalist [Havoc Support] survived=false, health=0%, margin=-881/s, repeatable=false
+     guildjen Elementalist [Cloud Support] survived=false, health=0%, margin=-849/s, repeatable=false
+     hardstuck Elementalist [Zerg Support] survived=false, health=0%, margin=-1019/s, repeatable=false
