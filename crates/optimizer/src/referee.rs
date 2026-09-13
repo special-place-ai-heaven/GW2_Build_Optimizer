@@ -91,8 +91,13 @@ pub enum ViabilityGate {
     /// WvW/PvP: personal cover vs CC — Stability *or* evade/block/invuln/stealth.
     /// Roam also accepts interrupt/disable-first (cut their cast before yours).
     StabilityAccess,
-    /// Build must have ≥ MIN_CLEANSE_COUNT cleanse skills (WvW/PvP only).
+    /// Damaging-condition cleanse rate/count floor (WvW/PvP only).
+    /// Enum name kept as `CleanseRate`; Resistance must NOT discount this floor.
     CleanseRate,
+    /// Soft-control answer for chill/weakness/slow/immobilize/blind/cripple
+    /// (WvW/PvP only). Passes if the kit has cleanse OR Resistance OR a
+    /// stunbreak (OR, not AND). Hard CC stays on `StunbreakCount`.
+    ControlCoverage,
     /// Build effective health must meet the mode-specific EHP floor.
     EffectiveHealth,
     /// WvW roam (Solo): stealth, evade, block, or mobility to disengage a group.
@@ -314,11 +319,11 @@ pub fn viability_failure_summary(report: &ViabilityReport) -> String {
 
 /// Evaluate all mode-appropriate viability gates for a build.
 ///
-/// - WvW/PvP: StunbreakCount, StabilityAccess, CleanseRate, EffectiveHealth
-/// - PvE: EffectiveHealth only
+/// - WvW/PvP: StunbreakCount, StabilityAccess, CleanseRate, ControlCoverage, EffectiveHealth
+/// - PvE: EffectiveHealth only (neither CleanseRate nor ControlCoverage)
 ///
 /// When `rotation` is `None` (simulation unavailable), rotation-dependent
-/// gates (StunbreakCount, StabilityAccess, CleanseRate) fail with
+/// gates (StunbreakCount, StabilityAccess, CleanseRate, ControlCoverage) fail with
 /// `note = "rotation unavailable"` in WvW/PvP. They are skipped entirely for PvE.
 pub fn evaluate_viability_gates(
     rotation: Option<&SimulationResult>,
@@ -439,6 +444,43 @@ pub fn evaluate_viability_gates_for(
             }
             None => GateResult {
                 gate: ViabilityGate::CleanseRate,
+                passed: false,
+                note: "rotation unavailable".into(),
+            },
+        });
+
+        // Soft-control coverage: chill/weakness/slow/immobilize/blind/cripple.
+        // Cleanse, Resistance, or stunbreak on the actual kit (OR, not AND).
+        gates.push(match rotation {
+            Some(rot) => {
+                let has_cleanse = rot.cleanse_count > 0 || rot.cleanse_rate_per_20s > 0.0;
+                let has_resistance =
+                    rot.buff_uptime.get("Resistance").copied().unwrap_or(0.0) > 0.0;
+                let has_stunbreak = rot.stunbreak_count > 0;
+                let passed = has_cleanse || has_resistance || has_stunbreak;
+                if !passed {
+                    shortfall += 1.0;
+                    graded.push(ViabilityGate::ControlCoverage);
+                }
+                let limb = if has_cleanse {
+                    "cleanse"
+                } else if has_resistance {
+                    "Resistance"
+                } else if has_stunbreak {
+                    "stunbreak"
+                } else {
+                    "none"
+                };
+                GateResult {
+                    gate: ViabilityGate::ControlCoverage,
+                    passed,
+                    note: format!(
+                        "soft-control coverage via {limb} (need cleanse OR Resistance OR stunbreak)"
+                    ),
+                }
+            }
+            None => GateResult {
+                gate: ViabilityGate::ControlCoverage,
                 passed: false,
                 note: "rotation unavailable".into(),
             },
@@ -757,24 +799,18 @@ pub fn required_cleanse_rate(scenario: &ScenarioSpec) -> f64 {
     }
 }
 
-/// The rate the gate actually demands of THIS kit: the scenario floor, lowered
-/// by self-Resistance uptime. Resistance ignores non-damaging conditions, so a
-/// build that holds it needs less cleanse — but damaging conditions still
-/// tick through it, so the reduction is capped at 75%. Uses the same
-/// `buff_uptime` map the Stability gate reads; a kit with no Resistance sees
-/// exactly the scenario floor. Shared by the gate and the off-bar pass.
+/// Damaging-condition cleanse rate floor for `CleanseRate`.
+///
+/// Resistance must NOT discount this floor: Resistance ignores soft/control
+/// conditions but damaging conditions still tick through it. Soft-control
+/// answers live on [`ViabilityGate::ControlCoverage`]. Shared by the gate and
+/// the off-bar pass. `_rot` retained so call sites stay stable.
 pub fn effective_cleanse_requirement(
     scenario: &ScenarioSpec,
-    rot: &SimulationResult,
+    _rot: &SimulationResult,
     profile: Option<&crate::data::ObjectiveProfile>,
 ) -> f64 {
-    let resistance = rot
-        .buff_uptime
-        .get("Resistance")
-        .copied()
-        .unwrap_or(0.0)
-        .clamp(0.0, 0.75);
-    cleanse_rate_floor(scenario, profile) * (1.0 - resistance)
+    cleanse_rate_floor(scenario, profile)
 }
 
 /// Seconds after "cooldown" in gear/trait tooltip text ("(Cooldown: 9
@@ -1323,9 +1359,10 @@ mod tests {
     // Intentional invariant tripwires.
     #![allow(clippy::assertions_on_constants)]
     use super::{
-        evaluate_validated_build, evaluate_viability_gates, evaluate_viability_gates_for,
-        search_rank, GateResult, RefereeReport, ViabilityGate, ViabilityReport, EHP_FLOOR_PVE,
-        EHP_FLOOR_PVP, EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM, EHP_FLOOR_WVW_ZERG,
+        effective_cleanse_requirement, evaluate_validated_build, evaluate_viability_gates,
+        evaluate_viability_gates_for, required_cleanse_rate, search_rank, GateResult,
+        RefereeReport, ViabilityGate, ViabilityReport, EHP_FLOOR_PVE, EHP_FLOOR_PVP,
+        EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM, EHP_FLOOR_WVW_ZERG,
     };
     use crate::balance::BalanceContext;
     use crate::combat::CombatPerformance;
@@ -1512,7 +1549,7 @@ mod tests {
         scenario.combat_tier = CombatTier::Solo;
         let mut rot = make_viable_rotation();
         rot.cleanse_count = MIN_CLEANSE_COUNT;
-        // Same requirement the gate and the off-bar pass use (Resistance-aware).
+        // Same requirement the gate and the off-bar pass use (Resistance does not discount).
         let required = effective_cleanse_requirement(&scenario, &rot, None);
         rot.cleanse_rate_per_20s = required * 0.5; // fails on rate only
         let combat = make_viable_combat();
@@ -2320,7 +2357,7 @@ mod tests {
             "expected viable; gates: {:?}",
             report.gates
         );
-        assert_eq!(report.gates.len(), 7); // three bar checks + three timeline checks + effective health
+        assert_eq!(report.gates.len(), 8); // four bar checks + three timeline checks + effective health
         for g in &report.gates {
             assert!(
                 g.passed,
@@ -2473,6 +2510,7 @@ mod tests {
         assert!(gate_by_kind(&report.gates, &ViabilityGate::StunbreakCount).is_none());
         assert!(gate_by_kind(&report.gates, &ViabilityGate::StabilityAccess).is_none());
         assert!(gate_by_kind(&report.gates, &ViabilityGate::CleanseRate).is_none());
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::ControlCoverage).is_none());
     }
 
     #[test]
@@ -2791,8 +2829,8 @@ mod tests {
         let scenario = make_wvw_scenario();
         let report = evaluate_viability_gates(None, &combat, &scenario);
 
-        // Three rotation gates, two WvW timeline gates, and effective health.
-        assert_eq!(report.gates.len(), 7);
+        // Four rotation gates, two WvW timeline gates, and effective health.
+        assert_eq!(report.gates.len(), 8);
         assert!(!report.is_viable);
 
         let sb = gate_by_kind(&report.gates, &ViabilityGate::StunbreakCount).unwrap();
@@ -2806,6 +2844,10 @@ mod tests {
         let cl = gate_by_kind(&report.gates, &ViabilityGate::CleanseRate).unwrap();
         assert!(!cl.passed);
         assert_eq!(cl.note, "rotation unavailable");
+
+        let cc = gate_by_kind(&report.gates, &ViabilityGate::ControlCoverage).unwrap();
+        assert!(!cc.passed);
+        assert_eq!(cc.note, "rotation unavailable");
 
         // EHP gate still runs and passes (viable combat)
         let ehp = gate_by_kind(&report.gates, &ViabilityGate::EffectiveHealth).unwrap();
@@ -4016,5 +4058,182 @@ coverage: {:?}",
             rotation.total_dps > 0.0,
             "gate-sim DPS in the 2 s PvE Solo window (CONN-01-05, re-recorded in Sprint 2)"
         );
+    }
+
+    // ---- Ada Kent suite 1-8: CleanseRate / ControlCoverage split ----
+    // Resistance-heavy evidence required: Resistance answers soft control but
+    // must not discount the damaging-condition CleanseRate floor.
+
+    /// 1. Resistance uptime no longer lowers the CleanseRate floor.
+    #[test]
+    fn ada_kent_01_resistance_does_not_discount_cleanse_floor() {
+        let scenario = make_wvw_scenario();
+        let mut rot = make_viable_rotation();
+        rot.buff_uptime.insert("Resistance".into(), 0.75);
+        let floor = effective_cleanse_requirement(&scenario, &rot, None);
+        let bare = make_viable_rotation();
+        let floor_bare = effective_cleanse_requirement(&scenario, &bare, None);
+        assert!(
+            (floor - floor_bare).abs() < 1e-12,
+            "Resistance must not discount CleanseRate floor: with={floor} bare={floor_bare}"
+        );
+        assert!(
+            (floor - required_cleanse_rate(&scenario)).abs() < 1e-12,
+            "floor should equal scenario cleanse rate: {floor}"
+        );
+    }
+
+    /// 2. Resistance-heavy / cleanse-light: CleanseRate fails, ControlCoverage passes.
+    #[test]
+    fn ada_kent_02_resistance_heavy_split_evidence() {
+        let mut rot = make_viable_rotation();
+        rot.cleanse_count = 0;
+        rot.cleanse_rate_per_20s = 0.0;
+        rot.stunbreak_count = 0;
+        rot.buff_uptime.insert("Resistance".into(), 0.80);
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let cl = gate_by_kind(&report.gates, &ViabilityGate::CleanseRate).unwrap();
+        let cc = gate_by_kind(&report.gates, &ViabilityGate::ControlCoverage).unwrap();
+        assert!(!cl.passed, "damaging cleanse still required: {}", cl.note);
+        assert!(cc.passed, "Resistance covers soft control: {}", cc.note);
+        assert!(cc.note.contains("Resistance"), "{}", cc.note);
+    }
+
+    /// 3. Cleanse alone covers ControlCoverage without Resistance or stunbreak.
+    #[test]
+    fn ada_kent_03_cleanse_alone_passes_control_coverage() {
+        let mut rot = make_viable_rotation();
+        rot.buff_uptime.remove("Resistance");
+        rot.stunbreak_count = 0;
+        rot.cleanse_count = 2;
+        rot.cleanse_rate_per_20s = 4.0;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let cc = gate_by_kind(&report.gates, &ViabilityGate::ControlCoverage).unwrap();
+        assert!(cc.passed, "{}", cc.note);
+        assert!(cc.note.contains("cleanse"), "{}", cc.note);
+    }
+
+    /// 4. Stunbreak alone covers ControlCoverage; CleanseRate still independent.
+    #[test]
+    fn ada_kent_04_stunbreak_alone_passes_control_coverage() {
+        let mut rot = make_viable_rotation();
+        rot.cleanse_count = 0;
+        rot.cleanse_rate_per_20s = 0.0;
+        rot.buff_uptime.remove("Resistance");
+        rot.stunbreak_count = 1;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let cc = gate_by_kind(&report.gates, &ViabilityGate::ControlCoverage).unwrap();
+        let cl = gate_by_kind(&report.gates, &ViabilityGate::CleanseRate).unwrap();
+        assert!(cc.passed, "{}", cc.note);
+        assert!(cc.note.contains("stunbreak"), "{}", cc.note);
+        assert!(!cl.passed, "CleanseRate remains its own gate: {}", cl.note);
+    }
+
+    /// 5. No cleanse, no Resistance, no stunbreak -> ControlCoverage fails.
+    #[test]
+    fn ada_kent_05_no_soft_control_answer_fails() {
+        let mut rot = make_viable_rotation();
+        rot.cleanse_count = 0;
+        rot.cleanse_rate_per_20s = 0.0;
+        rot.stunbreak_count = 0;
+        rot.buff_uptime.remove("Resistance");
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let cc = gate_by_kind(&report.gates, &ViabilityGate::ControlCoverage).unwrap();
+        assert!(!cc.passed, "{}", cc.note);
+        assert!(!report.is_viable);
+    }
+
+    /// 6. PvE emits neither CleanseRate nor ControlCoverage.
+    #[test]
+    fn ada_kent_06_pve_emits_neither_cleanse_nor_control() {
+        let rot = make_viable_rotation();
+        let mut combat = make_viable_combat();
+        combat.effective_health = EHP_FLOOR_PVE + 1_000.0;
+        let scenario = make_pve_scenario();
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::CleanseRate).is_none());
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::ControlCoverage).is_none());
+    }
+
+    /// 7. search_rank stays [i64;9]; ControlCoverage contributes at most +1 to key1 on WvW.
+    #[test]
+    fn ada_kent_07_search_rank_key1_plus_one_on_control_pass() {
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let mut with_cc = make_viable_rotation();
+        with_cc.buff_uptime.insert("Resistance".into(), 0.5);
+        let pass = evaluate_viability_gates(Some(&with_cc), &combat, &scenario);
+        assert!(
+            gate_by_kind(&pass.gates, &ViabilityGate::ControlCoverage)
+                .unwrap()
+                .passed
+        );
+        let mut fail_cc = with_cc.clone();
+        fail_cc.cleanse_count = 0;
+        fail_cc.cleanse_rate_per_20s = 0.0;
+        fail_cc.stunbreak_count = 0;
+        fail_cc.buff_uptime.clear();
+        let fail = evaluate_viability_gates(Some(&fail_cc), &combat, &scenario);
+        assert!(
+            !gate_by_kind(&fail.gates, &ViabilityGate::ControlCoverage)
+                .unwrap()
+                .passed
+        );
+
+        let rank_pass = search_rank(&RefereeReport {
+            scenario: scenario.clone(),
+            stats: crate::stats::StatBlock::default(),
+            modifiers: crate::combat::DamageModifiers::default(),
+            combat_solo: combat.clone(),
+            combat_party: combat.clone(),
+            combat_squad: combat.clone(),
+            primary_combat: combat.clone(),
+            rotation: Some(with_cc),
+            viability: pass.clone(),
+            user_intent_score: 0.0,
+            raw_direction_score: 0.0,
+            realized: Default::default(),
+            stat_direction_score: 0.0,
+            quality: DataQuality::Verified,
+            quality_reasons: Vec::new(),
+        });
+        assert_eq!(rank_pass.len(), 9);
+        let passed_gates = pass.gates.iter().filter(|g| g.passed).count() as i64;
+        assert_eq!(rank_pass[1], passed_gates, "key1 is passed-gate count");
+        assert!(
+            gate_by_kind(&pass.gates, &ViabilityGate::ControlCoverage).is_some()
+                && gate_by_kind(&fail.gates, &ViabilityGate::ControlCoverage).is_some(),
+            "ControlCoverage present on WvW; key1 max +1 vs pre-split"
+        );
+    }
+
+    /// 8. StunbreakCount remains a separate hard-CC gate from ControlCoverage.
+    #[test]
+    fn ada_kent_08_stunbreak_count_stays_separate_hard_cc_gate() {
+        let mut rot = make_viable_rotation();
+        rot.stunbreak_count = 0;
+        rot.buff_uptime.insert("Resistance".into(), 0.6);
+        rot.cleanse_count = 2;
+        rot.cleanse_rate_per_20s = 4.0;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let cc = gate_by_kind(&report.gates, &ViabilityGate::ControlCoverage).unwrap();
+        let sb = gate_by_kind(&report.gates, &ViabilityGate::StunbreakCount).unwrap();
+        assert!(cc.passed, "Resistance covers soft control: {}", cc.note);
+        assert!(
+            !sb.passed,
+            "StunbreakCount still required for hard CC: {}",
+            sb.note
+        );
+        assert!(!report.is_viable);
     }
 }

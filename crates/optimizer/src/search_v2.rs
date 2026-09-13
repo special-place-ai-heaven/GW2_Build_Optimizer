@@ -1600,7 +1600,7 @@ fn swap_relics_for_failed_gates(candidate: &BeamCandidate, db: &GameDb) -> Vec<V
         .collect()
 }
 
-/// When the current kit fails stunbreak/stability/cleanse, try those utilities first
+/// When the current kit fails stunbreak/stability/cleanse/control, try those utilities first
 /// instead of burning the eval budget on gear-prefix neighbors.
 fn swap_utilities_for_failed_gates(
     candidate: &BeamCandidate,
@@ -1613,7 +1613,8 @@ fn swap_utilities_for_failed_gates(
     let need_stability = gate_failed(&candidate.report.viability, ViabilityGate::StabilityAccess);
     let need_stunbreak = gate_failed(&candidate.report.viability, ViabilityGate::StunbreakCount);
     let need_cleanse = gate_failed(&candidate.report.viability, ViabilityGate::CleanseRate);
-    if !(need_stability || need_stunbreak || need_cleanse) {
+    let need_control = gate_failed(&candidate.report.viability, ViabilityGate::ControlCoverage);
+    if !(need_stability || need_stunbreak || need_cleanse || need_control) {
         return Vec::new();
     }
 
@@ -1650,6 +1651,9 @@ fn swap_utilities_for_failed_gates(
             (need_stability && synergy_pipeline::skill_has_cc_answer(skill))
                 || (need_stunbreak && synergy_pipeline::skill_is_stunbreak(skill))
                 || (need_cleanse && synergy_pipeline::skill_cleanse_count(skill) > 0)
+                || (need_control
+                    && (synergy_pipeline::skill_cleanse_count(skill) > 0
+                        || synergy_pipeline::skill_is_stunbreak(skill)))
         })
         .collect();
 
