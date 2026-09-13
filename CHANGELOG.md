@@ -2,6 +2,14 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.18 - 2026-09-13
+
+First-run setup nav/complete/news parity with Dieter DESIGN LOCK. SCHEMA CHANGE = N.
+
+- Setup wizard nav is one centered Back|Next row (width 120, gap 8); Language is Next-only; never stacks Back under Next after download.
+- DataDownload Next goes to Main (skips Complete / Get Started); Complete dropped from progress pills.
+- Setup news uses config.news.enabled_sources() + kick/collected (Tyria Dispatch multi-source), with kick_art when show_images.
+
 ## 1.14.17 - 2026-09-13
 
 NeedsMechanic Engine E0: shared TriggerBus + Endurance/Dodge family. SCHEMA CHANGE = N.
