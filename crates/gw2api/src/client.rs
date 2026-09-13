@@ -10,7 +10,7 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use serde::de::DeserializeOwned;
 
 const BASE_URL: &str = "https://api.guildwars2.com/v2";
-const MAX_BULK_IDS: usize = 200;
+pub(crate) const MAX_BULK_IDS: usize = 200;
 const BUCKET_CAPACITY: u32 = 300;
 const REFILL_RATE: f64 = 5.0; // tokens per second
 const MAX_RETRIES: u32 = 5;
@@ -649,6 +649,23 @@ impl Gw2Client {
         }
     }
 
+    /// One <=MAX_BULK_IDS bulk request (split/skip on 5xx).
+    /// Install commits `items.partial` after each completed chunk.
+    pub(crate) fn fetch_bulk_chunk<T: DeserializeOwned + Send>(
+        &self,
+        endpoint: &str,
+        chunk: &[serde_json::Value],
+    ) -> Result<(Vec<T>, Vec<serde_json::Value>), ApiError> {
+        merge_bulk_fetch(chunk, &mut |part| {
+            let ids: Vec<String> = part.iter().filter_map(value_to_bulk_id).collect();
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let joined = build_bulk_ids_query(&ids);
+            self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
+        })
+    }
+
     /// Like `fetch_by_ids_with_progress`, but a singleton retryable 5xx is
     /// collected into `skipped` so an items dump can skip-list the hole
     /// instead of aborting the whole `/v2/items` walk.
@@ -675,19 +692,7 @@ impl Gw2Client {
                 std::thread::scope(|s| {
                     let handles: Vec<_> = group
                         .iter()
-                        .map(|chunk| {
-                            s.spawn(|| {
-                                merge_bulk_fetch(chunk, &mut |part| {
-                                    let ids: Vec<String> =
-                                        part.iter().filter_map(value_to_bulk_id).collect();
-                                    if ids.is_empty() {
-                                        return Ok(Vec::new());
-                                    }
-                                    let joined = build_bulk_ids_query(&ids);
-                                    self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
-                                })
-                            })
-                        })
+                        .map(|chunk| s.spawn(|| self.fetch_bulk_chunk(endpoint, chunk)))
                         .collect();
 
                     handles
