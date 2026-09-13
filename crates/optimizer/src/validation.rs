@@ -72,6 +72,11 @@ pub struct ValidatedBuild {
     /// registering in the stat sheet.
     pub sigil_seats: SigilSlots,
     pub relic: Option<ValidatedItem>,
+    /// Nourishment (food). Same ownership as rune/relic. Inner argmax writes
+    /// the chosen id so the winner serializes it. None until solved or locked.
+    pub food: Option<ValidatedItem>,
+    /// Enhancement (utility consumable). Same ownership as rune/relic.
+    pub utility: Option<ValidatedItem>,
     /// Per-slot gear prefixes. Population policy (Task 2): every constructor
     /// that used to write the build-wide `gear_prefix` now fills all sixteen
     /// slots; category overrides (the old `gear_groups`) overwrite their own
