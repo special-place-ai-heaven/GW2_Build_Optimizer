@@ -7,12 +7,17 @@
 //! - Build mismatch / `Verify`: refresh KEPT only, compare-before-write.
 //! - Items keep-set stays the existing type+rarity filter; Refresh never
 //!   body-fetches the discarded bulk when `items.json` already exists.
+//!
+//! First-fill (no `items.json`) persists DataCache key `items.partial` after
+//! each completed 200-id batch so a killed install resumes
+//! (`live_ids` minus `fetched_ids`). Warm-complete is `exists("items")` only;
+//! partial is never treated as warm. `refresh_items` is unchanged.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cache::DataCache;
 use crate::client::{with_cancel_bridge, ApiError, Gw2Client};
@@ -44,8 +49,41 @@ pub enum RefreshMode {
     Verify,
 }
 
+/// Hopper UX probe for the items catalog path.
+///
+/// `None` is the existing Refresh path (build mismatch / Verify) — not a
+/// FirstFill / Resume / SameBuildSkip string. Partial is ignored when
+/// `items` already exists (warm-complete).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemsFillKind {
+    FirstFill,
+    Resume,
+    SameBuildSkip,
+}
+
+/// Classify the items path for Hopper. Looks at `items` then `items.partial`.
+/// `needs_catalog_refresh("items")` / `exists("items")` still ignore partial.
+pub fn items_fill_kind(
+    cache: &DataCache,
+    live_build: u32,
+    mode: RefreshMode,
+) -> Option<ItemsFillKind> {
+    if cache.exists("items") {
+        if mode == RefreshMode::Default && !cache.is_stale("items", live_build) {
+            Some(ItemsFillKind::SameBuildSkip)
+        } else {
+            None
+        }
+    } else if cache.exists(ITEMS_PARTIAL_KEY) {
+        Some(ItemsFillKind::Resume)
+    } else {
+        Some(ItemsFillKind::FirstFill)
+    }
+}
+
 const TOTAL_STEPS: usize = 10;
 const ITEMS_IDS_KEY: &str = "items.ids";
+const ITEMS_PARTIAL_KEY: &str = "items.partial";
 
 const RELEVANT_TYPES: &[&str] = &[
     "Armor",
@@ -276,6 +314,100 @@ fn parse_u32_ids(raw: &[serde_json::Value]) -> Vec<u32> {
         .collect()
 }
 
+/// Durable first-fill cursor. Sidecar via DataCache save/load/delete only.
+/// `fetched_ids` = every id whose body was already requested (keep AND discarded).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ItemsPartial {
+    pub live_ids: Vec<u32>,
+    pub fetched_ids: Vec<u32>,
+    pub kept: Vec<models::Item>,
+    pub skipped: Vec<serde_json::Value>,
+}
+
+/// Body-fetch set on install/resume: `live_ids \ fetched_ids`.
+pub(crate) fn items_install_remaining(live_ids: &[u32], fetched_ids: &[u32]) -> Vec<u32> {
+    let fetched: HashSet<u32> = fetched_ids.iter().copied().collect();
+    live_ids
+        .iter()
+        .copied()
+        .filter(|id| !fetched.contains(id))
+        .collect()
+}
+
+fn load_or_new_partial(cache: &DataCache, live_ids: &[u32]) -> Result<ItemsPartial, ApiError> {
+    Ok(
+        match cache
+            .load::<ItemsPartial>(ITEMS_PARTIAL_KEY)
+            .map_err(cache_err)?
+        {
+            Some(p) => p,
+            None => ItemsPartial {
+                live_ids: live_ids.to_vec(),
+                fetched_ids: Vec::new(),
+                kept: Vec::new(),
+                skipped: Vec::new(),
+            },
+        },
+    )
+}
+
+fn persist_items_partial(
+    cache: &DataCache,
+    partial: &ItemsPartial,
+    build: u32,
+) -> Result<(), ApiError> {
+    cache
+        .save(ITEMS_PARTIAL_KEY, partial, build)
+        .map_err(cache_err)
+}
+
+fn apply_install_batch(
+    partial: &mut ItemsPartial,
+    chunk: &[serde_json::Value],
+    raw_items: Vec<serde_json::Value>,
+    batch_skipped: Vec<serde_json::Value>,
+) {
+    let mut fetched: HashSet<u32> = partial.fetched_ids.iter().copied().collect();
+    for id in parse_u32_ids(chunk) {
+        if fetched.insert(id) {
+            partial.fetched_ids.push(id);
+        }
+    }
+    let mut kept_ids: HashSet<u32> = partial.kept.iter().map(|i| i.id).collect();
+    for val in raw_items {
+        if let Ok(item) = serde_json::from_value::<models::Item>(val) {
+            if item_is_kept(&item) && kept_ids.insert(item.id) {
+                partial.kept.push(item);
+            }
+        }
+    }
+    partial.skipped.extend(batch_skipped);
+}
+
+fn finish_items_install(
+    cache: &DataCache,
+    partial: &ItemsPartial,
+    live_ids: &[u32],
+    build: u32,
+) -> Result<(), ApiError> {
+    let live_set: HashSet<u32> = live_ids.iter().copied().collect();
+    let kept: Vec<models::Item> = partial
+        .kept
+        .iter()
+        .filter(|i| live_set.contains(&i.id))
+        .cloned()
+        .collect();
+    cache.save("items", &kept, build).map_err(cache_err)?;
+    cache
+        .save(ITEMS_IDS_KEY, &live_ids, build)
+        .map_err(cache_err)?;
+    cache
+        .save("items.skipped", &partial.skipped, build)
+        .map_err(cache_err)?;
+    cache.delete(ITEMS_PARTIAL_KEY);
+    Ok(())
+}
+
 fn install_items(
     client: &Gw2Client,
     cache: &DataCache,
@@ -295,38 +427,76 @@ fn install_items(
     let ids: Vec<serde_json::Value> = client.get("items")?;
     let live_ids = parse_u32_ids(&ids);
 
-    let (raw_items, skipped): (Vec<serde_json::Value>, Vec<serde_json::Value>) = client
-        .fetch_by_ids_with_skips("items", &ids, |fetched, total| {
+    let mut partial = load_or_new_partial(cache, &live_ids)?;
+    partial.live_ids = live_ids.clone();
+    let live_set: HashSet<u32> = live_ids.iter().copied().collect();
+    partial.kept.retain(|item| live_set.contains(&item.id));
+
+    let remaining = items_install_remaining(&live_ids, &partial.fetched_ids);
+    let remaining_vals: Vec<serde_json::Value> =
+        remaining.iter().map(|id| serde_json::json!(*id)).collect();
+    let batches: Vec<&[serde_json::Value]> =
+        remaining_vals.chunks(crate::client::MAX_BULK_IDS).collect();
+
+    on_progress(DownloadProgress {
+        current_step: step,
+        total_steps: TOTAL_STEPS,
+        step_name: "Items (equipment)".to_string(),
+        done: false,
+        detail: Some(format!(
+            "{} / {} items fetched",
+            partial.fetched_ids.len(),
+            live_ids.len()
+        )),
+        inner_done: partial.fetched_ids.len(),
+        inner_total: live_ids.len(),
+    });
+
+    for group in batches.chunks(5) {
+        if client.is_cancelled() {
+            return Err(ApiError::Cancelled);
+        }
+        #[allow(clippy::type_complexity)]
+        let group_results: Vec<
+            Result<(Vec<serde_json::Value>, Vec<serde_json::Value>), ApiError>,
+        > = std::thread::scope(|s| {
+            let handles: Vec<_> = group
+                .iter()
+                .map(|chunk| s.spawn(|| client.fetch_bulk_chunk("items", chunk)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| {
+                    h.join().unwrap_or_else(|_| {
+                        Err(ApiError::Internal(
+                            "Batch fetch thread panicked on items".into(),
+                        ))
+                    })
+                })
+                .collect()
+        });
+
+        for (chunk, batch_result) in group.iter().zip(group_results) {
+            let (raw_items, batch_skipped) = batch_result?;
+            apply_install_batch(&mut partial, chunk, raw_items, batch_skipped);
+            persist_items_partial(cache, &partial, build)?;
             on_progress(DownloadProgress {
                 current_step: step,
                 total_steps: TOTAL_STEPS,
                 step_name: "Items (equipment)".to_string(),
                 done: false,
-                detail: Some(format!("{fetched} / {total} items fetched")),
-                inner_done: fetched,
-                inner_total: total,
+                detail: Some(format!(
+                    "{} / {} items fetched",
+                    partial.fetched_ids.len(),
+                    live_ids.len()
+                )),
+                inner_done: partial.fetched_ids.len(),
+                inner_total: live_ids.len(),
             });
-        })?;
-
-    let mut equipment_items: Vec<models::Item> = Vec::with_capacity(ids.len() / 20);
-    for val in raw_items {
-        if let Ok(item) = serde_json::from_value::<models::Item>(val) {
-            if item_is_kept(&item) {
-                equipment_items.push(item);
-            }
         }
     }
 
-    cache
-        .save("items", &equipment_items, build)
-        .map_err(cache_err)?;
-    cache
-        .save("items.skipped", &skipped, build)
-        .map_err(cache_err)?;
-    cache
-        .save(ITEMS_IDS_KEY, &live_ids, build)
-        .map_err(cache_err)?;
-    Ok(())
+    finish_items_install(cache, &partial, &live_ids, build)
 }
 
 fn refresh_items(
@@ -1081,6 +1251,397 @@ mod tests {
             .expect("Verify same-build");
         ids.assert();
         body.assert();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- items.partial first-fill resume (SCHEMA N) ---------------------------
+
+    fn seed_kept_except_items(cache: &DataCache, build: u32) {
+        cache
+            .save("itemstats", &Vec::<models::ItemStat>::new(), build)
+            .unwrap();
+        cache
+            .save(
+                "specializations",
+                &Vec::<models::Specialization>::new(),
+                build,
+            )
+            .unwrap();
+        cache
+            .save("traits", &Vec::<models::Trait>::new(), build)
+            .unwrap();
+        cache
+            .save("skills", &Vec::<models::Skill>::new(), build)
+            .unwrap();
+        cache
+            .save("professions", &Vec::<models::Profession>::new(), build)
+            .unwrap();
+        cache
+            .save("legends", &Vec::<models::Legend>::new(), build)
+            .unwrap();
+        cache
+            .save("pets", &Vec::<models::Pet>::new(), build)
+            .unwrap();
+        cache
+            .save("pvp_amulets", &Vec::<models::PvpAmulet>::new(), build)
+            .unwrap();
+    }
+
+    fn item_json(id: u32, keep: bool) -> String {
+        if keep {
+            format!(
+                r#"{{"id":{id},"name":"Gear {id}","type":"Armor","rarity":"Exotic","level":80}}"#
+            )
+        } else {
+            format!(
+                r#"{{"id":{id},"name":"Junk {id}","type":"Consumable","rarity":"Basic","level":1}}"#
+            )
+        }
+    }
+
+    fn ids_json(ids: &[u32]) -> String {
+        format!(
+            "[{}]",
+            ids.iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    }
+
+    fn bodies_json(ids: &[u32]) -> String {
+        let parts: Vec<String> = ids.iter().map(|&id| item_json(id, id % 50 == 0)).collect();
+        format!("[{}]", parts.join(","))
+    }
+
+    fn empty_partial() -> ItemsPartial {
+        ItemsPartial {
+            live_ids: Vec::new(),
+            fetched_ids: Vec::new(),
+            kept: Vec::new(),
+            skipped: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn items_install_remaining_skips_already_fetched() {
+        let live: Vec<u32> = (1..=250).collect();
+        let fetched: Vec<u32> = (1..=200).collect();
+        assert_eq!(
+            items_install_remaining(&live, &fetched),
+            (201..=250).collect::<Vec<u32>>()
+        );
+        assert_eq!(
+            items_install_remaining(&live, &[]),
+            live,
+            "no partial -> first-fill remaining is all live ids"
+        );
+    }
+
+    #[test]
+    fn items_fill_kind_first_resume_same_build_skip() {
+        let dir = temp_cache_dir("fill_kind");
+        let cache = DataCache::new(&dir);
+        assert_eq!(
+            items_fill_kind(&cache, 42, RefreshMode::Default),
+            Some(ItemsFillKind::FirstFill)
+        );
+
+        cache
+            .save(
+                ITEMS_PARTIAL_KEY,
+                &ItemsPartial {
+                    live_ids: vec![1],
+                    fetched_ids: vec![1],
+                    kept: vec![],
+                    skipped: vec![],
+                },
+                41,
+            )
+            .unwrap();
+        assert_eq!(
+            items_fill_kind(&cache, 42, RefreshMode::Default),
+            Some(ItemsFillKind::Resume)
+        );
+        assert!(
+            cache.is_stale("items", 42),
+            "partial must not make items look warm"
+        );
+        assert!(!cache.exists("items"));
+        assert!(needs_catalog_refresh(
+            &cache,
+            "items",
+            42,
+            RefreshMode::Default
+        ));
+
+        cache
+            .save("items", &Vec::<models::Item>::new(), 42)
+            .unwrap();
+        assert_eq!(
+            items_fill_kind(&cache, 42, RefreshMode::Default),
+            Some(ItemsFillKind::SameBuildSkip)
+        );
+        assert_eq!(items_fill_kind(&cache, 43, RefreshMode::Default), None);
+        assert_eq!(items_fill_kind(&cache, 42, RefreshMode::Verify), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn persist_partial_does_not_publish_items_keys() {
+        let dir = temp_cache_dir("persist_partial_only");
+        let cache = DataCache::new(&dir);
+        let mut partial = empty_partial();
+        partial.live_ids = vec![1, 2];
+        partial.fetched_ids = vec![1];
+        persist_items_partial(&cache, &partial, 7).unwrap();
+        assert!(cache.exists(ITEMS_PARTIAL_KEY));
+        assert!(!cache.exists("items"));
+        assert!(!cache.exists(ITEMS_IDS_KEY));
+        assert!(!cache.exists("items.skipped"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_fill_writes_partial_per_batch_then_completes() {
+        let dir = temp_cache_dir("first_fill_partial");
+        let cache = DataCache::new(&dir);
+        seed_kept_except_items(&cache, 42);
+
+        let live: Vec<u32> = (1..=250).collect();
+        let batch1: Vec<u32> = (1..=200).collect();
+        let batch2: Vec<u32> = (201..=250).collect();
+
+        let mut server = mockito::Server::new();
+        let build_mock = server
+            .mock("GET", "/build")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id":42}"#)
+            .expect_at_least(1)
+            .create();
+        let ids_mock = server
+            .mock("GET", "/items")
+            .match_query(mockito::Matcher::Missing)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(ids_json(&live))
+            .expect_at_least(1)
+            .create();
+        let b1 = server
+            .mock("GET", "/items")
+            .match_query(mockito::Matcher::Regex(r"^ids=1,2,3,".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(bodies_json(&batch1))
+            .expect_at_least(1)
+            .create();
+        let b2 = server
+            .mock("GET", "/items")
+            .match_query(mockito::Matcher::Regex(r"^ids=201,202,".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(bodies_json(&batch2))
+            .expect_at_least(1)
+            .create();
+
+        let client = Gw2Client::without_key()
+            .unwrap()
+            .with_api_root(server.url());
+        let mut saw_partial_mid = false;
+        download_all(
+            &client,
+            &cache,
+            || false,
+            RefreshMode::Default,
+            |p| {
+                if p.step_name.starts_with("Items")
+                    && p.inner_total == 250
+                    && p.inner_done > 0
+                    && p.inner_done < 250
+                {
+                    assert!(
+                        cache.exists(ITEMS_PARTIAL_KEY),
+                        "partial must land after a completed 200-id batch"
+                    );
+                    assert!(
+                        !cache.exists("items"),
+                        "must not stamp items until install done"
+                    );
+                    assert!(!cache.exists(ITEMS_IDS_KEY));
+                    assert!(!cache.exists("items.skipped"));
+                    let part: ItemsPartial = cache.load(ITEMS_PARTIAL_KEY).unwrap().unwrap();
+                    assert!(!part.fetched_ids.is_empty());
+                    assert!(part.fetched_ids.iter().all(|id| live.contains(id)));
+                    saw_partial_mid = true;
+                }
+            },
+        )
+        .expect("first-fill");
+
+        assert!(saw_partial_mid, "expected a mid-install partial commit");
+        assert!(cache.exists("items"));
+        assert!(cache.exists(ITEMS_IDS_KEY));
+        assert!(cache.exists("items.skipped"));
+        assert!(
+            !cache.exists(ITEMS_PARTIAL_KEY),
+            "complete must delete items.partial"
+        );
+        let stored: Vec<models::Item> = cache.load("items").unwrap().unwrap();
+        assert!(stored.iter().all(item_is_kept), "keep-set must not widen");
+        let stored_ids: Vec<u32> = cache.load(ITEMS_IDS_KEY).unwrap().unwrap();
+        assert_eq!(stored_ids, live);
+        assert_eq!(cache.cached_build("items"), Some(42));
+        build_mock.assert();
+        ids_mock.assert();
+        b1.assert();
+        b2.assert();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resume_skips_already_fetched_ids() {
+        let dir = temp_cache_dir("resume_partial");
+        let cache = DataCache::new(&dir);
+        seed_kept_except_items(&cache, 42);
+
+        let live: Vec<u32> = (1..=250).collect();
+        let fetched: Vec<u32> = (1..=200).collect();
+        let kept = vec![sample_item(50, "Gear 50", "Armor", "Exotic")];
+        cache
+            .save(
+                ITEMS_PARTIAL_KEY,
+                &ItemsPartial {
+                    live_ids: live.clone(),
+                    fetched_ids: fetched,
+                    kept,
+                    skipped: vec![],
+                },
+                41,
+            )
+            .unwrap();
+        assert!(!cache.exists("items"));
+        assert_eq!(
+            items_fill_kind(&cache, 42, RefreshMode::Default),
+            Some(ItemsFillKind::Resume)
+        );
+
+        let batch2: Vec<u32> = (201..=250).collect();
+        let mut server = mockito::Server::new();
+        let build_mock = server
+            .mock("GET", "/build")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id":42}"#)
+            .expect_at_least(1)
+            .create();
+        let ids_mock = server
+            .mock("GET", "/items")
+            .match_query(mockito::Matcher::Missing)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(ids_json(&live))
+            .expect_at_least(1)
+            .create();
+        let already = server
+            .mock("GET", "/items")
+            .match_query(mockito::Matcher::Regex(r"^ids=1,".into()))
+            .expect(0)
+            .create();
+        let rest = server
+            .mock("GET", "/items")
+            .match_query(mockito::Matcher::Regex(r"^ids=201,202,".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(bodies_json(&batch2))
+            .expect_at_least(1)
+            .create();
+
+        let client = Gw2Client::without_key()
+            .unwrap()
+            .with_api_root(server.url());
+        download_all(&client, &cache, || false, RefreshMode::Default, |_| {})
+            .expect("resume install");
+
+        already.assert();
+        rest.assert();
+        build_mock.assert();
+        ids_mock.assert();
+        assert!(
+            !cache.exists(ITEMS_PARTIAL_KEY),
+            "complete clears items.partial"
+        );
+        let stored: Vec<models::Item> = cache.load("items").unwrap().unwrap();
+        assert!(
+            stored.iter().any(|i| i.id == 50),
+            "kept from the first batch must survive resume"
+        );
+        assert!(
+            stored.iter().any(|i| i.id == 250),
+            "kept from the resumed batch must be installed"
+        );
+        assert!(
+            stored.iter().all(|i| i.id != 1),
+            "discarded ids must not enter the keep-set"
+        );
+        let stored_ids: Vec<u32> = cache.load(ITEMS_IDS_KEY).unwrap().unwrap();
+        assert_eq!(stored_ids, live);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn warm_exists_items_same_build_skips_even_with_partial() {
+        let dir = temp_cache_dir("warm_partial_ignored");
+        let cache = DataCache::new(&dir);
+        seed_kept_except_items(&cache, 42);
+        cache
+            .save("items", &Vec::<models::Item>::new(), 42)
+            .unwrap();
+        cache.save(ITEMS_IDS_KEY, &Vec::<u32>::new(), 42).unwrap();
+        cache
+            .save(
+                ITEMS_PARTIAL_KEY,
+                &ItemsPartial {
+                    live_ids: vec![1],
+                    fetched_ids: vec![],
+                    kept: vec![],
+                    skipped: vec![],
+                },
+                41,
+            )
+            .unwrap();
+
+        let mut server = mockito::Server::new();
+        let build_mock = server
+            .mock("GET", "/build")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"id":42}"#)
+            .expect_at_least(1)
+            .create();
+        let items = server.mock("GET", "/items").expect(0).create();
+        let items_ids = server
+            .mock("GET", mockito::Matcher::Regex(r"^/items\?ids=.*".into()))
+            .expect(0)
+            .create();
+
+        let client = Gw2Client::without_key()
+            .unwrap()
+            .with_api_root(server.url());
+        let build = download_all(&client, &cache, || false, RefreshMode::Default, |_| {})
+            .expect("same-build Default must still FOLD3-skip");
+        assert_eq!(build, 42);
+        build_mock.assert();
+        items.assert();
+        items_ids.assert();
+        assert!(
+            cache.exists(ITEMS_PARTIAL_KEY),
+            "same-build skip must not rewrite leftover partial"
+        );
+        assert_eq!(
+            items_fill_kind(&cache, 42, RefreshMode::Default),
+            Some(ItemsFillKind::SameBuildSkip)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
