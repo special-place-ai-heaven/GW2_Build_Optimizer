@@ -2,6 +2,17 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.11 - 2026-09-13
+
+Elementalist trait catalogue: every Elementalist trait is classified; the coverage table's Elementalist NoRecord column is 0.
+
+### Elementalist trait triggers
+
+- The Elementalist's 108 traits are catalogued: every trait is executed from its facts, executed from a dated wiki record, or classified with the mechanic it still needs (attunement, aura, overload, dual attack, jade sphere, elemental empowerment, familiar, conjure, glyphs, cantrips, meditations, combo, disable trigger, dodge, trait skill, and the rest).
+- New wiki records fire on existing sites: on-crit (Renewing Stamina vigor, Burning Precision burning), heal skill use (Earth's Embrace resistance, Soothing Ice regeneration, Gale Song ally protection), cantrip skill use (Soothing Disruption regeneration), shout skill use (Tempestuous Aria ally might), overload skill use (Harmonious Conduit stability and swiftness, Hardy Conduit ally protection), stance skill use (Bolstered Elements protection), on-boon-applied swiftness (Woven Stride regeneration and cleanse), and on-condition-applied burning (Persisting Flames strike damage). Attunement-gated halves stay NeedsMechanic — no fake attunement records and no new trigger enum variants.
+- Honest NeedsMechanic names cover attunement, aura, overload, dual attack, jade sphere, elemental empowerment, familiar, conjure, glyphs, cantrips, meditations, combo, disable trigger, dodge, trait skill, endurance, recharge, revive, ally state, signets, and the elite-line unlocks.
+- `SHIPPED_PROFESSIONS` now includes Elementalist; `docs/audit/trait-coverage.md` regenerated with Elementalist NoRecord 0.
+
 ## 1.14.10 - 2026-09-13
 
 Engineer trait catalogue: every Engineer trait is classified; the coverage table's Engineer NoRecord column is 0.

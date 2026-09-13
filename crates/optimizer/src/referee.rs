@@ -1646,13 +1646,14 @@ mod tests {
 
     /// Professions whose trait catalogue increment has shipped: every one of
     /// their traits must have a state other than `NoRecord`.
-    const SHIPPED_PROFESSIONS: [&str; 6] = [
+    const SHIPPED_PROFESSIONS: [&str; 7] = [
         "Necromancer",
         "Ranger",
         "Thief",
         "Warrior",
         "Guardian",
         "Engineer",
+        "Elementalist",
     ];
 
     fn cache_db() -> Option<(std::path::PathBuf, GameDb)> {
