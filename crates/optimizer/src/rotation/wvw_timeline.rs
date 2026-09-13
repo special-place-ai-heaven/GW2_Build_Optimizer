@@ -17,6 +17,7 @@ use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
 
 use super::attunement::{apply_attunement_skill, AttunementState, Element};
 use super::combat_model::{corrupt_into, EnemyDummy, TargetState, TimedFoeCondition};
+use super::illusion::{spawn_clone, IllusionState};
 use super::simulator::{
     alacrity_cd_advance_ms, condition_tick_damage, crit_chance_fraction, reference_armor, SimParams,
 };
@@ -254,6 +255,8 @@ pub struct WvwCombatReport {
     pub bus_on_disable_foe: u32,
     /// Bus OnAttunementSwap emissions this fight.
     pub bus_on_attunement_swap: u32,
+    /// Bus OnCloneCreated emissions this fight.
+    pub bus_on_clone_created: u32,
 }
 
 /// Upper bound on [`WvwCombatReport::trace`]. The 513th event is dropped and
@@ -609,6 +612,8 @@ struct ProcSpec {
     healing_power_coefficient: f64,
     /// E2: lesser skill to cast when this proc fires (cast scheduler).
     cast_skill_id: Option<u32>,
+    /// Max stacks for timed stacking damage buffs (Compounding Power).
+    max_stacks: u32,
 }
 
 /// A rune or relic strike bonus that holds only while its prerequisite does
@@ -624,6 +629,8 @@ struct ConditionalSpec {
     crit_damage: bool,
     /// `true`: the percent is critical chance (Decimate Defenses). Sprint 3.
     crit_chance: bool,
+    /// `true`: the percent is outgoing condition damage (Compounding Power). E4.
+    condition_damage: bool,
     /// Threshold state as of the last evaluation.
     active: bool,
     stacks: u32,
@@ -639,6 +646,9 @@ enum ConditionalKind {
         max: u32,
         duration_ms: u32,
         scope: crate::data::normalized_effects::TriggerScope,
+        /// When true, landed hits feed stacks via gain_conditional_stacks.
+        /// Compounding Power (723) is false: stacks only on OnCloneCreated.
+        hit_fed: bool,
     },
     /// Holds while the player is in shroud (Sprint 3, US1).
     InShroud,
@@ -812,6 +822,8 @@ struct Timeline<'a> {
     dodge_action: DodgeAction,
     /// E3: sole attunement owner (current + Weaver secondary).
     attunement: AttunementState,
+    /// E4: sole clone-count owner.
+    illusion: IllusionState,
     /// E2: lesser skill SkillEffects keyed by cast_skill_id.
     cast_skill_catalog: HashMap<u32, Vec<SkillEffect>>,
     /// E0: OnThreshold fired once for the 50% health crossing.
@@ -1009,6 +1021,7 @@ impl<'a> Timeline<'a> {
             endurance: EndurancePool::new_full(),
             dodge_action: DodgeAction::new(),
             attunement: AttunementState::new(),
+            illusion: IllusionState::new(),
             cast_skill_catalog: catalog_from_skills(skills),
             threshold_50_emitted: false,
             protection_multiplier: crate::data::boon_condition_formulas::boons()
@@ -1081,6 +1094,7 @@ impl<'a> Timeline<'a> {
                     percent,
                     crit_damage: crit_bonus,
                     crit_chance,
+                    condition_damage: false,
                     active: false,
                     stacks: 0,
                     expires_at_ms: 0,
@@ -1107,6 +1121,7 @@ impl<'a> Timeline<'a> {
                     percent,
                     crit_damage: crit_bonus,
                     crit_chance,
+                    condition_damage: false,
                     active: false,
                     stacks: 0,
                     expires_at_ms: 0,
@@ -1130,6 +1145,7 @@ impl<'a> Timeline<'a> {
                     percent,
                     crit_damage: crit_bonus,
                     crit_chance,
+                    condition_damage: false,
                     active: false,
                     stacks: 0,
                     expires_at_ms: 0,
@@ -1156,6 +1172,7 @@ impl<'a> Timeline<'a> {
                     percent,
                     crit_damage: false,
                     crit_chance: false,
+                    condition_damage: false,
                     active: false,
                     stacks: 0,
                     expires_at_ms: 0,
@@ -1180,10 +1197,12 @@ impl<'a> Timeline<'a> {
                         max,
                         duration_ms: (duration * 1_000.0).round() as u32,
                         scope: effect.trigger_scope.clone().unwrap_or_default(),
+                        hit_fed: true,
                     },
                     percent,
                     crit_damage: false,
                     crit_chance: false,
+                    condition_damage: false,
                     active: false,
                     stacks: 0,
                     expires_at_ms: 0,
@@ -1211,6 +1230,7 @@ impl<'a> Timeline<'a> {
                     | TriggerRule::OnElite
                     | TriggerRule::OnThreshold
                     | TriggerRule::OnAttunementSwap
+                    | TriggerRule::OnCloneCreated
             ) || (matches!(effect.trigger_rule, TriggerRule::OnSkillUse)
                 // A skill's own record, or a trait's that names its skills (US2).
                 && (matches!(effect.source_type, SourceType::Skill) || scoped));
@@ -1295,6 +1315,12 @@ impl<'a> Timeline<'a> {
                     .copied()
                     .unwrap_or(0.0),
                 cast_skill_id: effect.cast_skill_id,
+                max_stacks: effect
+                    .max_stacks
+                    .as_ref()
+                    .and_then(resolved)
+                    .copied()
+                    .unwrap_or(0),
             });
         }
     }
@@ -2169,6 +2195,7 @@ impl<'a> Timeline<'a> {
         let might = self.buff_stacks("Might") as f64;
         let condition_damage = self.params.condition_damage
             + might * crate::data::boon_condition_formulas::boons().might_condi_per_stack();
+        let condi_mult = self.params.condition_mult * self.condition_conditional_mult();
         for condition in &mut self.target.conditions {
             if condition.next_tick_ms <= self.now_ms
                 && condition.next_tick_ms <= condition.expires_at_ms
@@ -2176,7 +2203,7 @@ impl<'a> Timeline<'a> {
                 let tick =
                     condition_tick_damage(&condition.name, condition_damage, &self.params.mode)
                         * condition.stacks as f64
-                        * self.params.condition_mult;
+                        * condi_mult;
                 outgoing_damage += tick;
                 condition.next_tick_ms += 1_000;
             }
@@ -2186,7 +2213,7 @@ impl<'a> Timeline<'a> {
                     outgoing_damage +=
                         condition_tick_damage(&condition.name, condition_damage, &self.params.mode)
                             * condition.stacks as f64
-                            * self.params.condition_mult
+                            * condi_mult
                             * frac;
                 }
             }
@@ -3017,7 +3044,7 @@ impl<'a> Timeline<'a> {
     fn strike_conditional_mult(&self) -> f64 {
         self.conditional_specs
             .iter()
-            .filter(|spec| !spec.crit_damage && !spec.crit_chance)
+            .filter(|spec| !spec.crit_damage && !spec.crit_chance && !spec.condition_damage)
             .map(|spec| match spec.kind {
                 ConditionalKind::Threshold { .. }
                 | ConditionalKind::InShroud
@@ -3030,6 +3057,19 @@ impl<'a> Timeline<'a> {
                 ConditionalKind::Stacking { .. } | ConditionalKind::PerFoeStack { .. } => {
                     1.0 + spec.stacks as f64 * spec.percent / 100.0
                 }
+                _ => 1.0,
+            })
+            .product()
+    }
+
+    /// The condition-damage multiplier of every conditional bonus that holds now.
+    fn condition_conditional_mult(&self) -> f64 {
+        self.conditional_specs
+            .iter()
+            .filter(|spec| spec.condition_damage)
+            .map(|spec| match spec.kind {
+                ConditionalKind::Timed { .. } if spec.active => 1.0 + spec.percent / 100.0,
+                ConditionalKind::Stacking { .. } => 1.0 + spec.stacks as f64 * spec.percent / 100.0,
                 _ => 1.0,
             })
             .product()
@@ -3211,10 +3251,15 @@ impl<'a> Timeline<'a> {
                 max,
                 duration_ms,
                 ref scope,
+                hit_fed,
             } = self.conditional_specs[idx].kind
             else {
                 continue;
             };
+            // Spawn-only stackers (723 Compounding Power) are not hit-fed.
+            if !hit_fed {
+                continue;
+            }
             if !self.scope_admits(scope, Some(skill_id)) {
                 continue;
             }
@@ -3398,6 +3443,65 @@ impl<'a> Timeline<'a> {
                 }
             } else {
                 match category {
+                    EffectCategory::SpawnClone => {
+                        // E4: payload calls spawn_clone; emit+OnCloneCreated procs only on rise.
+                        let rose =
+                            spawn_clone(&mut self.illusion, &mut self.trigger_bus, self.now_ms);
+                        if rose {
+                            self.trigger_procs(
+                                TriggerRule::OnCloneCreated,
+                                activating_skill_id,
+                                protected,
+                                1.0,
+                            );
+                        }
+                        rose
+                    }
+                    EffectCategory::StrikeDamagePct | EffectCategory::ConditionDamagePct
+                        if duration_ms > 0 && self.proc_specs[idx].max_stacks > 0 =>
+                    {
+                        // E4 Compounding Power: stacking buff on successful clone create.
+                        let max = self.proc_specs[idx].max_stacks;
+                        let is_condi = matches!(category, EffectCategory::ConditionDamagePct);
+                        let until = self.now_ms.saturating_add(duration_ms);
+                        match self.conditional_specs.iter_mut().find(|spec| {
+                            spec.source_name == name && spec.condition_damage == is_condi
+                        }) {
+                            Some(spec) => {
+                                if let ConditionalKind::Stacking { max: m, .. } = spec.kind {
+                                    spec.stacks = (spec.stacks + 1).min(m);
+                                } else {
+                                    spec.stacks = (spec.stacks + 1).min(max);
+                                    spec.kind = ConditionalKind::Stacking {
+                                        max,
+                                        duration_ms,
+                                        scope: Default::default(),
+                                        hit_fed: false,
+                                    };
+                                }
+                                spec.expires_at_ms = until;
+                                spec.active = true;
+                            }
+                            None => self.conditional_specs.push(ConditionalSpec {
+                                source_name: name.clone(),
+                                kind: ConditionalKind::Stacking {
+                                    max,
+                                    duration_ms,
+                                    scope: Default::default(),
+                                    hit_fed: false,
+                                },
+                                percent: value,
+                                crit_damage: false,
+                                crit_chance: false,
+                                condition_damage: is_condi,
+                                active: true,
+                                stacks: 1,
+                                expires_at_ms: until,
+                            }),
+                        }
+                        self.update_conditionals();
+                        true
+                    }
                     EffectCategory::StrikeDamagePct if value > 2.0 && duration_ms > 0 => {
                         // Sprint 3 (US3): a percent with a duration is a timed
                         // strike bonus (Soul Barbs, Dread), one spec per source,
@@ -3415,6 +3519,7 @@ impl<'a> Timeline<'a> {
                                 percent: value,
                                 crit_damage: false,
                                 crit_chance: false,
+                                condition_damage: false,
                                 active: false,
                                 stacks: 0,
                                 expires_at_ms: 0,
@@ -3514,6 +3619,7 @@ impl<'a> Timeline<'a> {
                         TriggerRule::OnElite => " on elite".to_string(),
                         TriggerRule::OnThreshold => " on threshold".to_string(),
                         TriggerRule::OnAttunementSwap => " on attunement swap".to_string(),
+                        TriggerRule::OnCloneCreated => " on clone created".to_string(),
                         _ => String::new(),
                     };
                     self.trace(
@@ -3897,6 +4003,7 @@ impl<'a> Timeline<'a> {
             bus_on_dodge: self.trigger_bus.count(BusEvent::OnDodge),
             bus_on_disable_foe: self.trigger_bus.count(BusEvent::OnDisableFoe),
             bus_on_attunement_swap: self.trigger_bus.count(BusEvent::OnAttunementSwap),
+            bus_on_clone_created: self.trigger_bus.count(BusEvent::OnCloneCreated),
         }
     }
 
@@ -4083,6 +4190,7 @@ fn trigger_label(trigger: &TriggerRule) -> &'static str {
         TriggerRule::OnElite => "on-elite",
         TriggerRule::OnThreshold => "on-threshold",
         TriggerRule::OnAttunementSwap => "on-attunement-swap",
+        TriggerRule::OnCloneCreated => "on-clone-created",
     }
 }
 
@@ -4220,6 +4328,7 @@ fn same_trigger(left: &TriggerRule, right: &TriggerRule) -> bool {
             | (TriggerRule::OnElite, TriggerRule::OnElite)
             | (TriggerRule::OnThreshold, TriggerRule::OnThreshold)
             | (TriggerRule::OnAttunementSwap, TriggerRule::OnAttunementSwap)
+            | (TriggerRule::OnCloneCreated, TriggerRule::OnCloneCreated)
     )
 }
 
@@ -4813,6 +4922,269 @@ mod tests {
             executing >= 3,
             ">=3 attunement traits must execute; got {executing}; {:?}",
             live_report.trait_fire_counts
+        );
+    }
+
+    /// E4 Kent: dodge 0->1 + emit; 4th spawn at cap no-op/no emit; heal-slot
+    /// Ego Restoration; Compounding Power only on successful spawn; 710 NM.
+    #[test]
+    fn kent_e4_causal_mes_clones_spawn_and_traits() {
+        use crate::data::normalized_effects::{effects, SourceType};
+        use crate::rotation::illusion::{spawn_clone, IllusionState};
+
+        let effects_wvw = effects().effects_for_mode("WvW");
+        let clone_records: Vec<&_> = effects_wvw
+            .iter()
+            .filter(|e| {
+                e.source_type == SourceType::Trait
+                    && e.coverage.is_none()
+                    && matches!(e.source_id, 704 | 740 | 723)
+            })
+            .collect();
+        assert!(
+            clone_records.len() >= 3,
+            "E4 must ship >=3 executable Mes clone trait records; got {}",
+            clone_records.len()
+        );
+        let sharper = effects_wvw.iter().find(|e| e.source_id == 710);
+        assert!(
+            sharper.is_some_and(|e| {
+                e.coverage.as_ref().is_some_and(|c| {
+                    matches!(
+                        c.class,
+                        crate::data::normalized_effects::CoverageClass::NeedsMechanic
+                    ) && c.mechanic.as_deref() == Some("clones")
+                })
+            }),
+            "710 Sharper Images must remain NeedsMechanic: clones"
+        );
+
+        // Micro-proof: 0->1 emit; 4th at cap no-op/no emit.
+        let mut state = IllusionState::new();
+        let mut bus = TriggerBus::new();
+        assert!(spawn_clone(&mut state, &mut bus, 0));
+        assert_eq!(state.count, 1);
+        assert_eq!(bus.count(BusEvent::OnCloneCreated), 1);
+        assert!(spawn_clone(&mut state, &mut bus, 10));
+        assert!(spawn_clone(&mut state, &mut bus, 20));
+        assert_eq!(state.count, 3);
+        assert!(!spawn_clone(&mut state, &mut bus, 30));
+        assert_eq!(state.count, 3);
+        assert_eq!(bus.count(BusEvent::OnCloneCreated), 3);
+
+        let params = params();
+        let active: Vec<&_> = clone_records;
+
+        // Dodge path: Deceptive Evasion OnDodge -> spawn -> Compounding Power.
+        let skills_dodge = [skill(
+            1,
+            SkillSlot::Weapon1,
+            250,
+            0,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let mut dodge_run = Timeline::new(
+            &skills_dodge,
+            &params,
+            profile(12_000, vec![]),
+            open_enemy(false),
+            &active,
+            &[],
+            true,
+            Vec::new(),
+        );
+        dodge_run.run();
+        let dodge_report = dodge_run.report();
+        assert!(
+            dodge_run.trigger_bus.count(BusEvent::OnDodge) >= 1,
+            "endurance dodge must fire"
+        );
+        assert!(
+            dodge_run.illusion.count >= 1,
+            "704 must spawn a clone on dodge; count={}",
+            dodge_run.illusion.count
+        );
+        assert!(
+            dodge_run.trigger_bus.count(BusEvent::OnCloneCreated) >= 1,
+            "successful spawn must emit OnCloneCreated"
+        );
+        assert_eq!(
+            dodge_report.bus_on_clone_created,
+            dodge_run.trigger_bus.count(BusEvent::OnCloneCreated)
+        );
+        let deceptive = dodge_report
+            .trait_fire_counts
+            .get("Deceptive Evasion")
+            .copied()
+            .unwrap_or(0);
+        assert!(
+            deceptive >= 1,
+            "Deceptive Evasion must execute; fires={deceptive}; {:?}",
+            dodge_report.trait_fire_counts
+        );
+        let compounding = dodge_report
+            .trait_fire_counts
+            .get("Compounding Power")
+            .copied()
+            .unwrap_or(0);
+        assert!(
+            compounding >= 1,
+            "723 must buff only on successful spawn; fires={compounding}; {:?}",
+            dodge_report.trait_fire_counts
+        );
+
+        // Cap no-op: force count=3 then spawn_clone must not emit / not fire 723 extra.
+        let mut capped = IllusionState::new();
+        capped.count = 3;
+        let mut bus2 = TriggerBus::new();
+        let before = bus2.count(BusEvent::OnCloneCreated);
+        assert!(!spawn_clone(&mut capped, &mut bus2, 0));
+        assert_eq!(bus2.count(BusEvent::OnCloneCreated), before);
+
+        // Heal-slot: Ego Restoration OnSkillUse + Slot Heal -> spawn.
+        let mut heal = skill(
+            2,
+            SkillSlot::Heal,
+            500,
+            1_000,
+            vec![SkillEffect::Healing { hit_count: 1 }],
+        );
+        heal.name = "Mirror".into();
+        heal.slot_name = Some("Heal".into());
+        let skills_heal = [heal];
+        let opener_heal = [2u32];
+        let mut heal_run = Timeline::new(
+            &skills_heal,
+            &params,
+            profile(4_000, vec![]),
+            open_enemy(false),
+            &active,
+            &[],
+            true,
+            Vec::new(),
+        );
+        heal_run.opener = &opener_heal;
+        heal_run.run();
+        let heal_report = heal_run.report();
+        assert!(
+            heal_run.illusion.count >= 1,
+            "740 must spawn on heal-slot use; count={}",
+            heal_run.illusion.count
+        );
+        let ego = heal_report
+            .trait_fire_counts
+            .get("Ego Restoration")
+            .copied()
+            .unwrap_or(0);
+        assert!(
+            ego >= 1,
+            "Ego Restoration must execute; fires={ego}; {:?}",
+            heal_report.trait_fire_counts
+        );
+
+        let executing = ["Deceptive Evasion", "Ego Restoration", "Compounding Power"]
+            .iter()
+            .filter(|n| {
+                dodge_report
+                    .trait_fire_counts
+                    .get(**n)
+                    .copied()
+                    .unwrap_or(0)
+                    + heal_report.trait_fire_counts.get(**n).copied().unwrap_or(0)
+                    > 0
+            })
+            .count();
+        assert!(
+            executing >= 3,
+            ">=3 Mes clone traits must execute; dodge={:?} heal={:?}",
+            dodge_report.trait_fire_counts,
+            heal_report.trait_fire_counts
+        );
+    }
+
+    /// E4 Kent: one successful clone + N ordinary hits must leave Compounding
+    /// Power at 1 stack until the next successful spawn (not hit-rate fed).
+    #[test]
+    fn kent_e4_compounding_power_stacks_only_on_clone_spawn() {
+        use crate::data::normalized_effects::{effects, SourceType};
+        use crate::rotation::illusion::spawn_clone;
+
+        let effects_wvw = effects().effects_for_mode("WvW");
+        let active: Vec<&_> = effects_wvw
+            .iter()
+            .filter(|e| {
+                e.source_type == SourceType::Trait && e.coverage.is_none() && e.source_id == 723
+            })
+            .collect();
+        assert!(!active.is_empty(), "723 Compounding Power must be present");
+
+        let skills = [skill(
+            1,
+            SkillSlot::Weapon1,
+            250,
+            0,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let params = params();
+        let mut run = Timeline::new(
+            &skills,
+            &params,
+            profile(1_000, vec![]),
+            open_enemy(false),
+            &active,
+            &[],
+            true,
+            Vec::new(),
+        );
+
+        let cp_stacks = |run: &Timeline<'_>| -> u32 {
+            run.conditional_specs
+                .iter()
+                .filter(|s| s.source_name.eq_ignore_ascii_case("Compounding Power"))
+                .map(|s| s.stacks)
+                .max()
+                .unwrap_or(0)
+        };
+
+        // First successful spawn installs 723 at 1 stack.
+        assert!(spawn_clone(&mut run.illusion, &mut run.trigger_bus, 0));
+        run.now_ms = 0;
+        run.trigger_procs(TriggerRule::OnCloneCreated, Some(1), false, 1.0);
+        assert_eq!(cp_stacks(&run), 1, "first spawn must install 1 stack");
+        assert!(
+            run.conditional_specs.iter().any(|s| {
+                s.source_name.eq_ignore_ascii_case("Compounding Power")
+                    && matches!(s.kind, ConditionalKind::Stacking { hit_fed: false, .. })
+            }),
+            "723 must be hit_fed=false"
+        );
+
+        // N ordinary hits must not mutate 723 stacks.
+        for i in 1..=25 {
+            run.now_ms = i * 100;
+            run.gain_conditional_stacks(1);
+        }
+        assert_eq!(
+            cp_stacks(&run),
+            1,
+            "ordinary hits must not raise 723; fires={:?}",
+            run.report().trait_fire_counts
+        );
+
+        // Next successful spawn raises stacks to 2 (PIN: OnCloneCreated only).
+        assert!(spawn_clone(&mut run.illusion, &mut run.trigger_bus, 3_000));
+        run.now_ms = 3_000;
+        run.trigger_procs(TriggerRule::OnCloneCreated, Some(1), false, 1.0);
+        assert_eq!(
+            cp_stacks(&run),
+            2,
+            "second successful spawn must raise 723 to 2 stacks"
         );
     }
 

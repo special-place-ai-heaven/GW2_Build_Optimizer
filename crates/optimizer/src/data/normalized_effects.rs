@@ -134,6 +134,8 @@ pub enum EffectCategory {
     /// Critical chance in percentage points (Decimate Defenses: per stack
     /// of the foe's vulnerability).
     CritChancePct,
+    /// NeedsMechanic Engine E4: payload creates a clone via IllusionState::spawn.
+    SpawnClone,
 }
 
 impl EffectCategory {
@@ -209,6 +211,8 @@ pub enum TriggerRule {
     OnThreshold,
     /// Primary attunement changed (AttunementState); bus OnAttunementSwap.
     OnAttunementSwap,
+    /// Clone count rose (IllusionState spawn); bus OnCloneCreated.
+    OnCloneCreated,
 }
 
 /// Health prerequisite of an `OnHealthThreshold` / `Conditional` effect,
@@ -919,11 +923,12 @@ mod tests {
             EffectCategory::GainsLifeForce,
             EffectCategory::Heal,
             EffectCategory::CritChancePct,
+            EffectCategory::SpawnClone,
         ];
         assert_eq!(
             variants.len(),
-            25,
-            "must test all 25 EffectCategory variants"
+            26,
+            "must test all 26 EffectCategory variants"
         );
         for v in variants {
             let json = serde_json::to_string(&v).unwrap();
@@ -1373,6 +1378,7 @@ mod tests {
             (TriggerRule::OnElite, "\"OnElite\""),
             (TriggerRule::OnThreshold, "\"OnThreshold\""),
             (TriggerRule::OnAttunementSwap, "\"OnAttunementSwap\""),
+            (TriggerRule::OnCloneCreated, "\"OnCloneCreated\""),
         ] {
             let mut effect = minimal_effect("kind");
             effect.trigger_rule = rule.clone();
@@ -1553,6 +1559,7 @@ mod tests {
                             | TriggerRule::OnElite
                             | TriggerRule::OnThreshold
                             | TriggerRule::OnAttunementSwap
+                            | TriggerRule::OnCloneCreated
                     )
                     || matches!(
                         effect.inner_category.as_ref().unwrap_or(&effect.category),
