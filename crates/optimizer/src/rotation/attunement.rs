@@ -119,9 +119,7 @@ pub fn apply_attunement_skill(
     skill_name: &str,
 ) -> Option<Element> {
     let to = Element::from_skill_name(skill_name)?;
-    if state.swap(to).is_none() {
-        return None;
-    }
+    state.swap(to)?;
     bus.emit(BusEvent::OnAttunementSwap, at_ms);
     Some(to)
 }
