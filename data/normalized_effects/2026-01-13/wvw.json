@@ -5025,22 +5025,27 @@
       }
     },
     {
-      "effect_id": "trait:1240:coverage",
+      "effect_id": "trait:1240:0",
       "source_type": "Trait",
       "source_id": 1240,
       "source_name": "Expeditious Dodger",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnDodge",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Expeditious_Dodger (read 2026-09-13: Swiftness 6 s on dodge)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "dodge"
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Swiftness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 6000
       }
     },
     {
@@ -5063,22 +5068,27 @@
       }
     },
     {
-      "effect_id": "trait:1289:coverage",
+      "effect_id": "trait:1289:0",
       "source_type": "Trait",
       "source_id": 1289,
       "source_name": "Pumping Up",
-      "category": "FlatStat",
-      "value": null,
+      "category": "AppliesBoon",
+      "value": 1.0,
       "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "trigger_rule": "OnDodge",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Pumping_Up (read 2026-09-13: Might on dodge (1 stack 20 s in WvW/PvP))",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "dodge"
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 20000
       }
     },
     {
@@ -6836,22 +6846,27 @@
       }
     },
     {
-      "effect_id": "trait:1379:coverage",
+      "effect_id": "trait:1379:0",
       "source_type": "Trait",
       "source_id": 1379,
       "source_name": "Resilient Roll",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnDodge",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Resilient_Roll (read 2026-09-13: Gain resistance when you dodge)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "dodge"
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Resistance",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000
       }
     },
     {
@@ -15046,22 +15061,27 @@
       }
     },
     {
-      "effect_id": "trait:1782:coverage",
+      "effect_id": "trait:1782:0",
       "source_type": "Trait",
       "source_id": 1782,
       "source_name": "Resolute Evasion",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnDodge",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Resolute_Evasion (read 2026-09-13: Gain resolution after you dodge)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "dodge"
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Resolution",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 6000
       }
     },
     {
