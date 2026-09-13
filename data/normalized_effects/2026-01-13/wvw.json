@@ -11046,6 +11046,1646 @@
         "class": "NeedsMechanic",
         "mechanic": "barrier"
       }
+    },
+    {
+      "effect_id": "trait:266:0",
+      "source_type": "Trait",
+      "source_id": 266,
+      "source_name": "Renewing Stamina",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Renewing_Stamina (read 2026-09-13: Vigor 5 s when you critically strike a foe)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Vigor",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 5000
+      }
+    },
+    {
+      "effect_id": "trait:296:0",
+      "source_type": "Trait",
+      "source_id": 296,
+      "source_name": "Burning Precision",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Burning_Precision (read 2026-09-13: On crit: Burning 1 s in WvW/PvP; 33% chance and burning duration increase are NeedsMechanic condition duration / chance)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Burning",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 1000
+      }
+    },
+    {
+      "effect_id": "trait:282:0",
+      "source_type": "Trait",
+      "source_id": 282,
+      "source_name": "Earth's Embrace",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Earth%27s_Embrace (read 2026-09-13: Resistance 4 s when you use a healing skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Resistance",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 4000
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      }
+    },
+    {
+      "effect_id": "trait:348:0",
+      "source_type": "Trait",
+      "source_id": 348,
+      "source_name": "Soothing Ice",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Soothing_Ice (read 2026-09-13: Regeneration 4 s when you use a healing skill; frost aura half is NeedsMechanic aura)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Regeneration",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 4000
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      }
+    },
+    {
+      "effect_id": "trait:364:0",
+      "source_type": "Trait",
+      "source_id": 364,
+      "source_name": "Soothing Disruption",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Soothing_Disruption (read 2026-09-13: Cantrips: Regeneration 6 s; per-cantrip linked boons (vigor/fury/stability/resistance/aegis/protection) left as page-linked facts)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Regeneration",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 6000
+      },
+      "trigger_scope": {
+        "Category": "Cantrip"
+      }
+    },
+    {
+      "effect_id": "trait:1952:0",
+      "source_type": "Trait",
+      "source_id": 1952,
+      "source_name": "Gale Song",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Gale_Song (read 2026-09-13: Protection 3 s to nearby allies (radius 300, 5 targets) when you use a healing skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Protection",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 3000,
+        "target_count": 5
+      },
+      "trigger_scope": {
+        "Slot": "Heal"
+      }
+    },
+    {
+      "effect_id": "trait:1891:0",
+      "source_type": "Trait",
+      "source_id": 1891,
+      "source_name": "Tempestuous Aria",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Tempestuous_Aria (read 2026-09-13: Shout: Might x3 for 6 s in WvW/PvP to nearby allies (5 targets); aura outgoing-damage half is NeedsMechanic aura)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 3.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 6000,
+        "target_count": 5
+      },
+      "trigger_scope": {
+        "Category": "Shout"
+      }
+    },
+    {
+      "effect_id": "trait:1902:0",
+      "source_type": "Trait",
+      "source_id": 1902,
+      "source_name": "Harmonious Conduit",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Harmonious_Conduit (read 2026-09-13: Overloads: Stability 4 s when starting an overload)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Stability",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 4000
+      },
+      "trigger_scope": {
+        "Category": "Overload"
+      }
+    },
+    {
+      "effect_id": "trait:1902:1",
+      "source_type": "Trait",
+      "source_id": 1902,
+      "source_name": "Harmonious Conduit",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Harmonious_Conduit (read 2026-09-13: Overloads: Swiftness 8 s when starting an overload)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Swiftness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 8000
+      },
+      "trigger_scope": {
+        "Category": "Overload"
+      }
+    },
+    {
+      "effect_id": "trait:1948:0",
+      "source_type": "Trait",
+      "source_id": 1948,
+      "source_name": "Hardy Conduit",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hardy_Conduit (read 2026-09-13: Overloads: Protection 3 s in WvW to nearby allies (radius 300, 5 targets); protection effectiveness increase is NeedsMechanic)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Protection",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 3000,
+        "target_count": 5
+      },
+      "trigger_scope": {
+        "Category": "Overload"
+      }
+    },
+    {
+      "effect_id": "trait:2170:0",
+      "source_type": "Trait",
+      "source_id": 2170,
+      "source_name": "Bolstered Elements",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bolstered_Elements (read 2026-09-13: Stance: Protection 3 s; Lesser Stone Resonance on elite is NeedsMechanic trait skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Protection",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000
+      },
+      "trigger_scope": {
+        "Category": "Stance"
+      }
+    },
+    {
+      "effect_id": "trait:2090:0",
+      "source_type": "Trait",
+      "source_id": 2090,
+      "source_name": "Woven Stride",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Woven_Stride (read 2026-09-13: Regeneration 3 s when you gain swiftness; superspeed half is NeedsMechanic movement skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Regeneration",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000
+      },
+      "trigger_scope": {
+        "Status": "Swiftness"
+      }
+    },
+    {
+      "effect_id": "trait:2090:1",
+      "source_type": "Trait",
+      "source_id": 2090,
+      "source_name": "Woven Stride",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Woven_Stride (read 2026-09-13: Cleanse 1 condition when you gain swiftness; superspeed half is NeedsMechanic movement skill)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self"
+      },
+      "trigger_scope": {
+        "Status": "Swiftness"
+      }
+    },
+    {
+      "effect_id": "trait:1510:0",
+      "source_type": "Trait",
+      "source_id": 1510,
+      "source_name": "Persisting Flames",
+      "category": "TriggeredEffect",
+      "value": 2.0,
+      "stacking_rule": "Additive",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Persisting_Flames (read 2026-09-13: +2% strike damage for 15 s when you inflict burning (stack cap 5 is API fact); fire-field duration increase is NeedsMechanic fire field)",
+      "inner_category": "StrikeDamagePct",
+      "effect_duration": 15.0,
+      "trigger_scope": {
+        "Status": "Burning"
+      }
+    },
+    {
+      "effect_id": "trait:227:coverage",
+      "source_type": "Trait",
+      "source_id": 227,
+      "source_name": "Zephyr's Boon",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Zephyr%27s_Boon (read 2026-09-13: Fury and swiftness to allies you grant auras to)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aura"
+      }
+    },
+    {
+      "effect_id": "trait:224:coverage",
+      "source_type": "Trait",
+      "source_id": 224,
+      "source_name": "One with Air",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/One_with_Air (read 2026-09-13: Superspeed when attuning to air)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:229:coverage",
+      "source_type": "Trait",
+      "source_id": 229,
+      "source_name": "Inscription",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Inscription_(trait) (read 2026-09-13: Glyphs grant attunement-based boons; resistance when attuning to air)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "glyphs"
+      }
+    },
+    {
+      "effect_id": "trait:1503:coverage",
+      "source_type": "Trait",
+      "source_id": 1503,
+      "source_name": "Fresh Air",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Fresh_Air (read 2026-09-13: Recharge air attunement on critical hit; ferocity when attuning to air)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:1672:coverage",
+      "source_type": "Trait",
+      "source_id": 1672,
+      "source_name": "Lightning Rod",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lightning_Rod (read 2026-09-13: Cast Lightning Rod trait skill when you disable a foe)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:268:coverage",
+      "source_type": "Trait",
+      "source_id": 268,
+      "source_name": "Arcane Prowess",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Arcane_Prowess (read 2026-09-13: Gain boons when you switch attunements)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:253:coverage",
+      "source_type": "Trait",
+      "source_id": 253,
+      "source_name": "Arcane Precision",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Arcane_Precision (read 2026-09-13: Critical strikes inflict an attunement-based condition)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:264:coverage",
+      "source_type": "Trait",
+      "source_id": 264,
+      "source_name": "Elemental Attunement",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elemental_Attunement (read 2026-09-13: Grant a boon to nearby allies when changing attunements)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:265:coverage",
+      "source_type": "Trait",
+      "source_id": 265,
+      "source_name": "Arcane Resurrection",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Arcane_Resurrection (read 2026-09-13: Cast Geyser and gain an attunement aura when you begin reviving; Geyser partial revive)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "revive"
+      }
+    },
+    {
+      "effect_id": "trait:1673:coverage",
+      "source_type": "Trait",
+      "source_id": 1673,
+      "source_name": "Elemental Lockdown",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elemental_Lockdown (read 2026-09-13: Gain an attunement-based boon when you disable a foe)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:257:coverage",
+      "source_type": "Trait",
+      "source_id": 257,
+      "source_name": "Final Shielding",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Final_Shielding (read 2026-09-13: Cast Lesser Arcane Shield when you use an elite skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:238:coverage",
+      "source_type": "Trait",
+      "source_id": 238,
+      "source_name": "Evasive Arcana",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Evasive_Arcana (read 2026-09-13: Cast an attunement-based skill when you dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1511:coverage",
+      "source_type": "Trait",
+      "source_id": 1511,
+      "source_name": "Bountiful Power",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bountiful_Power (read 2026-09-13: Charges on attunement change; burst of power (quickness/damage) at max stacks)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:278:coverage",
+      "source_type": "Trait",
+      "source_id": 278,
+      "source_name": "Stone Flesh",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stone_Flesh (read 2026-09-13: Strike damage taken reduced while attuned to earth)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:289:coverage",
+      "source_type": "Trait",
+      "source_id": 289,
+      "source_name": "Elemental Shielding",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elemental_Shielding (read 2026-09-13: Auras you grant to allies also grant protection)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aura"
+      }
+    },
+    {
+      "effect_id": "trait:281:coverage",
+      "source_type": "Trait",
+      "source_id": 281,
+      "source_name": "Rock Solid",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Rock_Solid (read 2026-09-13: Grant stability to nearby allies when attuning to earth)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:277:coverage",
+      "source_type": "Trait",
+      "source_id": 277,
+      "source_name": "Earthen Blessing",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Earthen_Blessing (read 2026-09-13: Shorter movement-impairing conditions on you; restore endurance when you receive them; duration cut is NeedsMechanic incoming condition duration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "endurance"
+      }
+    },
+    {
+      "effect_id": "trait:280:coverage",
+      "source_type": "Trait",
+      "source_id": 280,
+      "source_name": "Geomancer's Training",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Geomancer%27s_Training (read 2026-09-13: Reduced recharge on earth weapon skills; nearby incoming strike reduction)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "recharge"
+      }
+    },
+    {
+      "effect_id": "trait:1508:coverage",
+      "source_type": "Trait",
+      "source_id": 1508,
+      "source_name": "Diamond Skin",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Diamond_Skin (read 2026-09-13: Leap finisher cleanses self; blast finisher cleanses nearby allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "combo"
+      }
+    },
+    {
+      "effect_id": "trait:287:coverage",
+      "source_type": "Trait",
+      "source_id": 287,
+      "source_name": "Written in Stone",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Written_in_Stone (read 2026-09-13: Signets keep passives while recharging; aura when you use a signet)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "signets"
+      }
+    },
+    {
+      "effect_id": "trait:1674:coverage",
+      "source_type": "Trait",
+      "source_id": 1674,
+      "source_name": "Stone Heart",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stone_Heart (read 2026-09-13: Reduced strike damage after entering or exiting earth attunement)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:328:coverage",
+      "source_type": "Trait",
+      "source_id": 328,
+      "source_name": "Conjurer",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Conjurer (read 2026-09-13: Fire aura when an ally picks up a conjured weapon)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "conjure"
+      }
+    },
+    {
+      "effect_id": "trait:335:coverage",
+      "source_type": "Trait",
+      "source_id": 335,
+      "source_name": "Burning Fire",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Burning_Fire (read 2026-09-13: Cast Lesser Cleansing Fire when you have 3 conditions)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:318:coverage",
+      "source_type": "Trait",
+      "source_id": 318,
+      "source_name": "Sunspot",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sunspot (read 2026-09-13: Fire aura and damage nearby foes when you attune to fire; also on overload)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:340:coverage",
+      "source_type": "Trait",
+      "source_id": 340,
+      "source_name": "Smothering Auras",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Smothering_Auras (read 2026-09-13: Fire aura duration up; applying/transmuting auras cleanses conditions)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aura"
+      }
+    },
+    {
+      "effect_id": "trait:294:coverage",
+      "source_type": "Trait",
+      "source_id": 294,
+      "source_name": "Pyromancer's Puissance",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Pyromancer%27s_Puissance (read 2026-09-13: Might while using skills attuned to fire; Flame Expulsion on leave/overload)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:350:coverage",
+      "source_type": "Trait",
+      "source_id": 350,
+      "source_name": "Soothing Mist",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Soothing_Mist (read 2026-09-13: You and nearby allies recover health while attuned to water)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:360:coverage",
+      "source_type": "Trait",
+      "source_id": 360,
+      "source_name": "Stop, Drop, and Roll",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stop,_Drop,_and_Roll (read 2026-09-13: Dodging removes burning and chilled from nearby allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:358:coverage",
+      "source_type": "Trait",
+      "source_id": 358,
+      "source_name": "Cleansing Wave",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cleansing_Wave (read 2026-09-13: Heal and cleanse conditions on self and nearby allies when attuning to water)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:1676:coverage",
+      "source_type": "Trait",
+      "source_id": 1676,
+      "source_name": "Aquamancer's Training",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Aquamancer%27s_Training (read 2026-09-13: Increased healing to other allies; reduced recharge on water weapon skills)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "recharge"
+      }
+    },
+    {
+      "effect_id": "trait:362:coverage",
+      "source_type": "Trait",
+      "source_id": 362,
+      "source_name": "Cleansing Water",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cleansing_Water (read 2026-09-13: Cleanse conditions from allies you grant regeneration to)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ally state"
+      }
+    },
+    {
+      "effect_id": "trait:361:coverage",
+      "source_type": "Trait",
+      "source_id": 361,
+      "source_name": "Powerful Aura",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Powerful_Aura (read 2026-09-13: Any aura you grant yourself is granted to nearby allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aura"
+      }
+    },
+    {
+      "effect_id": "trait:2227:coverage",
+      "source_type": "Trait",
+      "source_id": 2227,
+      "source_name": "Depth of Elements",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Depth_of_Elements (read 2026-09-13: Elemental energy on strike imbues Jade Sphere; access to Augments)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "jade sphere"
+      }
+    },
+    {
+      "effect_id": "trait:2230:coverage",
+      "source_type": "Trait",
+      "source_id": 2230,
+      "source_name": "Hardened Auras",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hardened_Auras (read 2026-09-13: Damage reduction increased when you grant yourself an aura)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aura"
+      }
+    },
+    {
+      "effect_id": "trait:2252:coverage",
+      "source_type": "Trait",
+      "source_id": 2252,
+      "source_name": "Vicious Empowerment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Vicious_Empowerment (read 2026-09-13: Elemental Empowerment and might when you disable or immobilize a foe; EE stacks are NeedsMechanic elemental empowerment)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2224:coverage",
+      "source_type": "Trait",
+      "source_id": 2224,
+      "source_name": "Energized Elements",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Energized_Elements (read 2026-09-13: Gain energy and boons when you switch attunements)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:2250:coverage",
+      "source_type": "Trait",
+      "source_id": 2250,
+      "source_name": "Elemental Empowerment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elemental_Empowerment (read 2026-09-13: Gain Elemental Empowerment stacks while in combat)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "elemental empowerment"
+      }
+    },
+    {
+      "effect_id": "trait:2247:coverage",
+      "source_type": "Trait",
+      "source_id": 2247,
+      "source_name": "Empowering Auras",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Empowering_Auras (read 2026-09-13: Increased outgoing damage when you grant yourself an aura)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aura"
+      }
+    },
+    {
+      "effect_id": "trait:2249:coverage",
+      "source_type": "Trait",
+      "source_id": 2249,
+      "source_name": "Evasive Empowerment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Evasive_Empowerment (read 2026-09-13: Elemental Empowerment and vigor when evading an attack)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:2234:coverage",
+      "source_type": "Trait",
+      "source_id": 2234,
+      "source_name": "Spectacular Sphere",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Spectacular_Sphere (read 2026-09-13: Larger Jade Sphere grants swiftness (WvW) and an attunement-based boon)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "jade sphere"
+      }
+    },
+    {
+      "effect_id": "trait:2231:coverage",
+      "source_type": "Trait",
+      "source_id": 2231,
+      "source_name": "Elemental Epitome",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elemental_Epitome (read 2026-09-13: Attunement aura on combo; Elemental Empowerment when you grant yourself an aura)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "combo"
+      }
+    },
+    {
+      "effect_id": "trait:2233:coverage",
+      "source_type": "Trait",
+      "source_id": 2233,
+      "source_name": "Elemental Synergy",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elemental_Synergy (read 2026-09-13: Bonus effect when you finish a combo (once per attunement per interval))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "combo"
+      }
+    },
+    {
+      "effect_id": "trait:2241:coverage",
+      "source_type": "Trait",
+      "source_id": 2241,
+      "source_name": "Empowered Empowerment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Empowered_Empowerment (read 2026-09-13: Elemental Empowerment more effective; further bonus at max stacks)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "elemental empowerment"
+      }
+    },
+    {
+      "effect_id": "trait:2251:coverage",
+      "source_type": "Trait",
+      "source_id": 2251,
+      "source_name": "Sphere Specialist",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sphere_Specialist (read 2026-09-13: Jade Sphere boons last longer; gain energy while spheres are active)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "jade sphere"
+      }
+    },
+    {
+      "effect_id": "trait:2344:coverage",
+      "source_type": "Trait",
+      "source_id": 2344,
+      "source_name": "Evocation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Evocation (read 2026-09-13: Specialize in an element; familiar and reduced attunement recharge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "familiar"
+      }
+    },
+    {
+      "effect_id": "trait:2415:coverage",
+      "source_type": "Trait",
+      "source_id": 2415,
+      "source_name": "Altruistic Aspect",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Altruistic_Aspect (read 2026-09-13: Meditation skills grant boons to allies (per-skill linked boons))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "meditations"
+      }
+    },
+    {
+      "effect_id": "trait:2382:coverage",
+      "source_type": "Trait",
+      "source_id": 2382,
+      "source_name": "Enhanced Potency",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Enhanced_Potency (read 2026-09-13: Improve a boon based on your familiar)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "familiar"
+      }
+    },
+    {
+      "effect_id": "trait:2342:coverage",
+      "source_type": "Trait",
+      "source_id": 2342,
+      "source_name": "Familiar's Focus",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Familiar%27s_Focus (read 2026-09-13: Familiar's Prowess is improved)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "familiar"
+      }
+    },
+    {
+      "effect_id": "trait:2380:coverage",
+      "source_type": "Trait",
+      "source_id": 2380,
+      "source_name": "Familiar's Blessing",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Familiar%27s_Blessing (read 2026-09-13: Grant boons to nearby allies when you use a familiar skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "familiar"
+      }
+    },
+    {
+      "effect_id": "trait:2438:coverage",
+      "source_type": "Trait",
+      "source_id": 2438,
+      "source_name": "Elemental Dynamo",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elemental_Dynamo (read 2026-09-13: Gain one familiar charge when attuning to your selected element)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "familiar"
+      }
+    },
+    {
+      "effect_id": "trait:2351:coverage",
+      "source_type": "Trait",
+      "source_id": 2351,
+      "source_name": "Familiar's Prowess",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Familiar%27s_Prowess (read 2026-09-13: Temporary bonus after using a familiar skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "familiar"
+      }
+    },
+    {
+      "effect_id": "trait:2335:coverage",
+      "source_type": "Trait",
+      "source_id": 2335,
+      "source_name": "Galvanic Enchantment",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Galvanic_Enchantment (read 2026-09-13: After a familiar skill, next strike creates chain lightning)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "familiar"
+      }
+    },
+    {
+      "effect_id": "trait:2436:coverage",
+      "source_type": "Trait",
+      "source_id": 2436,
+      "source_name": "Elemental Balance",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elemental_Balance (read 2026-09-13: Every second entry to selected attunement recharges the next weapon skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:2437:coverage",
+      "source_type": "Trait",
+      "source_id": 2437,
+      "source_name": "Specialized Elements",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Specialized_Elements (read 2026-09-13: Cannot leave selected attunement; familiar recharge and weapon skill recharge on activate)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "familiar"
+      }
+    },
+    {
+      "effect_id": "trait:2025:coverage",
+      "source_type": "Trait",
+      "source_id": 2025,
+      "source_name": "Singularity",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Singularity (read 2026-09-13: Attain singularity by remaining in an attunement; overload access; shouts)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "overload"
+      }
+    },
+    {
+      "effect_id": "trait:1962:coverage",
+      "source_type": "Trait",
+      "source_id": 1962,
+      "source_name": "Latent Stamina",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Latent_Stamina (read 2026-09-13: Vigor to nearby allies when attuning to water; endurance to allies you grant vigor)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:1886:coverage",
+      "source_type": "Trait",
+      "source_id": 1886,
+      "source_name": "Unstable Conduit",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unstable_Conduit (read 2026-09-13: Overloads grant an attunement-based aura)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "overload"
+      }
+    },
+    {
+      "effect_id": "trait:2015:coverage",
+      "source_type": "Trait",
+      "source_id": 2015,
+      "source_name": "Invigorating Torrents",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Invigorating_Torrents (read 2026-09-13: Auras you grant also grant regeneration and vigor (WvW durations))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aura"
+      }
+    },
+    {
+      "effect_id": "trait:1839:coverage",
+      "source_type": "Trait",
+      "source_id": 1839,
+      "source_name": "Transcendent Tempest",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Transcendent_Tempest (read 2026-09-13: Faster singularity; increased damage after successfully completing an overload)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "overload"
+      }
+    },
+    {
+      "effect_id": "trait:2033:coverage",
+      "source_type": "Trait",
+      "source_id": 2033,
+      "source_name": "Lucid Singularity",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lucid_Singularity (read 2026-09-13: Boons to nearby allies while channeling and on completing an overload (might pulses in WvW))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "overload"
+      }
+    },
+    {
+      "effect_id": "trait:2109:coverage",
+      "source_type": "Trait",
+      "source_id": 2109,
+      "source_name": "Weaver",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Weaver (read 2026-09-13: Elite specialization unlock; dual attunement and dual attacks)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dual attack"
+      }
+    },
+    {
+      "effect_id": "trait:2165:coverage",
+      "source_type": "Trait",
+      "source_id": 2165,
+      "source_name": "Elemental Pursuit",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elemental_Pursuit (read 2026-09-13: Swiftness when you disable an enemy; swiftness effectiveness increase)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2115:coverage",
+      "source_type": "Trait",
+      "source_id": 2115,
+      "source_name": "Weaver's Prowess",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Weaver%27s_Prowess (read 2026-09-13: Resistance when you attune to a single element)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:2061:coverage",
+      "source_type": "Trait",
+      "source_id": 2061,
+      "source_name": "Swift Revenge",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Swift_Revenge (read 2026-09-13: Dual attacks grant element-based bonuses (might/cleanse/swiftness/endurance))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dual attack"
+      }
+    },
+    {
+      "effect_id": "trait:2081:coverage",
+      "source_type": "Trait",
+      "source_id": 2081,
+      "source_name": "Elemental Polyphony",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elemental_Polyphony (read 2026-09-13: Attributes based on current attunement; both when dual attuned)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:2131:coverage",
+      "source_type": "Trait",
+      "source_id": 2131,
+      "source_name": "Elements of Rage",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elements_of_Rage (read 2026-09-13: Damage bonus when attuned to a single element; access to Unravel)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "attunement"
+      }
+    },
+    {
+      "effect_id": "trait:2138:coverage",
+      "source_type": "Trait",
+      "source_id": 2138,
+      "source_name": "Flow State",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Flow_State (read 2026-09-13: Attunements and dual attack skills gain reduced recharge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dual attack"
+      }
     }
   ]
 }
