@@ -377,7 +377,12 @@ pub fn assign_best_infusions(
 
     // Uniform fill: one pick per flag family applied to every free seat in
     // that family. Cross-family product stays tiny (types x types).
-    let mut best_key = cheap_key(validated, db, profession_name, weights, ctx, scenario);
+    //
+    // Seed best_key at MIN (not the current fill). Seeding from the current
+    // fill while best_* start as None meant a re-solve on an already-optimal
+    // fill never claimed a winner (ties are not strict >) and writeback then
+    // cleared free seats — breaking search_v2 neighbors that inherit parent fills.
+    let mut best_key = (i64::MIN, i64::MIN, i64::MIN);
     let mut best_inf: Option<&Item> = None;
     let mut best_enr: Option<&Item> = None;
 
@@ -758,6 +763,75 @@ mod tests {
         assert!(
             infusion_fills.iter().all(|&id| id == 50),
             "power weights should pick Mighty (50), got {infusion_fills:?}"
+        );
+    }
+
+    /// Re-solving an already-optimal Mighty fill must keep free seats filled.
+    /// Regression for the best_key-seed / None-writeback clear bug.
+    #[test]
+    fn resolve_again_keeps_already_optimal_mighty_fill() {
+        let mighty = test_infusion(
+            50,
+            "Mighty Infusion",
+            &["Infusion"],
+            &[("Power", 9)],
+            &["Pve"],
+        );
+        let precise = test_infusion(
+            51,
+            "Precise Infusion",
+            &["Infusion"],
+            &[("Precision", 9)],
+            &["Pve"],
+        );
+        let db = db_with(vec![mighty, precise]);
+        let mut build = armored_build();
+        assign_best_infusions(
+            &mut build,
+            &db,
+            "Warrior",
+            &power_weights(),
+            &pve_ctx(),
+            &pve_scenario(),
+            &BuildLocks::default(),
+        );
+        let first: Vec<Option<u32>> = build
+            .infusion_seats
+            .iter()
+            .map(|s| s.item.as_ref().map(|i| i.id))
+            .collect();
+        assert!(
+            first.contains(&Some(50)),
+            "first solve should fill Mighty, got {first:?}"
+        );
+
+        assign_best_infusions(
+            &mut build,
+            &db,
+            "Warrior",
+            &power_weights(),
+            &pve_ctx(),
+            &pve_scenario(),
+            &BuildLocks::default(),
+        );
+        let second: Vec<Option<u32>> = build
+            .infusion_seats
+            .iter()
+            .map(|s| s.item.as_ref().map(|i| i.id))
+            .collect();
+        assert_eq!(
+            first, second,
+            "re-solve must not clear already-optimal free seats"
+        );
+        let infusion_fills: Vec<u32> = build
+            .infusion_seats
+            .iter()
+            .filter(|s| s.flags.iter().any(|f| f.eq_ignore_ascii_case("Infusion")))
+            .filter_map(|s| s.item.as_ref().map(|i| i.id))
+            .collect();
+        assert!(
+            !infusion_fills.is_empty() && infusion_fills.iter().all(|&id| id == 50),
+            "free Infusion seats must still be Mighty after re-solve, got {infusion_fills:?}"
         );
     }
 
