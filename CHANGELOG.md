@@ -2,6 +2,15 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.16 - 2026-09-13
+
+Revenant legends use the same icon+name skill-bar slots as Ranger pets. SCHEMA CHANGE = N.
+
+- The current-build skills bar shows LEGENDS | UTILITY SKILLS | ELITE SKILL when a Revenant has legends and no pets, matching PET SKILLS geometry.
+- Each legend slot paints the swap-skill icon and a compact human name (Alliance, Dwarf). Raw API ids such as Legend7 are never shown.
+- Clicking a legend slot still previews that legend's heal / utilities / elite.
+- Addon compile: `SimParams.deferred_target` is filled at the suggestion-rotation call site so the crate builds after 1.14.15.
+
 ## 1.14.15 - 2026-09-13
 
 Live foe TargetState ledger and deferred vs-target resolve (Success [5]). SCHEMA CHANGE = N.

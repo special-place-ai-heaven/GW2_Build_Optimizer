@@ -69,6 +69,81 @@ fn slash_parts(joined: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Look up a legend by API id (`Legend7`), compact name (`Dwarf`), or swap-skill name.
+fn legend_by_token<'a>(
+    db: &'a gw2_optimizer::gamedb::GameDb,
+    token: &str,
+) -> Option<&'a gw2_api::models::Legend> {
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+    if let Some(l) = db.legends.get(token) {
+        return Some(l);
+    }
+    if let Some((_, l)) = db
+        .legends
+        .iter()
+        .find(|(id, _)| id.eq_ignore_ascii_case(token))
+    {
+        return Some(l);
+    }
+    db.legends.values().find(|l| {
+        db.skills.get(&l.swap).is_some_and(|s| {
+            s.name.eq_ignore_ascii_case(token)
+                || crate::ui::comparison::compact_stance_name(&s.name).eq_ignore_ascii_case(token)
+        })
+    })
+}
+
+fn is_raw_legend_id(token: &str) -> bool {
+    let t = token.trim();
+    let rest = t
+        .strip_prefix("Legend")
+        .or_else(|| t.strip_prefix("legend"));
+    rest.is_some_and(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Compact display name for a legend token. Never returns a raw `LegendN` id.
+fn legend_shown_name(db: Option<&gw2_optimizer::gamedb::GameDb>, token: &str) -> String {
+    if let Some(d) = db {
+        if let Some(legend) = legend_by_token(d, token) {
+            if let Some(skill) = d.skills.get(&legend.swap) {
+                let loc = d.loc_skill(legend.swap, &skill.name);
+                return crate::ui::comparison::compact_stance_name(loc);
+            }
+        }
+    }
+    let compact =
+        crate::ui::comparison::compact_stance_name(crate::ui::comparison::loc_name(db, token));
+    if is_raw_legend_id(&compact) {
+        String::new()
+    } else {
+        compact
+    }
+}
+
+fn legend_icon_url<'a>(db: &'a gw2_optimizer::gamedb::GameDb, token: &str) -> Option<&'a str> {
+    let legend = legend_by_token(db, token)?;
+    crate::ui::icons::skill_url(db, legend.swap)
+}
+
+fn legend_inspect_name(db: Option<&gw2_optimizer::gamedb::GameDb>, token: &str) -> String {
+    if let Some(d) = db {
+        if let Some(legend) = legend_by_token(d, token) {
+            if let Some(skill) = d.skills.get(&legend.swap) {
+                return d.loc_skill(legend.swap, &skill.name).to_string();
+            }
+        }
+    }
+    let shown = legend_shown_name(db, token);
+    if shown.is_empty() {
+        token.to_string()
+    } else {
+        shown
+    }
+}
+
 /// Heal / utilities / elite for one revenant legend, keyed by compact stance label
 /// ("Dwarf", "Entity", …). Character API skills are the active legend only —
 /// and older legends often share palettes with the newest one — so the bar
@@ -77,11 +152,7 @@ fn stance_kit(
     db: &gw2_optimizer::gamedb::GameDb,
     compact: &str,
 ) -> Option<(String, Vec<String>, String)> {
-    let legend = db.legends.values().find(|l| {
-        db.skills.get(&l.swap).is_some_and(|s| {
-            crate::ui::comparison::compact_stance_name(&s.name).eq_ignore_ascii_case(compact)
-        })
-    })?;
+    let legend = legend_by_token(db, compact)?;
     let name = |id: u32| {
         db.skills
             .get(&id)
@@ -118,49 +189,6 @@ fn peek_stance_kit(
             v
         }
     });
-    db.and_then(|d| stance_kit(d, names[selected]))
-}
-
-/// Clickable stance pills. Returns that legend's kit when the db has it.
-fn render_stance_tabs(
-    ui: &Ui,
-    db: Option<&gw2_optimizer::gamedb::GameDb>,
-    joined: &str,
-    id_suffix: &str,
-) -> Option<(String, Vec<String>, String)> {
-    let names = slash_parts(joined);
-    if names.is_empty() {
-        return None;
-    }
-    ui.text_colored(crate::ui::theme::pal().muted, t("slot.stances"));
-    let n = names.len();
-    let mut selected = STANCE_PREVIEW.with(|c| {
-        let v = c.get();
-        if v >= n {
-            c.set(0);
-            0
-        } else {
-            v
-        }
-    });
-    let avail = ui.content_region_avail()[0];
-    let mut row_x = 0.0_f32;
-    for (i, name) in names.iter().enumerate() {
-        let [cw, _] = crate::ui::theme::select_chip_size(ui, name, false);
-        crate::ui::theme::wrap_chip(ui, avail, &mut row_x, cw, 4.0);
-        let id = format!("##stance_tab_{id_suffix}_{i}");
-        if crate::ui::theme::select_chip(
-            ui,
-            crate::ui::comparison::loc_name(db, name),
-            i == selected,
-            &id,
-            None,
-        ) {
-            selected = i;
-            STANCE_PREVIEW.with(|c| c.set(i));
-        }
-        crate::ui::comparison::inspect_if_hovered(ui, name, db);
-    }
     db.and_then(|d| stance_kit(d, names[selected]))
 }
 
@@ -254,7 +282,7 @@ fn paint_kit_slot(
     inspect: &str,
     icon_zoom: f32,
     changed: bool,
-) {
+) -> bool {
     let empty = value.is_empty();
     let fill = if empty {
         crate::ui::theme::pal().plate_empty
@@ -267,7 +295,7 @@ fn paint_kit_slot(
         rim
     };
     ui.set_cursor_screen_pos(p);
-    let _ = ui.invisible_button(id, [slot_w, slot_h]);
+    let clicked = ui.invisible_button(id, [slot_w, slot_h]);
     if !empty && !inspect.is_empty() {
         crate::ui::comparison::inspect_if_hovered(ui, inspect, db);
     }
@@ -317,6 +345,7 @@ fn paint_kit_slot(
             );
         }
     }
+    clicked
 }
 
 /// The equipped bar, for marking which slots a suggestion moved. Utilities
@@ -350,10 +379,15 @@ fn render_skill_bar(
     id_suffix: &str,
     worn: Option<&WornSkills>,
 ) {
-    let (heal, utilities, elite) = match peek_stance_kit(db, stances) {
+    let (mut heal, mut utilities, mut elite) = match peek_stance_kit(db, stances) {
         Some((h, u, e)) => (h, u, e),
         None => (heal.to_string(), utilities.to_vec(), elite.to_string()),
     };
+    let legend_raw = slash_parts(stances);
+    let legend_shown: Vec<String> = legend_raw
+        .iter()
+        .map(|token| legend_shown_name(db, token))
+        .collect();
     let pet_raw = slash_parts(pets);
     let pet_shown: Vec<String> = pet_raw
         .iter()
@@ -382,6 +416,7 @@ fn render_skill_bar(
     let u3_s = loc(utilities.get(2).map(|s| s.as_str()).unwrap_or(""));
     let elite_s = loc(&elite);
     let g_pets = t("group.pet_skills");
+    let g_legends = t("group.legends");
     let g_util = t("group.utility_skills");
     let g_elite = t("group.elite_skill");
 
@@ -413,6 +448,7 @@ fn render_skill_bar(
     };
 
     let pet_mins: Vec<f32> = pet_shown.iter().map(|n| min_slot(n)).collect();
+    let legend_mins: Vec<f32> = legend_shown.iter().map(|n| min_slot(n)).collect();
     let util_mins = [
         min_slot(&heal_s),
         min_slot(&u1_s),
@@ -421,14 +457,24 @@ fn render_skill_bar(
     ];
     let elite_mins = [min_slot(&elite_s)];
     let has_pets = !pet_mins.is_empty();
-    let n_div = if has_pets { 2.0 } else { 1.0 };
-    let pet_need = group_need(&g_pets, &pet_mins);
+    // Pets win if both somehow exist (Ranger vs Rev). Legends take the same
+    // left column only when the pet row is empty.
+    let has_legends = !has_pets && !legend_raw.is_empty();
+    let has_left = has_pets || has_legends;
+    let n_div = if has_left { 2.0 } else { 1.0 };
+    let left_title = if has_legends {
+        g_legends.as_str()
+    } else {
+        g_pets.as_str()
+    };
+    let left_mins: &[f32] = if has_legends { &legend_mins } else { &pet_mins };
+    let pet_need = group_need(left_title, left_mins);
     let util_need = group_need(&g_util, &util_mins);
     let elite_need = group_need(&g_elite, &elite_mins);
     let need = pet_need + util_need + elite_need + n_div * div_w;
     let (pet_w, util_w, elite_w) = if need <= avail {
         let extra = avail - need;
-        if has_pets {
+        if has_left {
             (
                 pet_need + extra * 0.20,
                 util_need + extra * 0.70,
@@ -465,8 +511,8 @@ fn render_skill_bar(
         .build();
     }
     let mut hx = start[0];
-    if has_pets {
-        paint_group_header(ui, hx, hdr_top, pet_w, bar_h, &g_pets);
+    if has_left {
+        paint_group_header(ui, hx, hdr_top, pet_w, bar_h, left_title);
         hx += pet_w + div_w;
     }
     paint_group_header(ui, hx, hdr_top, util_w, bar_h, &g_util);
@@ -476,14 +522,6 @@ fn render_skill_bar(
     ui.dummy([0.0, bar_h + 2.0]);
     let body_top = ui.cursor_screen_pos()[1];
     ui.dummy([0.0, 2.0]);
-
-    let (heal, utilities, elite) = match render_stance_tabs(ui, db, stances, id_suffix) {
-        Some((h, u, e)) => (h, u, e),
-        None => (heal, utilities, elite),
-    };
-    let u1 = utilities.first().map(|s| s.as_str()).unwrap_or("");
-    let u2 = utilities.get(1).map(|s| s.as_str()).unwrap_or("");
-    let u3 = utilities.get(2).map(|s| s.as_str()).unwrap_or("");
 
     let slot_y = ui.cursor_screen_pos()[1];
     let mut x = start[0];
@@ -514,6 +552,60 @@ fn render_skill_bar(
         }
         x += pet_w + div_w;
     }
+    if has_legends {
+        let inner_x = x + group_pad;
+        let inner_w = (pet_w - group_pad * 2.0).max(1.0);
+        let n = legend_shown.len();
+        let sw = slot_row_w(inner_w, n, gap);
+        let mut selected = STANCE_PREVIEW.with(|c| {
+            let v = c.get();
+            if v >= n {
+                c.set(0);
+                0
+            } else {
+                v
+            }
+        });
+        for (i, (token, shown)) in legend_raw.iter().zip(legend_shown.iter()).enumerate() {
+            let inspect = legend_inspect_name(db, token);
+            let clicked = paint_kit_slot(
+                ui,
+                db,
+                [inner_x + i as f32 * (sw + gap), slot_y],
+                sw,
+                slot_h,
+                pad,
+                icon,
+                icon_text_gap,
+                line,
+                &format!("##legend_slot_{id_suffix}_{i}"),
+                shown,
+                if i == selected {
+                    crate::ui::theme::pal().gold
+                } else {
+                    crate::ui::theme::pal().gold_dim
+                },
+                db.and_then(|d| legend_icon_url(d, token)),
+                &inspect,
+                1.0,
+                false,
+            );
+            if clicked {
+                selected = i;
+                STANCE_PREVIEW.with(|c| c.set(i));
+            }
+        }
+        if let Some((h, u, e)) = db.and_then(|d| stance_kit(d, legend_raw[selected])) {
+            heal = h;
+            utilities = u;
+            elite = e;
+        }
+        x += pet_w + div_w;
+    }
+
+    let u1 = utilities.first().map(|s| s.as_str()).unwrap_or("");
+    let u2 = utilities.get(1).map(|s| s.as_str()).unwrap_or("");
+    let u3 = utilities.get(2).map(|s| s.as_str()).unwrap_or("");
 
     {
         let inner_x = x + group_pad;
@@ -600,7 +692,7 @@ fn render_skill_bar(
     }
     let card_h = body_bottom - hdr_top;
     let mut vx = start[0];
-    if has_pets {
+    if has_left {
         vx += pet_w;
         paint_vdiv(ui, vx + div_w * 0.5, hdr_top, card_h);
         vx += div_w;
@@ -699,12 +791,21 @@ pub fn render_suggestion_skills(
 
 #[cfg(test)]
 mod tests {
-    use super::{stance_kit, two_line_split};
+    use super::{is_raw_legend_id, legend_icon_url, legend_shown_name, stance_kit, two_line_split};
     use gw2_api::models::Legend;
 
     fn skill(id: u32, name: &str) -> gw2_api::models::Skill {
         serde_json::from_value(serde_json::json!({ "id": id, "name": name }))
             .expect("skill fixture")
+    }
+
+    fn skill_with_icon(id: u32, name: &str, icon: &str) -> gw2_api::models::Skill {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "name": name,
+            "icon": icon
+        }))
+        .expect("skill fixture")
     }
 
     fn legend(id: &str, swap: u32, heal: u32, elite: u32, utilities: [u32; 3]) -> Legend {
@@ -776,5 +877,67 @@ mod tests {
             vec!["Glyph of".to_string(), "Equality".to_string()]
         );
         assert_eq!(two_line_split("Entangle"), vec!["Entangle".to_string()]);
+    }
+
+    fn legend_name_db() -> gw2_optimizer::gamedb::GameDb {
+        let mut db = gw2_optimizer::gamedb::GameDb::empty_for_tests();
+        db.skills.insert(
+            1,
+            skill_with_icon(1, "Legendary Dwarf Stance", "https://icons/dwarf.png"),
+        );
+        db.skills.insert(10, skill(10, "Soothing Stone"));
+        db.skills.insert(14, skill(14, "Rite of the Great Dwarf"));
+        db.skills.insert(
+            2,
+            skill_with_icon(2, "Legendary Alliance Stance", "https://icons/alliance.png"),
+        );
+        db.skills.insert(20, skill(20, "Selfish Spirit"));
+        db.legends
+            .insert("Legend3".into(), legend("Legend3", 1, 10, 14, [11, 12, 13]));
+        db.legends
+            .insert("Legend8".into(), legend("Legend8", 2, 20, 20, [21, 21, 21]));
+        db
+    }
+
+    #[test]
+    fn legend_shown_name_never_raw_id() {
+        let db = legend_name_db();
+        assert_eq!(legend_shown_name(Some(&db), "Legend3"), "Dwarf");
+        assert_eq!(legend_shown_name(Some(&db), "Dwarf"), "Dwarf");
+        assert_eq!(
+            legend_shown_name(Some(&db), "Legendary Dwarf Stance"),
+            "Dwarf"
+        );
+        assert_eq!(legend_shown_name(Some(&db), "Legend8"), "Alliance");
+        assert_eq!(legend_shown_name(Some(&db), "legend8"), "Alliance");
+        assert_eq!(legend_shown_name(Some(&db), "Legend7"), "");
+        assert_eq!(legend_shown_name(None, "Legend2"), "");
+        assert!(is_raw_legend_id("Legend7"));
+        assert!(!is_raw_legend_id("Dwarf"));
+        assert!(!legend_shown_name(Some(&db), "Legend3").contains("Legend"));
+    }
+
+    #[test]
+    fn legend_icon_comes_from_swap_skill() {
+        let db = legend_name_db();
+        assert_eq!(
+            legend_icon_url(&db, "Legend3"),
+            Some("https://icons/dwarf.png")
+        );
+        assert_eq!(
+            legend_icon_url(&db, "Alliance"),
+            Some("https://icons/alliance.png")
+        );
+        assert_eq!(legend_icon_url(&db, "Legend7"), None);
+    }
+
+    #[test]
+    fn stance_kit_accepts_raw_legend_id() {
+        let db = legend_name_db();
+        let (heal, _, elite) = stance_kit(&db, "Legend3").expect("by id");
+        assert_eq!(heal, "Soothing Stone");
+        assert_eq!(elite, "Rite of the Great Dwarf");
+        let (heal, _, _) = stance_kit(&db, "Alliance").expect("by compact");
+        assert_eq!(heal, "Selfish Spirit");
     }
 }
