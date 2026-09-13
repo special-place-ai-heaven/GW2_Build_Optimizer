@@ -338,18 +338,17 @@ pub fn assign_best_consumables(
         v
     };
 
+    let scoring = JointArgmaxCtx {
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+    };
+
     let product = food_choices.len().saturating_mul(util_choices.len());
     if product <= 64 {
-        let (food, utility) = joint_argmax(
-            validated,
-            &food_choices,
-            &util_choices,
-            db,
-            profession_name,
-            weights,
-            ctx,
-            scenario,
-        );
+        let (food, utility) = joint_argmax(validated, &food_choices, &util_choices, &scoring);
         if !food_locked {
             validated.food = food.map(item_to_validated);
         }
@@ -369,52 +368,54 @@ pub fn assign_best_consumables(
         } else {
             None
         }];
-        let (food, _) = joint_argmax(
-            validated,
-            &food_choices,
-            &pinned_utils,
-            db,
-            profession_name,
-            weights,
-            ctx,
-            scenario,
-        );
+        let (food, _) = joint_argmax(validated, &food_choices, &pinned_utils, &scoring);
         validated.food = food.map(item_to_validated);
     }
     if !util_locked {
         let pinned_food = [validated.food.as_ref().and_then(|v| db.items.get(&v.id))];
-        let (_, utility) = joint_argmax(
-            validated,
-            &pinned_food,
-            &util_choices,
-            db,
-            profession_name,
-            weights,
-            ctx,
-            scenario,
-        );
+        let (_, utility) = joint_argmax(validated, &pinned_food, &util_choices, &scoring);
         validated.utility = utility.map(item_to_validated);
     }
+}
+
+/// Scoring inputs for the food/utility joint argmax (keeps the helper under
+/// clippy's `too_many_arguments` limit without a blanket allow).
+struct JointArgmaxCtx<'b> {
+    db: &'b GameDb,
+    profession_name: &'b str,
+    weights: &'b OptimizationWeights,
+    ctx: &'b BalanceContext,
+    scenario: &'b ScenarioSpec,
 }
 
 fn joint_argmax<'a>(
     validated: &ValidatedBuild,
     foods: &[Option<&'a Item>],
     utils: &[Option<&'a Item>],
-    db: &GameDb,
-    profession_name: &str,
-    weights: &OptimizationWeights,
-    ctx: &BalanceContext,
-    scenario: &ScenarioSpec,
+    scoring: &JointArgmaxCtx<'_>,
 ) -> (Option<&'a Item>, Option<&'a Item>) {
     let mut scratch = validated.clone();
-    let mut best_key = cheap_key(&scratch, db, profession_name, weights, ctx, scenario);
+    let mut best_key = cheap_key(
+        &scratch,
+        scoring.db,
+        scoring.profession_name,
+        scoring.weights,
+        scoring.ctx,
+        scoring.scenario,
+    );
     let mut best: (Option<&Item>, Option<&Item>) = (None, None);
     for food in foods {
         for util in utils {
             scratch.food = food.map(item_to_validated);
             scratch.utility = util.map(item_to_validated);
-            let key = cheap_key(&scratch, db, profession_name, weights, ctx, scenario);
+            let key = cheap_key(
+                &scratch,
+                scoring.db,
+                scoring.profession_name,
+                scoring.weights,
+                scoring.ctx,
+                scoring.scenario,
+            );
             if key > best_key {
                 best_key = key;
                 best = (*food, *util);
@@ -695,9 +696,11 @@ mod tests {
             None,
         );
         let db = db_with(vec![better, worse, util_best, util_lock]);
-        let mut locks = BuildLocks::default();
-        locks.food = Some(22);
-        locks.utility = Some(24);
+        let locks = BuildLocks {
+            food: Some(22),
+            utility: Some(24),
+            ..Default::default()
+        };
         let mut build = ValidatedBuild::default();
         assign_best_consumables(
             &mut build,
@@ -745,11 +748,13 @@ mod tests {
             &scenario,
         );
 
-        let mut power_build = ValidatedBuild::default();
-        power_build.food = Some(ValidatedItem {
-            id: 31,
-            name: "Power Stew".into(),
-        });
+        let power_build = ValidatedBuild {
+            food: Some(ValidatedItem {
+                id: 31,
+                name: "Power Stew".into(),
+            }),
+            ..Default::default()
+        };
         let power_report = crate::referee::evaluate_validated_build(
             &power_build,
             &db,
@@ -759,11 +764,13 @@ mod tests {
             &scenario,
         );
 
-        let mut tough_build = ValidatedBuild::default();
-        tough_build.food = Some(ValidatedItem {
-            id: 32,
-            name: "Tough Stew".into(),
-        });
+        let tough_build = ValidatedBuild {
+            food: Some(ValidatedItem {
+                id: 32,
+                name: "Tough Stew".into(),
+            }),
+            ..Default::default()
+        };
         let tough_report = crate::referee::evaluate_validated_build(
             &tough_build,
             &db,
@@ -913,8 +920,10 @@ mod tests {
         let ctx = pve_ctx();
         let scenario = pve_scenario();
 
-        let mut locks_tiny = BuildLocks::default();
-        locks_tiny.food = Some(53);
+        let locks_tiny = BuildLocks {
+            food: Some(53),
+            ..Default::default()
+        };
         let mut build_tiny = ValidatedBuild::default();
         assign_best_consumables(
             &mut build_tiny,
@@ -928,8 +937,10 @@ mod tests {
         assert_eq!(build_tiny.food.as_ref().map(|i| i.id), Some(53));
         let tiny_util = build_tiny.utility.as_ref().map(|i| i.id);
 
-        let mut locks_huge = BuildLocks::default();
-        locks_huge.food = Some(54);
+        let locks_huge = BuildLocks {
+            food: Some(54),
+            ..Default::default()
+        };
         let mut build_huge = ValidatedBuild::default();
         assign_best_consumables(
             &mut build_huge,
@@ -1013,8 +1024,10 @@ mod tests {
         let ctx = pve_ctx();
         let scenario = pve_scenario();
 
-        let mut locks_tiny = BuildLocks::default();
-        locks_tiny.utility = Some(63);
+        let locks_tiny = BuildLocks {
+            utility: Some(63),
+            ..Default::default()
+        };
         let mut build_tiny = ValidatedBuild::default();
         assign_best_consumables(
             &mut build_tiny,
@@ -1028,8 +1041,10 @@ mod tests {
         assert_eq!(build_tiny.utility.as_ref().map(|i| i.id), Some(63));
         let tiny_food = build_tiny.food.as_ref().map(|i| i.id);
 
-        let mut locks_huge = BuildLocks::default();
-        locks_huge.utility = Some(64);
+        let locks_huge = BuildLocks {
+            utility: Some(64),
+            ..Default::default()
+        };
         let mut build_huge = ValidatedBuild::default();
         assign_best_consumables(
             &mut build_huge,
