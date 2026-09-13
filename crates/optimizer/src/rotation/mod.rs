@@ -4,6 +4,7 @@
 
 pub mod builder;
 pub mod combat_model;
+pub mod combo;
 #[cfg(test)]
 pub(crate) mod necro_published;
 pub mod prose;
@@ -14,6 +15,7 @@ pub mod skill_timings;
 pub mod trigger_bus;
 pub mod wvw_timeline;
 
+pub use combo::{ComboEngine, ComboOutcome, ComboOutcomeEffect, ComboSite, SELF_COMBATANT_ID};
 pub use trigger_bus::{BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST};
 pub use wvw_timeline::WvwCombatReport;
 

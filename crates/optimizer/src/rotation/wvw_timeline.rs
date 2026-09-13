@@ -531,12 +531,6 @@ struct BarrierLayer {
 }
 
 #[derive(Debug, Clone)]
-struct ComboFieldState {
-    field_type: String,
-    expires_at_ms: u32,
-}
-
-#[derive(Debug, Clone)]
 struct PendingCast {
     skill_idx: usize,
     started_at_ms: u32,
@@ -730,7 +724,8 @@ struct Timeline<'a> {
     /// Shared live foe ledger (Phase 3 TargetState).
     target: TargetState,
     incoming_conditions: Vec<TimedCondition>,
-    combo_field: Option<ComboFieldState>,
+    /// Phase 4 shared ComboEngine (replaces Option<ComboFieldState>).
+    combo: super::combo::ComboEngine,
     target_reached_at_ms: Option<u32>,
     player_health: f64,
     barrier: VecDeque<BarrierLayer>,
@@ -949,7 +944,7 @@ impl<'a> Timeline<'a> {
             defenses: Vec::new(),
             buffs: Vec::new(),
             incoming_conditions: Vec::new(),
-            combo_field: None,
+            combo: super::combo::ComboEngine::new(),
             target_reached_at_ms: None,
             barrier: VecDeque::new(),
             protected_run_ms: 0,
@@ -1369,13 +1364,7 @@ impl<'a> Timeline<'a> {
         self.buffs.retain(|buff| buff.expires_at_ms > self.now_ms);
         self.barrier
             .retain(|layer| layer.expires_at_ms > self.now_ms);
-        if self
-            .combo_field
-            .as_ref()
-            .is_some_and(|field| field.expires_at_ms <= self.now_ms)
-        {
-            self.combo_field = None;
-        }
+        self.combo.tick_expiry(self.now_ms);
     }
 
     /// Land every scheduled hit that is due, in the order they were queued.
@@ -2336,10 +2325,13 @@ impl<'a> Timeline<'a> {
                 field_type,
                 duration_ms,
             } => {
-                self.combo_field = Some(ComboFieldState {
-                    field_type: field_type.clone(),
-                    expires_at_ms: self.now_ms.saturating_add(*duration_ms),
-                });
+                self.combo.place_field(
+                    field_type,
+                    *duration_ms,
+                    self.now_ms,
+                    super::combo::ComboSite::Ground,
+                    super::combo::SELF_COMBATANT_ID,
+                );
             }
             SkillEffect::ComboFinisher {
                 finisher_type,
@@ -2447,87 +2439,137 @@ impl<'a> Timeline<'a> {
     }
 
     fn resolve_combo(&mut self, skill_id: u32, finisher_type: &str, percent: u32) {
-        if percent < 100 {
-            if percent > 0 {
-                self.note_unmodeled(format!("{finisher_type} finisher (partial combo)"));
-            }
-            return;
-        }
-        let Some(field) = self.combo_field.as_ref() else {
+        // Interrupted leap: effects only run on successful cast resolve, so the
+        // existing cast/CC interrupt path already suppresses finishers. Pass
+        // interrupted=false here; ComboEngine still honors the flag for tests.
+        let Some(outcome) = self.combo.try_finisher(
+            finisher_type,
+            percent,
+            self.now_ms,
+            super::combo::SELF_COMBATANT_ID,
+            super::combo::ComboSite::Ground,
+            false,
+        ) else {
             return;
         };
-        let field_name = field.field_type.clone();
-        let field_type = field_name.to_lowercase();
-        let finisher = finisher_type.to_lowercase();
-        let unmodeled =
-            |why: &str| format!("{field_name} field + {finisher_type} finisher ({why})");
+        self.apply_combo_outcome(skill_id, outcome);
+    }
+
+    fn apply_combo_outcome(&mut self, skill_id: u32, outcome: super::combo::ComboOutcome) {
+        use super::combo::ComboOutcomeEffect;
+        let scale = outcome.proc_scale;
+        if scale <= 0.0 {
+            return;
+        }
+        let field_name = outcome.field_type.clone();
+        let finisher_type = outcome.finisher_type.clone();
         self.combo_activations += 1;
-        if field_type.contains("smoke") {
-            if finisher.contains("blast") || finisher.contains("leap") {
-                self.apply_defense(CoverKind::Stealth, 3_000, 1, false);
-            } else if finisher.contains("projectile") || finisher.contains("whirl") {
-                self.apply_defense(CoverKind::Blind, 3_000, 1, false);
-            } else {
-                self.note_unmodeled(unmodeled("unmodeled combo"));
+        match outcome.effect {
+            ComboOutcomeEffect::Buff {
+                name,
+                stacks,
+                duration_ms,
+            } => {
+                let duration = ((duration_ms as f64) * scale).round() as u32;
+                if duration > 0 && stacks > 0 {
+                    self.apply_buff(&name, stacks, duration, true);
+                    let detail = format!("{field_name} field + {finisher_type} finisher -> {name}");
+                    self.trace(TraceKind::ComboResolved, &self.skill_name(skill_id), detail);
+                }
             }
-        } else if field_type.contains("water") {
-            if finisher.contains("blast") {
-                self.heal(1_320.0 + self.params.healing_power * 0.20);
-            } else if finisher.contains("leap") {
-                self.heal(1_300.0 + self.params.healing_power * 0.50);
-            } else {
-                // Projectile/whirl apply regeneration; periodic regeneration
-                // is not represented by this timeline yet.
-                self.note_unmodeled(unmodeled("unmodeled combo"));
+            ComboOutcomeEffect::Condition {
+                name,
+                stacks,
+                duration_ms,
+            } => {
+                let duration = ((duration_ms as f64) * scale * self.params.condition_duration_mult)
+                    .round() as u32;
+                if duration > 0 && stacks > 0 {
+                    // Phase 3: foe conditions MUST use TargetState::apply_condition.
+                    let cap =
+                        crate::rotation::simulator::condition_stack_cap(&name, &self.params.mode);
+                    self.target
+                        .apply_condition(&name, stacks, duration, self.now_ms, cap as u32);
+                    let detail = format!("{field_name} field + {finisher_type} finisher -> {name}");
+                    self.trace(TraceKind::ComboResolved, &self.skill_name(skill_id), detail);
+                }
             }
-        } else if field_type.contains("light") {
-            if finisher.contains("blast") {
-                self.cleanse(1);
-            } else {
-                self.note_unmodeled(unmodeled("unmodeled combo"));
+            ComboOutcomeEffect::Healing {
+                base,
+                healing_power_coef,
+            } => {
+                let amount = (base + self.params.healing_power * healing_power_coef) * scale;
+                self.heal(amount);
+                self.trace(
+                    TraceKind::ComboResolved,
+                    &self.skill_name(skill_id),
+                    format!("{field_name} field + {finisher_type} finisher -> heal"),
+                );
             }
-        } else if field_type.contains("fire") {
-            if finisher.contains("blast") {
-                self.apply_buff("Might", 3, 20_000, true);
-            } else {
-                self.note_unmodeled(unmodeled("unmodeled combo"));
-            }
-        } else if field_type.contains("dark") {
-            // wiki `Combo` (read 2026-09-08): blast = area Dark Aura 3 s,
-            // leap = Dark Aura 5 s, projectile = life stealing, whirl =
-            // leeching bolts.
-            let protected = self.control_owned();
-            let outcome = if finisher.contains("whirl") {
-                // wiki `Leeching Bolts` (read 2026-09-08): per bolt 198 damage
-                // (0.03 × power) and 170 healing (0.05 × healing power).
-                // ponytail: the page does not state the bolt count; one bolt
-                // per activation is the stated lower bound, not a guess.
-                let damage = 198.0 + 0.03 * self.params.power;
-                let healing = 170.0 + 0.05 * self.params.healing_power;
+            ComboOutcomeEffect::LifeSteal {
+                damage_base,
+                damage_power_coef,
+                heal_base,
+                heal_healing_power_coef,
+            } => {
+                let protected = self.control_owned();
+                let damage = (damage_base + damage_power_coef * self.params.power) * scale;
+                let healing =
+                    (heal_base + heal_healing_power_coef * self.params.healing_power) * scale;
                 self.record_damage(damage, protected);
                 self.heal(healing);
-                Some("leeching bolt")
-            } else if finisher.contains("leap") {
-                self.apply_buff("Dark Aura", 1, 5_000, true);
-                Some("Dark Aura 5 s")
-            } else if finisher.contains("blast") {
-                self.apply_buff("Dark Aura", 1, 3_000, true);
-                Some("area Dark Aura 3 s")
-            } else {
-                // Projectile life stealing: numbers not read yet.
-                self.note_unmodeled(unmodeled("life stealing unread"));
-                None
-            };
-            if let Some(outcome) = outcome {
                 let name = self.skill_name(skill_id);
                 self.trace(
                     TraceKind::ComboResolved,
                     &name,
-                    format!("{field_name} field + {finisher_type} finisher → {outcome}"),
+                    format!("{field_name} field + {finisher_type} finisher -> leeching bolt"),
                 );
             }
-        } else {
-            self.note_unmodeled(unmodeled("unmodeled combo"));
+            ComboOutcomeEffect::ConditionCleanse { count } => {
+                let n = ((count as f64) * scale).round() as u32;
+                if n > 0 {
+                    self.cleanse(n);
+                    self.trace(
+                        TraceKind::ComboResolved,
+                        &self.skill_name(skill_id),
+                        format!("{field_name} field + {finisher_type} finisher -> cleanse"),
+                    );
+                }
+            }
+            ComboOutcomeEffect::Cover { kind, duration_ms } => {
+                let duration = ((duration_ms as f64) * scale).round() as u32;
+                if duration > 0 {
+                    self.apply_defense(kind, duration, 1, false);
+                    self.trace(
+                        TraceKind::ComboResolved,
+                        &self.skill_name(skill_id),
+                        format!("{field_name} field + {finisher_type} finisher -> cover"),
+                    );
+                }
+            }
+            ComboOutcomeEffect::CrowdControl { duration_ms } => {
+                let duration = ((duration_ms as f64) * scale).round() as u32;
+                if duration > 0 && !self.target.stability {
+                    let previous_end = self.target.disabled_until_ms.max(self.now_ms);
+                    let new_end = self.target.disabled_until_ms.max(self.at(duration));
+                    let landed = new_end > previous_end;
+                    self.control_landed_ms += new_end.saturating_sub(previous_end);
+                    self.target.disabled_until_ms = new_end;
+                    if landed {
+                        self.trigger_bus.emit(BusEvent::OnDisableFoe, self.now_ms);
+                        self.trigger_procs(TriggerRule::OnDisableFoe, Some(skill_id), false, 1.0);
+                    }
+                    self.trace(
+                        TraceKind::ComboResolved,
+                        &self.skill_name(skill_id),
+                        format!("{field_name} field + {finisher_type} finisher -> daze"),
+                    );
+                }
+            }
+            ComboOutcomeEffect::Unmodeled { reason } => {
+                // Still counts as an activation attempt against a live field.
+                self.note_unmodeled(reason);
+            }
         }
     }
 
