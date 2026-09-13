@@ -1646,7 +1646,7 @@ mod tests {
 
     /// Professions whose trait catalogue increment has shipped: every one of
     /// their traits must have a state other than `NoRecord`.
-    const SHIPPED_PROFESSIONS: [&str; 3] = ["Necromancer", "Ranger", "Thief"];
+    const SHIPPED_PROFESSIONS: [&str; 4] = ["Necromancer", "Ranger", "Thief", "Warrior"];
 
     fn cache_db() -> Option<(std::path::PathBuf, GameDb)> {
         let Ok(cache_dir) = gw2_api::dev_config::cache_dir() else {
