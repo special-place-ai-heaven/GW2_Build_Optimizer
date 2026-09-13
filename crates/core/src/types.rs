@@ -70,6 +70,12 @@ pub struct BuildLocks {
     /// older lock JSON without this field still loads.
     #[serde(default)]
     pub gear_locks: HashMap<GearSlot, u32>,
+    /// Locked nourishment (food) item id. Inner argmax never overwrites this.
+    #[serde(default)]
+    pub food: Option<u32>,
+    /// Locked enhancement (utility consumable) item id. Inner argmax never overwrites this.
+    #[serde(default)]
+    pub utility: Option<u32>,
 }
 
 impl BuildLocks {
@@ -85,6 +91,8 @@ impl BuildLocks {
                 .values()
                 .any(|cols| cols.iter().any(|c| c.is_some()))
             || !self.gear_locks.is_empty()
+            || self.food.is_some()
+            || self.utility.is_some()
     }
 
     /// Get locked trait for a specific spec and column (0=Adept, 1=Master, 2=Grandmaster).
@@ -137,6 +145,12 @@ impl BuildLocks {
         });
         for (slot, id) in gear_entries {
             parts.push(format!("Gear {} locked to ID {}", slot_name(slot), id));
+        }
+        if let Some(id) = self.food {
+            parts.push(format!("Food locked to ID {id}"));
+        }
+        if let Some(id) = self.utility {
+            parts.push(format!("Utility locked to ID {id}"));
         }
         if parts.is_empty() {
             String::new()

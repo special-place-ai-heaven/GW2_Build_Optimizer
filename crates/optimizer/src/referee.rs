@@ -874,6 +874,12 @@ pub fn kit_cleanse_rate_from_gear(validated: &ValidatedBuild, db: &GameDb) -> f6
     if let Some(r) = &validated.relic {
         rate += item_rate(r.id);
     }
+    if let Some(r) = &validated.food {
+        rate += item_rate(r.id);
+    }
+    if let Some(r) = &validated.utility {
+        rate += item_rate(r.id);
+    }
     for spec in &validated.specializations {
         for &id in spec.all_trait_ids.iter().chain(spec.trait_ids.iter()) {
             if let Some(src) = reg.trait_(id) {
@@ -1102,6 +1108,32 @@ pub fn evaluate_validated_build(
     scenario: &ScenarioSpec,
 ) -> RefereeReport {
     evaluate_validated_build_with(validated, db, profession_name, weights, ctx, scenario, &[])
+}
+
+/// Evaluate a completed kit after the cheap consumable inner argmax.
+///
+/// Writes chosen food/utility ids onto `validated` (locks are not overwritten)
+/// and then ranks the exact kit. Search calls this after the kit is complete
+/// and before the rank is retained. Exact-kit tests use [`evaluate_validated_build`].
+pub fn evaluate_validated_build_solved(
+    validated: &mut ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+    locks: &gw2_core::types::BuildLocks,
+) -> RefereeReport {
+    crate::consumables::assign_best_consumables(
+        validated,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+        locks,
+    );
+    evaluate_validated_build(validated, db, profession_name, weights, ctx, scenario)
 }
 
 /// Same referee, but the WvW timeline presses `opener` (skill ids, in
@@ -2879,6 +2911,8 @@ mod tests {
             sigils: vec![],
             sigil_seats: Default::default(),
             relic: None,
+            food: None,
+            utility: None,
             gear_slots: gw2_core::types::GearSlots::default(), // itemstat 9999 intentionally absent
             explanation: String::new(),
             synergy_explanation: String::new(),

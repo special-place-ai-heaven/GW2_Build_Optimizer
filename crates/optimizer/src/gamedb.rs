@@ -622,6 +622,46 @@ impl GameDb {
             .collect()
     }
 
+    /// Nourishment (food) legal in `mode` via `game_types`.
+    pub fn nourishments_for(&self, mode: &gw2_core::types::GameMode) -> Vec<&Item> {
+        self.consumables_of(&["Food", "Nourishment"], mode)
+    }
+
+    /// Enhancement (utility consumable) legal in `mode` via `game_types`.
+    pub fn enhancements_for(&self, mode: &gw2_core::types::GameMode) -> Vec<&Item> {
+        self.consumables_of(&["Utility", "Enhancement"], mode)
+    }
+
+    fn consumables_of(
+        &self,
+        detail_types: &[&str],
+        mode: &gw2_core::types::GameMode,
+    ) -> Vec<&Item> {
+        let ids = self
+            .items_by_type
+            .get("Consumable")
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let mut out: Vec<&Item> = ids
+            .iter()
+            .filter_map(|id| self.items.get(id))
+            .filter(|item| {
+                crate::consumables::kind_of(item).is_some()
+                    && item
+                        .details
+                        .as_ref()
+                        .and_then(|d| d.detail_type.as_deref())
+                        .is_some_and(|t| {
+                            detail_types.iter().any(|want| t.eq_ignore_ascii_case(want))
+                        })
+                    && crate::consumables::item_legal_for_mode(item, mode)
+            })
+            .collect();
+        // items_by_type is already sorted; keep id order for a stable argmax.
+        out.sort_by_key(|item| item.id);
+        out
+    }
+
     pub fn spec(&self, id: u32) -> Option<&Specialization> {
         self.specializations.get(&id)
     }
