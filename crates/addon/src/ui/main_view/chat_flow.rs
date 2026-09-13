@@ -1501,7 +1501,10 @@ fn gate_remedy(gate: &gw2_optimizer::referee::ViabilityGate) -> &'static str {
             "give it Stability, or an evade, block, invuln or stealth it can use on demand"
         }
         G::CleanseRate => {
-            "add condition cleanse: a cleansing utility, a trait that cleanses, or a rune or              relic that does"
+            "add damaging-condition cleanse: a cleansing utility, a trait that cleanses, or a rune or              relic that does"
+        }
+        G::ControlCoverage => {
+            "cover soft control (chill/weakness/slow/immobilize/blind/cripple): cleanse, Resistance, or a stunbreak"
         }
         G::EffectiveHealth => {
             "raise effective health: Toughness and Vitality in the prefix, or a defensive              specialization"

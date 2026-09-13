@@ -2129,6 +2129,7 @@ pub(crate) mod runtime_diagnostics_tests {
             crate::referee::ViabilityGate::StunbreakCount,
             crate::referee::ViabilityGate::StabilityAccess,
             crate::referee::ViabilityGate::CleanseRate,
+            crate::referee::ViabilityGate::ControlCoverage,
         ] {
             let result = report
                 .viability
