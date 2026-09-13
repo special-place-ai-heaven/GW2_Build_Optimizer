@@ -1449,6 +1449,8 @@ mod tests {
                 trace_truncated: false,
                 proc_trials: Vec::new(),
                 shroud_refusals: Vec::new(),
+                dodge_count: 0,
+                bus_on_dodge: 0,
             }),
         }
     }

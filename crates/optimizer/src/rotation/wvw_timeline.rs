@@ -20,6 +20,7 @@ use super::simulator::{
     alacrity_cd_advance_ms, condition_tick_damage, crit_chance_fraction, reference_armor, SimParams,
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
+use super::trigger_bus::{BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST};
 use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect, SkillSlot};
 
 const TIMELINE_TICK_MS: u32 = 50;
@@ -238,6 +239,11 @@ pub struct WvwCombatReport {
     /// needs 10% life force, had 4%`. The referee appends them to the
     /// quality reasons.
     pub shroud_refusals: Vec<String>,
+    // NeedsMechanic Engine E0
+    /// Dodges performed (EndurancePool + DodgeAction).
+    pub dodge_count: u32,
+    /// Bus OnDodge emissions this fight.
+    pub bus_on_dodge: u32,
 }
 
 /// Upper bound on [`WvwCombatReport::trace`]. The 513th event is dropped and
@@ -284,6 +290,9 @@ pub enum TraceKind {
     /// An in-shroud conditional bonus turned on / off.
     ShroudBonusActive,
     ShroudBonusEnded,
+    // NeedsMechanic Engine E0
+    /// EndurancePool + DodgeAction spent a dodge.
+    Dodged,
 }
 
 /// Seeded-trial summary for one proc source, trace mode only
@@ -790,6 +799,12 @@ struct Timeline<'a> {
     /// Any shroud entry happened this fight (shroud records that never fired
     /// otherwise get the shroud-floor reason at the end).
     shroud_entered_once: bool,
+    /// E0: shared TriggerBus + Endurance/Dodge family.
+    trigger_bus: TriggerBus,
+    endurance: EndurancePool,
+    dodge_action: DodgeAction,
+    /// E0: OnThreshold fired once for the 50% health crossing.
+    threshold_50_emitted: bool,
     protection_multiplier: f64,
     resource_rules: HashMap<u32, SkillResourceRule>,
     resources: HashMap<ResourceKind, f64>,
@@ -979,6 +994,10 @@ impl<'a> Timeline<'a> {
             ally_healing: 0.0,
             ally_cleanses: 0,
             shroud_entered_once: false,
+            trigger_bus: TriggerBus::new(),
+            endurance: EndurancePool::new_full(),
+            dodge_action: DodgeAction::new(),
+            threshold_50_emitted: false,
             protection_multiplier: crate::data::boon_condition_formulas::boons()
                 .protection_multiplier(),
             resource_rules: resource_rules
@@ -1174,6 +1193,10 @@ impl<'a> Timeline<'a> {
                     | TriggerRule::OnBoonApplied
                     | TriggerRule::OnBoonStripped
                     | TriggerRule::Periodic
+                    | TriggerRule::OnDodge
+                    | TriggerRule::OnDisableFoe
+                    | TriggerRule::OnElite
+                    | TriggerRule::OnThreshold
             ) || (matches!(effect.trigger_rule, TriggerRule::OnSkillUse)
                 // A skill's own record, or a trait's that names its skills (US2).
                 && (matches!(effect.source_type, SourceType::Skill) || scoped));
@@ -1258,6 +1281,8 @@ impl<'a> Timeline<'a> {
             self.charge_cover_consumed_this_tick = false;
             self.expire_timed_state();
             self.regenerate_resources();
+            self.tick_endurance_and_dodge();
+            self.tick_health_threshold_bus();
             self.land_scheduled_hits();
             self.resolve_pending_cast();
             self.tick_conditions();
@@ -1457,6 +1482,10 @@ impl<'a> Timeline<'a> {
     fn start_cast(&mut self, skill_idx: usize) {
         let skill = &self.skills[skill_idx];
         self.pay_resource(skill.skill_id);
+        if matches!(skill.slot, super::SkillSlot::Elite) {
+            self.trigger_bus.emit(BusEvent::OnElite, self.now_ms);
+            self.trigger_procs(TriggerRule::OnElite, Some(skill.skill_id), false, 1.0);
+        }
         self.resource_blocked_skills.remove(&skill.skill_id);
         if let Some(rule) = self.resource_rules.get(&skill.skill_id).cloned() {
             if rule.enters_shroud {
@@ -2346,8 +2375,13 @@ impl<'a> Timeline<'a> {
                 if !self.target.stability {
                     let previous_end = self.target.disabled_until_ms.max(self.now_ms);
                     let new_end = self.target.disabled_until_ms.max(self.at(*duration_ms));
+                    let landed = new_end > previous_end;
                     self.target.disabled_until_ms = new_end;
                     self.control_landed_ms += new_end.saturating_sub(previous_end);
+                    if landed {
+                        self.trigger_bus.emit(BusEvent::OnDisableFoe, self.now_ms);
+                        self.trigger_procs(TriggerRule::OnDisableFoe, Some(skill_id), false, 1.0);
+                    }
                 }
                 // Wiki `Fear` (read 2026-09-08): "Fear is a condition ... Fear
                 // counts as a control effect"; Taunt likewise. The disable above
@@ -3365,6 +3399,10 @@ impl<'a> Timeline<'a> {
                             self.shroud_exit_why.as_deref().unwrap_or("shroud ended")
                         ),
                         TriggerRule::Periodic => " periodic".to_string(),
+                        TriggerRule::OnDodge => " on dodge".to_string(),
+                        TriggerRule::OnDisableFoe => " on disable foe".to_string(),
+                        TriggerRule::OnElite => " on elite".to_string(),
+                        TriggerRule::OnThreshold => " on threshold".to_string(),
                         _ => String::new(),
                     };
                     self.trace(
@@ -3599,6 +3637,46 @@ impl<'a> Timeline<'a> {
         }
     }
 
+    /// E0: emit OnThreshold once when health first reaches 50% or below.
+    fn tick_health_threshold_bus(&mut self) {
+        if self.threshold_50_emitted || self.params.max_health <= 0.0 {
+            return;
+        }
+        let pct = self.player_health / self.params.max_health * 100.0;
+        if pct <= 50.0 {
+            self.threshold_50_emitted = true;
+            self.trigger_bus.emit(BusEvent::OnThreshold, self.now_ms);
+            self.trigger_procs(TriggerRule::OnThreshold, None, false, 1.0);
+        }
+    }
+
+    /// E0: regen EndurancePool; when a full dodge is affordable, DodgeAction
+    /// spends it and the bus emits OnDodge so dodge-tagged trait records fire.
+    fn tick_endurance_and_dodge(&mut self) {
+        self.endurance.tick(TIMELINE_TICK_MS);
+        if !self.endurance.can_dodge(DODGE_COST) {
+            return;
+        }
+        // Immobilize / hard lock stops dodges (wiki Control effect / Dodge).
+        if self.disabled_until_ms > self.now_ms {
+            return;
+        }
+        if self.incoming_conditions.iter().any(|c| {
+            crate::data::boon_condition_formulas::canonical_condition_name(&c.name)
+                .eq_ignore_ascii_case("Immobile")
+                && c.expires_at_ms > self.now_ms
+        }) {
+            return;
+        }
+        if self
+            .dodge_action
+            .try_dodge(&mut self.endurance, &mut self.trigger_bus, self.now_ms)
+        {
+            self.trace(TraceKind::Dodged, "dodge", "endurance spent");
+            self.trigger_procs(TriggerRule::OnDodge, None, false, 1.0);
+        }
+    }
+
     fn regenerate_resources(&mut self) {
         let seconds = TIMELINE_TICK_MS as f64 / 1_000.0;
         if let Some(drain) = self.in_shroud.as_ref().map(|s| s.drain_per_second) {
@@ -3704,6 +3782,8 @@ impl<'a> Timeline<'a> {
             trace_truncated: self.trace_truncated,
             proc_trials: Vec::new(),
             shroud_refusals: self.shroud_refusals.clone(),
+            dodge_count: self.dodge_action.dodges,
+            bus_on_dodge: self.trigger_bus.count(BusEvent::OnDodge),
         }
     }
 
@@ -3885,6 +3965,10 @@ fn trigger_label(trigger: &TriggerRule) -> &'static str {
         TriggerRule::OnBoonApplied => "on-boon-applied",
         TriggerRule::OnBoonStripped => "on-boon-stripped",
         TriggerRule::Periodic => "periodic",
+        TriggerRule::OnDodge => "on-dodge",
+        TriggerRule::OnDisableFoe => "on-disable-foe",
+        TriggerRule::OnElite => "on-elite",
+        TriggerRule::OnThreshold => "on-threshold",
     }
 }
 
@@ -4007,6 +4091,10 @@ fn same_trigger(left: &TriggerRule, right: &TriggerRule) -> bool {
             | (TriggerRule::OnBoonApplied, TriggerRule::OnBoonApplied)
             | (TriggerRule::OnBoonStripped, TriggerRule::OnBoonStripped)
             | (TriggerRule::Periodic, TriggerRule::Periodic)
+            | (TriggerRule::OnDodge, TriggerRule::OnDodge)
+            | (TriggerRule::OnDisableFoe, TriggerRule::OnDisableFoe)
+            | (TriggerRule::OnElite, TriggerRule::OnElite)
+            | (TriggerRule::OnThreshold, TriggerRule::OnThreshold)
     )
 }
 
@@ -4104,6 +4192,151 @@ mod tests {
             Timeline::new(skills, params, profile, enemy, &[], rules, true, Vec::new());
         timeline.run();
         timeline.report()
+    }
+
+    fn run_report_with_effects(
+        skills: &[RotationSkill],
+        rules: &[SkillResourceRule],
+        enemy: EnemyDummy,
+        profile: WvwProfile,
+        params: &SimParams,
+        active_effects: &[&NormalizedEffect],
+    ) -> WvwCombatReport {
+        let mut timeline = Timeline::new(
+            skills,
+            params,
+            profile,
+            enemy,
+            active_effects,
+            rules,
+            true,
+            Vec::new(),
+        );
+        timeline.run();
+        timeline.report()
+    }
+
+    /// E0 Kent: EndurancePool → DodgeAction → bus OnDodge → dodge traits execute.
+    #[test]
+    fn kent_e0_causal_dodge_fires_expeditious_dodger() {
+        use crate::data::normalized_effects::{effects, SourceType, TriggerRule};
+
+        let effects_wvw = effects().effects_for_mode("WvW");
+        let dodge_records: Vec<&_> = effects_wvw
+            .iter()
+            .filter(|e| {
+                e.source_type == SourceType::Trait
+                    && e.trigger_rule == TriggerRule::OnDodge
+                    && e.coverage.is_none()
+                    && matches!(e.source_id, 1240 | 1289 | 1379 | 1782)
+            })
+            .collect();
+        assert!(
+            dodge_records.len() >= 3,
+            "E0 must ship >=3 executable OnDodge trait records; got {}",
+            dodge_records.len()
+        );
+
+        let skills = [skill(
+            1,
+            SkillSlot::Weapon1,
+            1_000,
+            0,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let params = params();
+        let active: Vec<&_> = dodge_records;
+        let report = run_report_with_effects(
+            &skills,
+            &[],
+            open_enemy(false),
+            profile(25_000, vec![]),
+            &params,
+            &active,
+        );
+
+        assert!(
+            report.dodge_count >= 2,
+            "endurance regen must yield >=2 dodges over 25s; got {}",
+            report.dodge_count
+        );
+        assert_eq!(
+            report.bus_on_dodge, report.dodge_count,
+            "bus OnDodge must equal dodge_count"
+        );
+        let fired = report
+            .trait_fire_counts
+            .get("Expeditious Dodger")
+            .copied()
+            .unwrap_or(0);
+        assert!(
+            fired >= 1,
+            "Expeditious Dodger must execute via OnDodge; fires={fired}; counts={:?}",
+            report.trait_fire_counts
+        );
+        let executing = [
+            "Expeditious Dodger",
+            "Pumping Up",
+            "Resilient Roll",
+            "Resolute Evasion",
+        ]
+        .iter()
+        .filter(|n| report.trait_fire_counts.get(**n).copied().unwrap_or(0) >= 1)
+        .count();
+        assert!(
+            executing >= 3,
+            ">=3 dodge-family traits must execute; got {executing}; {:?}",
+            report.trait_fire_counts
+        );
+    }
+
+    /// Immobilize / Immobilized must block dodge the same as canonical Immobile.
+    #[test]
+    fn immobile_aliases_block_dodge() {
+        let params = params();
+        for name in ["Immobile", "Immobilize", "Immobilized"] {
+            let mut timeline = Timeline::new(
+                &[],
+                &params,
+                profile(1_000, vec![]),
+                open_enemy(false),
+                &[],
+                &[],
+                true,
+                Vec::new(),
+            );
+            assert!(timeline.endurance.can_dodge(DODGE_COST));
+            timeline.incoming_conditions.push(TimedCondition {
+                name: name.into(),
+                stacks: 1,
+                expires_at_ms: 5_000,
+                next_tick_ms: 1_000,
+            });
+            timeline.tick_endurance_and_dodge();
+            assert_eq!(timeline.dodge_action.dodges, 0, "{name} must block dodge");
+            assert_eq!(
+                timeline.trigger_bus.count(BusEvent::OnDodge),
+                0,
+                "{name} must not emit OnDodge"
+            );
+        }
+        // Control: no immobilize -> dodge fires once.
+        let mut clear = Timeline::new(
+            &[],
+            &params,
+            profile(1_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            Vec::new(),
+        );
+        clear.tick_endurance_and_dodge();
+        assert_eq!(clear.dodge_action.dodges, 1);
+        assert_eq!(clear.trigger_bus.count(BusEvent::OnDodge), 1);
     }
 
     fn open_enemy(stability: bool) -> EnemyDummy {
