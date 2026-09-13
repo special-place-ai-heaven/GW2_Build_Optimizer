@@ -2,6 +2,17 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.6 - 2026-09-13
+
+Ranger trait catalogue: every Ranger trait is classified; the coverage table's Ranger NoRecord column is 0.
+
+### Ranger trait triggers
+
+- The Ranger's 108 traits are catalogued: every trait is executed from its facts, executed from a dated wiki record, or classified with the mechanic it still needs (pet, pet swap, weapon swap, spirits, celestial avatar, transform, unleash, wind force, arrows, disable trigger, dodge, traps, endurance, opening strike and the rest).
+- New wiki records fire on existing sites: Survival skill use (Wilderness Knowledge fury and cleanse), Signet skill use (Stoneform might and fury), on-hit with a foe-health gate (Hunter's Gaze), Celestial Avatar skill use (Grace of the Land ally might), and a passive outgoing-healing percent (Natural Mender). Trigger kinds added for this profession are those skill-use categories and the on-hit health gate; no new trigger enum variants.
+- Honest `NeedsMechanic` entries name the fidelity still missing (pets, beastmode merge, unleash, celestial avatar, Wind Force / Cyclone Bow, weapon swap, and related). They are not claimed as simulated.
+- `docs/audit/trait-coverage.md` regenerated; Ranger `NoRecord=0`. Necromancer coverage unchanged.
+
 ## 1.14.5 - 2026-09-09
 
 - Armor and trinket rows of an optimized build show an icon again. A plate names its gear by stat prefix and slot with no item id, so those rows had nothing to look up; they now take the icon of a cached exotic (else ascended) piece of that slot, armour weight and prefix, the way weapon rows already fell back to the weapon type.

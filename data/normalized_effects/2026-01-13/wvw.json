@@ -3174,6 +3174,1366 @@
       },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Spiteful_Spirit (read 2026-09-08: page facts missing; strike coefficient unresolved)"
+    },
+    {
+      "effect_id": "trait:1861:coverage",
+      "source_type": "Trait",
+      "source_id": 1861,
+      "source_name": "Go for the Eyes",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Go_for_the_Eyes (read 2026-09-13: Beast abilities blind)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet"
+      }
+    },
+    {
+      "effect_id": "trait:1606:coverage",
+      "source_type": "Trait",
+      "source_id": 1606,
+      "source_name": "Resounding Timbre",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Resounding_Timbre (read 2026-09-13: Commands copy boons to pet; merge extends)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet"
+      }
+    },
+    {
+      "effect_id": "trait:975:coverage",
+      "source_type": "Trait",
+      "source_id": 975,
+      "source_name": "Wilting Strike",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wilting_Strike (read 2026-09-13: Beast abilities inflict weakness)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet"
+      }
+    },
+    {
+      "effect_id": "trait:1047:coverage",
+      "source_type": "Trait",
+      "source_id": 1047,
+      "source_name": "Bestial Rage",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bestial_Rage (read 2026-09-13: might and fury on disable)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:1945:coverage",
+      "source_type": "Trait",
+      "source_id": 1945,
+      "source_name": "Beastly Warden",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Beastly_Warden (read 2026-09-13: Beast abilities taunt; ursine/porcine pet stats)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet"
+      }
+    },
+    {
+      "effect_id": "trait:968:coverage",
+      "source_type": "Trait",
+      "source_id": 968,
+      "source_name": "Zephyr's Speed",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Zephyr%27s_Speed (read 2026-09-13: Lesser Quickening Zephyr on pet swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet swap"
+      }
+    },
+    {
+      "effect_id": "trait:1066:coverage",
+      "source_type": "Trait",
+      "source_id": 1066,
+      "source_name": "Go for the Throat",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Go_for_the_Throat (read 2026-09-13: Beast strike casts Lesser Sic 'Em)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet"
+      }
+    },
+    {
+      "effect_id": "trait:1021:0",
+      "source_type": "Trait",
+      "source_id": 1021,
+      "source_name": "Stoneform",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stoneform (read 2026-09-13: Signet activation: 8 s might x3 and 6 s fury in WvW/PvP; Lesser Signet of Stone on elite is NeedsMechanic trait skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 3.0,
+        "target_scope": "self",
+        "base_duration_ms": 8000
+      },
+      "trigger_scope": {
+        "Category": "Signet"
+      }
+    },
+    {
+      "effect_id": "trait:1021:1",
+      "source_type": "Trait",
+      "source_id": 1021,
+      "source_name": "Stoneform",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stoneform (read 2026-09-13: Signet activation fury 6 s in WvW/PvP)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 6000
+      },
+      "trigger_scope": {
+        "Category": "Signet"
+      }
+    },
+    {
+      "effect_id": "trait:1021:coverage",
+      "source_type": "Trait",
+      "source_id": 1021,
+      "source_name": "Stoneform",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stoneform (read 2026-09-13: Lesser Signet of Stone on elite)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:1014:0",
+      "source_type": "Trait",
+      "source_id": 1014,
+      "source_name": "Hunter's Gaze",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hunter%27s_Gaze (read 2026-09-13: might on strike by foe health; record carries the below-75% 1-stack band (5 s, ICD 1))",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 5000,
+        "internal_cooldown_ms": 1000
+      },
+      "internal_cooldown": 1.0,
+      "prerequisite": {
+        "foe_health": {
+          "above": false,
+          "percent": 75.0
+        }
+      }
+    },
+    {
+      "effect_id": "trait:1010:coverage",
+      "source_type": "Trait",
+      "source_id": 1010,
+      "source_name": "Opening Strike",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Opening_Strike (read 2026-09-13: first strike on combat enter)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "opening strike"
+      }
+    },
+    {
+      "effect_id": "trait:986:coverage",
+      "source_type": "Trait",
+      "source_id": 986,
+      "source_name": "Clarion Bond",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Clarion_Bond (read 2026-09-13: Lesser Call of the Wild on pet swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet swap"
+      }
+    },
+    {
+      "effect_id": "trait:1009:coverage",
+      "source_type": "Trait",
+      "source_id": 1009,
+      "source_name": "Alpha Focus",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Alpha_Focus (read 2026-09-13: Opening Strike cripples)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "opening strike"
+      }
+    },
+    {
+      "effect_id": "trait:1070:coverage",
+      "source_type": "Trait",
+      "source_id": 1070,
+      "source_name": "Moment of Clarity",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Moment_of_Clarity (read 2026-09-13: attack of opportunity on interrupt; daze/stun duration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "interrupt"
+      }
+    },
+    {
+      "effect_id": "trait:1011:coverage",
+      "source_type": "Trait",
+      "source_id": 1011,
+      "source_name": "Precise Strike",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Precise_Strike (read 2026-09-13: Opening Strike crit chance)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "opening strike"
+      }
+    },
+    {
+      "effect_id": "trait:1698:coverage",
+      "source_type": "Trait",
+      "source_id": 1698,
+      "source_name": "Lead the Wind",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lead_the_Wind (read 2026-09-13: longbow/harpoon pierce and recharge; Point-Blank Shot boons)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "recharge"
+      }
+    },
+    {
+      "effect_id": "trait:1055:coverage",
+      "source_type": "Trait",
+      "source_id": 1055,
+      "source_name": "Rejuvenation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Rejuvenation (read 2026-09-13: Beast skills grant regeneration around ranger)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet"
+      }
+    },
+    {
+      "effect_id": "trait:1056:coverage",
+      "source_type": "Trait",
+      "source_id": 1056,
+      "source_name": "Fortifying Bond",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Fortifying_Bond (read 2026-09-13: boons shared with pet)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet"
+      }
+    },
+    {
+      "effect_id": "trait:965:coverage",
+      "source_type": "Trait",
+      "source_id": 965,
+      "source_name": "Spirited Arrival",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Spirited_Arrival (read 2026-09-13: boons on pet swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet swap"
+      }
+    },
+    {
+      "effect_id": "trait:1038:coverage",
+      "source_type": "Trait",
+      "source_id": 1038,
+      "source_name": "Nature's Vengeance",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Nature%27s_Vengeance (read 2026-09-13: spirits slam again)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "spirits"
+      }
+    },
+    {
+      "effect_id": "trait:1988:coverage",
+      "source_type": "Trait",
+      "source_id": 1988,
+      "source_name": "Protective Ward",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Protective_Ward (read 2026-09-13: Lesser Guard on pet swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet swap"
+      }
+    },
+    {
+      "effect_id": "trait:1080:coverage",
+      "source_type": "Trait",
+      "source_id": 1080,
+      "source_name": "Tail Wind",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Tail_Wind (read 2026-09-13: swiftness on weapon swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon swap"
+      }
+    },
+    {
+      "effect_id": "trait:1067:coverage",
+      "source_type": "Trait",
+      "source_id": 1067,
+      "source_name": "Primal Reflexes",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Primal_Reflexes (read 2026-09-13: vigor on evade)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1075:coverage",
+      "source_type": "Trait",
+      "source_id": 1075,
+      "source_name": "Trapper's Expertise",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Trapper%27s_Expertise (read 2026-09-13: trap boon/condition duration; traps cripple)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "traps"
+      }
+    },
+    {
+      "effect_id": "trait:1083:coverage",
+      "source_type": "Trait",
+      "source_id": 1083,
+      "source_name": "Furious Grip",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Furious_Grip (read 2026-09-13: fury on weapon swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon swap"
+      }
+    },
+    {
+      "effect_id": "trait:1064:coverage",
+      "source_type": "Trait",
+      "source_id": 1064,
+      "source_name": "Quick Draw",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Quick_Draw (read 2026-09-13: quickness and next-weapon-skill recharge on swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon swap"
+      }
+    },
+    {
+      "effect_id": "trait:1096:coverage",
+      "source_type": "Trait",
+      "source_id": 1096,
+      "source_name": "Natural Vigor",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Natural_Vigor (read 2026-09-13: endurance recovery +25%)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "endurance"
+      }
+    },
+    {
+      "effect_id": "trait:1098:coverage",
+      "source_type": "Trait",
+      "source_id": 1098,
+      "source_name": "Child of Earth",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Child_of_Earth (read 2026-09-13: Muddy Terrain on heal skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:1086:coverage",
+      "source_type": "Trait",
+      "source_id": 1086,
+      "source_name": "Oakheart Salve",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Oakheart_Salve (read 2026-09-13: regen when struck by bleed/poison/burn; strike reduction while regenerating)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming condition"
+      }
+    },
+    {
+      "effect_id": "trait:1090:coverage",
+      "source_type": "Trait",
+      "source_id": 1090,
+      "source_name": "Companion's Defense",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Companion%27s_Defense (read 2026-09-13: protection on dodge for you and pet)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1100:coverage",
+      "source_type": "Trait",
+      "source_id": 1100,
+      "source_name": "Empathic Bond",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Empathic_Bond (read 2026-09-13: remove conditions on pet swap)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet swap"
+      }
+    },
+    {
+      "effect_id": "trait:1094:coverage",
+      "source_type": "Trait",
+      "source_id": 1094,
+      "source_name": "Carnivore",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Carnivore (read 2026-09-13: life steal on disable by you or pet)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:1699:0",
+      "source_type": "Trait",
+      "source_id": 1699,
+      "source_name": "Wilderness Knowledge",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wilderness_Knowledge (read 2026-09-13: Survival skills: 4 s fury in WvW/PvP)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 4000
+      },
+      "trigger_scope": {
+        "Category": "Survival"
+      }
+    },
+    {
+      "effect_id": "trait:1699:1",
+      "source_type": "Trait",
+      "source_id": 1699,
+      "source_name": "Wilderness Knowledge",
+      "category": "RemovesCondition",
+      "value": 2.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wilderness_Knowledge (read 2026-09-13: Survival skills remove 2 conditions)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 2.0,
+        "target_scope": "self"
+      },
+      "trigger_scope": {
+        "Category": "Survival"
+      }
+    },
+    {
+      "effect_id": "trait:1868:coverage",
+      "source_type": "Trait",
+      "source_id": 1868,
+      "source_name": "Druidic Clarity",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Druidic_Clarity (read 2026-09-13: celestial avatar enter cleanses allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "celestial avatar"
+      }
+    },
+    {
+      "effect_id": "trait:1935:coverage",
+      "source_type": "Trait",
+      "source_id": 1935,
+      "source_name": "Blood Moon",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Blood_Moon (read 2026-09-13: bleeding on immobilize or disable)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2053:coverage",
+      "source_type": "Trait",
+      "source_id": 2053,
+      "source_name": "Celestial Shadow",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Celestial_Shadow (read 2026-09-13: stealth and superspeed on leaving celestial avatar)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "celestial avatar"
+      }
+    },
+    {
+      "effect_id": "trait:2001:0",
+      "source_type": "Trait",
+      "source_id": 2001,
+      "source_name": "Grace of the Land",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Grace_of_the_Land (read 2026-09-13: Celestial Avatar skills: 4 s might x2 to 5 allies in WvW (no alacrity in competitive))",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 2.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 4000,
+        "target_count": 5
+      },
+      "trigger_scope": {
+        "Category": "CelestialAvatar"
+      }
+    },
+    {
+      "effect_id": "trait:2056:coverage",
+      "source_type": "Trait",
+      "source_id": 2056,
+      "source_name": "Natural Balance",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Natural_Balance (read 2026-09-13: condition damage/duration buff on celestial enter/exit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "celestial avatar"
+      }
+    },
+    {
+      "effect_id": "trait:1992:0",
+      "source_type": "Trait",
+      "source_id": 1992,
+      "source_name": "Natural Mender",
+      "category": "OutgoingHealingPct",
+      "value": 15.0,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "AlwaysOn"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Natural_Mender (read 2026-09-13: +15% healing to others in WvW/PvP; astral force while out of celestial is NeedsMechanic)"
+    },
+    {
+      "effect_id": "trait:1992:coverage",
+      "source_type": "Trait",
+      "source_id": 1992,
+      "source_name": "Natural Mender",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Natural_Mender (read 2026-09-13: astral force each interval while not in celestial avatar)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "celestial avatar"
+      }
+    },
+    {
+      "effect_id": "trait:2058:coverage",
+      "source_type": "Trait",
+      "source_id": 2058,
+      "source_name": "Lingering Light",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lingering_Light (read 2026-09-13: healing and celestial recharge while in form)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "celestial avatar"
+      }
+    },
+    {
+      "effect_id": "trait:2359:coverage",
+      "source_type": "Trait",
+      "source_id": 2359,
+      "source_name": "Teachings of the Tengu",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Teachings_of_the_Tengu (read 2026-09-13: Cyclone Bow and Wind Force / Hawkeye)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "wind force"
+      }
+    },
+    {
+      "effect_id": "trait:2402:coverage",
+      "source_type": "Trait",
+      "source_id": 2402,
+      "source_name": "Joy of Movement",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Joy_of_Movement (read 2026-09-13: Squalls remove movement and damaging conditions)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "squall"
+      }
+    },
+    {
+      "effect_id": "trait:2370:coverage",
+      "source_type": "Trait",
+      "source_id": 2370,
+      "source_name": "Feel the Rush",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Feel_the_Rush (read 2026-09-13: movement skills grant swiftness and endurance)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "movement skill"
+      }
+    },
+    {
+      "effect_id": "trait:2360:coverage",
+      "source_type": "Trait",
+      "source_id": 2360,
+      "source_name": "Wuthering Wind",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wuthering_Wind (read 2026-09-13: after Bluster, pet attack creates wind swell)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "wind force"
+      }
+    },
+    {
+      "effect_id": "trait:2413:coverage",
+      "source_type": "Trait",
+      "source_id": 2413,
+      "source_name": "Perilous Skies",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Perilous_Skies (read 2026-09-13: Quarry's Peril replaced by Pelt)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "skill replace"
+      }
+    },
+    {
+      "effect_id": "trait:2396:coverage",
+      "source_type": "Trait",
+      "source_id": 2396,
+      "source_name": "Thrill of the Catch",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Thrill_of_the_Catch (read 2026-09-13: restore arrows on disable)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "arrows"
+      }
+    },
+    {
+      "effect_id": "trait:2341:coverage",
+      "source_type": "Trait",
+      "source_id": 2341,
+      "source_name": "Jetstream",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Jetstream (read 2026-09-13: base movement speed; Hawkeye superspeed)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "wind force"
+      }
+    },
+    {
+      "effect_id": "trait:2425:coverage",
+      "source_type": "Trait",
+      "source_id": 2425,
+      "source_name": "Cloudburst",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cloudburst (read 2026-09-13: Bluster/Hawkeye cooldown and ally boons)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "wind force"
+      }
+    },
+    {
+      "effect_id": "trait:2336:coverage",
+      "source_type": "Trait",
+      "source_id": 2336,
+      "source_name": "Gale Force",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Gale_Force (read 2026-09-13: Wind Force stacking speed/damage; Hawkeye converts)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "wind force"
+      }
+    },
+    {
+      "effect_id": "trait:2372:coverage",
+      "source_type": "Trait",
+      "source_id": 2372,
+      "source_name": "Shrike",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shrike (read 2026-09-13: missile-hit volley restores an arrow)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "arrows"
+      }
+    },
+    {
+      "effect_id": "trait:2151:coverage",
+      "source_type": "Trait",
+      "source_id": 2151,
+      "source_name": "Elevated Bond",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Elevated_Bond (read 2026-09-13: Stances access and beastmode merge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "transform"
+      }
+    },
+    {
+      "effect_id": "trait:2134:coverage",
+      "source_type": "Trait",
+      "source_id": 2134,
+      "source_name": "Fresh Reinforcement",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Fresh_Reinforcement (read 2026-09-13: entering beastmode copies pet boons)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "transform"
+      }
+    },
+    {
+      "effect_id": "trait:2071:coverage",
+      "source_type": "Trait",
+      "source_id": 2071,
+      "source_name": "Live Fast",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Live_Fast (read 2026-09-13: Beast ability grants fury and quickness)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet"
+      }
+    },
+    {
+      "effect_id": "trait:2072:coverage",
+      "source_type": "Trait",
+      "source_id": 2072,
+      "source_name": "Unstoppable Union",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unstoppable_Union (read 2026-09-13: protection on beastmode enter/exit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "transform"
+      }
+    },
+    {
+      "effect_id": "trait:2119:coverage",
+      "source_type": "Trait",
+      "source_id": 2119,
+      "source_name": "Second Skin",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Second_Skin (read 2026-09-13: less condition damage while you have protection)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "protection state"
+      }
+    },
+    {
+      "effect_id": "trait:2085:coverage",
+      "source_type": "Trait",
+      "source_id": 2085,
+      "source_name": "Essence of Speed",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Essence_of_Speed (read 2026-09-13: gaining quickness extends other boons)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "boon extension"
+      }
+    },
+    {
+      "effect_id": "trait:2127:coverage",
+      "source_type": "Trait",
+      "source_id": 2127,
+      "source_name": "Twice as Vicious",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Twice_as_Vicious (read 2026-09-13: disable grants timed strike/condition damage)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2128:coverage",
+      "source_type": "Trait",
+      "source_id": 2128,
+      "source_name": "Leader of the Pack",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Leader_of_the_Pack (read 2026-09-13: Stance duration on self and allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "stance duration"
+      }
+    },
+    {
+      "effect_id": "trait:2268:coverage",
+      "source_type": "Trait",
+      "source_id": 2268,
+      "source_name": "Unleashed Power",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unleashed_Power (read 2026-09-13: Cantrips and Unleash; pet unleashed skills)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "unleash"
+      }
+    },
+    {
+      "effect_id": "trait:2297:coverage",
+      "source_type": "Trait",
+      "source_id": 2297,
+      "source_name": "Debilitating Blows",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Debilitating_Blows (read 2026-09-13: disable applies conditions by unleash state)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2263:coverage",
+      "source_type": "Trait",
+      "source_id": 2263,
+      "source_name": "Enhancing Impact",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Enhancing_Impact (read 2026-09-13: disable grants boons by unleash state)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:2287:coverage",
+      "source_type": "Trait",
+      "source_id": 2287,
+      "source_name": "Cleansing Unleash",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cleansing_Unleash (read 2026-09-13: remove conditions on unleash)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "unleash"
+      }
+    },
+    {
+      "effect_id": "trait:2278:coverage",
+      "source_type": "Trait",
+      "source_id": 2278,
+      "source_name": "Corrupting Vines",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Corrupting_Vines (read 2026-09-13: Rending Vines convert; Unleashed Ambush strips)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "unleash"
+      }
+    },
+    {
+      "effect_id": "trait:2271:coverage",
+      "source_type": "Trait",
+      "source_id": 2271,
+      "source_name": "Let Loose",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Let_Loose (read 2026-09-13: Unleashed Ambush ally boons; weapon-swap refresh)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "unleash"
+      }
+    },
+    {
+      "effect_id": "trait:2283:coverage",
+      "source_type": "Trait",
+      "source_id": 2283,
+      "source_name": "Biorhythm",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Biorhythm (read 2026-09-13: biorhythm stacks on unleash)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "unleash"
+      }
+    },
+    {
+      "effect_id": "trait:2274:coverage",
+      "source_type": "Trait",
+      "source_id": 2274,
+      "source_name": "Ferocious Symbiosis",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Ferocious_Symbiosis (read 2026-09-13: you and pet grant damage/movespeed on strikes)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pet"
+      }
     }
   ]
 }
