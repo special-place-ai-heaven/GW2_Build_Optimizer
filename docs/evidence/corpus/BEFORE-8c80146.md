@@ -9,7 +9,7 @@ Addon cache: `C:\GAMES\Guild Wars 2\addons\gw2_build_optimizer`
 **BEFORE Success [1] = DOCUMENTED GAP + best-available calibration evidence.**
 
 Meta≥Average pairwise ordering and Spearman ρ were **NOT checked**.
-Expert labels Meta/Great/Good/Average (ledger: 26/24/53/25 = 130) are **not present** in scraped `BenchmarkBuild` JSON and were **not found on disk**. Per Grove: do not invent labels.
+Expert labels Meta/Great/Good/Average (ledger text: 26 Meta + 24 Great + 53 Good + 25 Average = **128**, often rounded as "~130") are **not present** in scraped `BenchmarkBuild` JSON and were **not found on disk**. Per Grove: do not invent labels.
 
 Scorer untouched.
 
@@ -31,7 +31,7 @@ Raw stdout:
 ## Labels gap (why Spearman / Meta≥Average absent)
 
 - `BenchmarkBuild` fields: source, profession, mode, role, gear_prefix, published ids — **no** expert_label / tier / Meta|Great|Good|Average.
-- Live scrape on this machine: **740** builds (guildjen 412, hardstuck 148, snowcrows 180).
+- Live scrape on this machine: **740** synced builds total (`calibrate_viability` stdout: "740 synced builds"). Per-source split not emitted by that harness and not claimed here.
 - Ledger oracle text remains aspirational until a labels fixture exists (`data/corpus/labels.json` or equivalent join key).
 
 ## calibrate_viability (published corpus — best available)
@@ -59,7 +59,7 @@ PvE highlights (strike / condi / hps for power|condi|healer presets — see raw 
 
 ## Gaps / blockers for a true Success [1] metric
 
-1. **Missing labels fixture** for the 130 expert-tier builds.
+1. **Missing labels fixture** for the ledger's expert-tier builds (128 from stated bucket counts; "~130" in prose).
 2. No durable Meta≥Average / Spearman harness joined to labels (would wrap existing referee score only — not started, to avoid inventing tiers).
 3. `score_benchmark_build` remains a gear-prefix proxy — unsuitable for corpus calibration.
 

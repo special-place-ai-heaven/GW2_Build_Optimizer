@@ -1,30 +1,15 @@
 {
-  "labels": {
-    "ledger_claimed": {
-      "Great": 24,
-      "Average": 25,
-      "Meta": 26,
-      "Good": 53
-    },
-    "scraped_builds": 740,
-    "present": false
-  },
-  "tip_sha": "8c80146ed71c75f437a5df8aa4d1c296c91d5735",
-  "verdict": "DOCUMENTED_GAP_PLUS_BEST_AVAILABLE",
-  "metrics": {
-    "spearman": null,
-    "meta_ge_average_pairwise": null,
-    "reason_unchecked": "expert Meta/Great/Good/Average labels absent from scrape and disk; not invented"
-  },
-  "recorded_at_utc": "2026-09-13T11:52:29Z",
   "scorer_changed": false,
+  "version": "1.14.5",
+  "recorded_at_utc": "2026-09-13T11:52:29Z",
+  "tip_sha": "8c80146ed71c75f437a5df8aa4d1c296c91d5735",
   "harness": {
     "calibrate_viability": {
-      "scored": 582,
-      "is_viable": "489/582",
+      "log": "docs/evidence/corpus/calibrate_viability-8c80146.txt",
       "command": "cargo run -p gw2-optimizer --example calibrate_viability",
       "path": "crates/optimizer/examples/calibrate_viability.rs",
-      "log": "docs/evidence/corpus/calibrate_viability-8c80146.txt"
+      "is_viable": "489/582",
+      "scored": 582
     },
     "flow_calibration": {
       "logs": [
@@ -41,5 +26,27 @@
       ]
     }
   },
-  "version": "1.14.5"
+  "labels": {
+    "ledger_bucket_sum": 128,
+    "note": "Per-source split omitted; not printed by calibrate_viability stdout",
+    "present": false,
+    "ledger_prose_approx": "~130",
+    "ledger_claimed_buckets": {
+      "Meta": 26,
+      "Great": 24,
+      "Good": 53,
+      "Average": 25
+    },
+    "scraped_builds_total": 740
+  },
+  "linus_nits": [
+    "fixed 26+24+53+25=128 not 130",
+    "dropped unbacked per-source split"
+  ],
+  "verdict": "DOCUMENTED_GAP_PLUS_BEST_AVAILABLE",
+  "metrics": {
+    "reason_unchecked": "expert Meta/Great/Good/Average labels absent from scrape and disk; not invented",
+    "spearman": null,
+    "meta_ge_average_pairwise": null
+  }
 }
