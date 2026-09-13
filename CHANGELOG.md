@@ -2,6 +2,17 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.13 - 2026-09-13
+
+Revenant trait catalogue: every Revenant trait is classified; the coverage table's Revenant NoRecord column is 0. Track B Success [9] — all nine professions shipped.
+
+### Revenant trait triggers
+
+- The Revenant's 108 traits are catalogued: every trait is executed from its facts, executed from a dated wiki record, or classified with the mechanic it still needs (legend, energy, upkeep, stance, facets, citadel, kalla's fervor, cosmic wisdom, affinity, energy meld, alliance, battle scars, band together, and the rest).
+- New wiki records fire on existing sites: on-condition-applied chilled (Abyssal Chill torment), on-boon-applied fury (Incensed Response might), on-crit (Endless Enmity ally fury), heal skill use (Blinding Truths blinded, Ashen Demeanor might and resistance), and Periodic in-combat (Assassin's Presence ally fury). Legend / energy / upkeep / stance / Invoke Torment halves stay NeedsMechanic — no fake legend-state records and no new trigger enum variants.
+- Honest NeedsMechanic names cover legend, energy, upkeep, stance, facets, consume, citadel, kalla's fervor, band together, cosmic wisdom, affinity, energy meld, alliance, battle scars, combat, profession skill, aura, condition duration, dodge, endurance, trait skill, incoming strike, ally state, percent heal, boon grant, max health, disable trigger, and the elite-line unlocks.
+- `SHIPPED_PROFESSIONS` now includes Revenant; `docs/audit/trait-coverage.md` regenerated with Revenant NoRecord 0. All nine professions NoRecord=0.
+
 ## 1.14.12 - 2026-09-13
 
 Mesmer trait catalogue: every Mesmer trait is classified; the coverage table's Mesmer NoRecord column is 0.
