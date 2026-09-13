@@ -23,6 +23,43 @@ fn key_field_is_masked(revealed: bool) -> bool {
     !revealed
 }
 
+const SETUP_NAV_BTN_W: f32 = 120.0;
+const SETUP_NAV_GAP: f32 = 8.0;
+
+/// One centered horizontal nav row: Back then primary CTA (`same_line`, gap 8).
+/// Buttons are at least `SETUP_NAV_BTN_W` wide and grow to fit the label so
+/// "Get Started >>" centers correctly. Never stacks Back under the CTA.
+fn setup_nav_row(ui: &Ui, back: Option<&str>, next: Option<&str>) -> (bool, bool) {
+    let n = u32::from(back.is_some()) + u32::from(next.is_some());
+    if n == 0 {
+        return (false, false);
+    }
+    let back_w = back
+        .map(|l| theme::gold_button_width(ui, l).max(SETUP_NAV_BTN_W))
+        .unwrap_or(0.0);
+    let next_w = next
+        .map(|l| theme::gold_button_width(ui, l).max(SETUP_NAV_BTN_W))
+        .unwrap_or(0.0);
+    let row_w = back_w + next_w + if n == 2 { SETUP_NAV_GAP } else { 0.0 };
+    let avail = ui.content_region_avail()[0];
+    let pad = ((avail - row_w) / 2.0).max(0.0);
+    let at = ui.cursor_pos();
+    ui.set_cursor_pos([at[0] + pad, at[1]]);
+
+    let mut back_clicked = false;
+    let mut next_clicked = false;
+    if let Some(label) = back {
+        back_clicked = theme::gold_button_sized(ui, label, [back_w, 0.0]);
+    }
+    if let Some(label) = next {
+        if back.is_some() {
+            ui.same_line_with_spacing(0.0, SETUP_NAV_GAP);
+        }
+        next_clicked = theme::gold_button_sized(ui, label, [next_w, 0.0]);
+    }
+    (back_clicked, next_clicked)
+}
+
 pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
     theme::header(ui, &t("setup.title"));
 
@@ -30,20 +67,18 @@ pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
     let s_gw2 = t("setup.step_gw2");
     let s_ai = t("setup.step_ai");
     let s_data = t("setup.step_data");
-    let s_ready = t("setup.step_ready");
+    // Complete is not a wizard step — DataDownload Get Started goes straight to Main.
     let steps = [
         (SetupStep::Language, s_lang.as_str()),
         (SetupStep::Gw2ApiKey, s_gw2.as_str()),
         (SetupStep::LlmApiKey, s_ai.as_str()),
         (SetupStep::DataDownload, s_data.as_str()),
-        (SetupStep::Complete, s_ready.as_str()),
     ];
     let current_idx = match step {
         SetupStep::Language => 0,
         SetupStep::Gw2ApiKey => 1,
         SetupStep::LlmApiKey => 2,
-        SetupStep::DataDownload => 3,
-        SetupStep::Complete => 4,
+        SetupStep::DataDownload | SetupStep::Complete => 3,
     };
     for (i, (target, name)) in steps.iter().enumerate() {
         if i > 0 {
@@ -63,7 +98,10 @@ pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
         SetupStep::Gw2ApiKey => render_gw2_key_step(ui, state),
         SetupStep::LlmApiKey => render_llm_key_step(ui, state),
         SetupStep::DataDownload => render_download_step(ui, state),
-        SetupStep::Complete => render_complete_step(ui, state),
+        // Unreachable in normal flow (download Get Started -> Main). Keep as safety net.
+        SetupStep::Complete => {
+            state.screen = Screen::Main;
+        }
     }
 }
 
@@ -116,7 +154,8 @@ fn render_language_step(ui: &Ui, state: &mut AddonState) {
     }
 
     ui.spacing();
-    if theme::gold_button_sized(ui, t("btn.next"), [120.0, 0.0]) {
+    let (_back, next) = setup_nav_row(ui, None, Some(&t("btn.next")));
+    if next {
         state.screen = Screen::Setup(SetupStep::Gw2ApiKey);
     }
 }
@@ -304,14 +343,17 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
     }
 
     ui.spacing();
-    if theme::gold_button_sized(ui, t("btn.back"), [120.0, 0.0]) {
+    let next_label = if state.setup.gw2_key_status == KeyStatus::Valid {
+        Some(t("btn.next"))
+    } else {
+        None
+    };
+    let (back, next) = setup_nav_row(ui, Some(&t("btn.back")), next_label.as_deref());
+    if back {
         state.screen = Screen::Setup(SetupStep::Language);
     }
-    if state.setup.gw2_key_status == KeyStatus::Valid {
-        ui.same_line();
-        if theme::gold_button_sized(ui, t("btn.next"), [120.0, 0.0]) {
-            state.screen = Screen::Setup(SetupStep::LlmApiKey);
-        }
+    if next {
+        state.screen = Screen::Setup(SetupStep::LlmApiKey);
     }
 }
 
@@ -513,16 +555,19 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
         }
     }
 
-    // Navigation
+    // Navigation — one centered Back | Next row (never stacked).
     ui.spacing();
-    if theme::gold_button_sized(ui, t("btn.back"), [120.0, 0.0]) {
+    let next_label = if state.setup.llm_key_status == KeyStatus::Valid {
+        Some(t("btn.next"))
+    } else {
+        None
+    };
+    let (back, next) = setup_nav_row(ui, Some(&t("btn.back")), next_label.as_deref());
+    if back {
         state.screen = Screen::Setup(SetupStep::Gw2ApiKey);
     }
-    if state.setup.llm_key_status == KeyStatus::Valid {
-        ui.same_line();
-        if theme::gold_button_sized(ui, t("btn.next"), [120.0, 0.0]) {
-            state.screen = Screen::Setup(SetupStep::DataDownload);
-        }
+    if next {
+        state.screen = Screen::Setup(SetupStep::DataDownload);
     }
 }
 
@@ -688,34 +733,45 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
             } else if dl.done {
                 ui.spacing();
                 ui.text_colored(theme::OPTIMIZED, t("setup.download_complete"));
-                ui.spacing();
-                if theme::gold_button_sized(ui, t("btn.next"), [120.0, 0.0]) {
-                    state.screen = Screen::Setup(SetupStep::Complete);
-                }
             }
         }
     }
 
-    // Back button (only if not downloading)
+    // Nav row (never while downloading). Idle/error: Back only. Done: Back | Get Started
+    // one centered row → Main (Complete/Ready screen+pill removed). Start/Retry stay in body.
     let is_downloading = state
         .setup
         .download_progress
         .as_ref()
         .is_some_and(|dl| !dl.done && dl.error.is_none());
+    let download_done = state
+        .setup
+        .download_progress
+        .as_ref()
+        .is_some_and(|dl| dl.done && dl.error.is_none());
 
     if !is_downloading {
         ui.spacing();
-        if theme::gold_button_sized(ui, t("btn.back"), [120.0, 0.0]) {
+        let next_label = if download_done {
+            Some(t("btn.get_started"))
+        } else {
+            None
+        };
+        let (back, next) = setup_nav_row(ui, Some(&t("btn.back")), next_label.as_deref());
+        if back {
             state.screen = Screen::Setup(SetupStep::LlmApiKey);
+        }
+        if next {
+            // Skip SetupStep::Complete — Get Started goes straight to Main.
+            state.screen = Screen::Main;
         }
     }
 
     ui.dummy([0.0, 10.0]);
-    crate::news::kick(state, &[gw2_core::config::NewsSource::Official]);
-    let items = state
-        .news
-        .items(gw2_core::config::NewsSource::Official)
-        .to_vec();
+    // Match Tyria Dispatch sources (News tab parity), not Official-only.
+    let sources = state.config.news.enabled_sources();
+    crate::news::kick(state, &sources);
+    let items = state.news.collected(&sources);
     if state.config.news.show_images {
         let urls: Vec<String> = items.iter().filter_map(|i| i.image_url.clone()).collect();
         crate::news::kick_art(state, &urls);
@@ -741,21 +797,6 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
             },
         );
     });
-}
-
-fn render_complete_step(ui: &Ui, state: &mut AddonState) {
-    theme::header(ui, &t("setup.complete_header"));
-    ui.spacing();
-
-    ui.text_colored(theme::OPTIMIZED, t("setup.ready_msg"));
-    ui.spacing();
-
-    ui.text_wrapped(t("setup.hotkey_hint"));
-    ui.spacing();
-
-    if theme::gold_button_sized(ui, t("btn.get_started"), [160.0, 0.0]) {
-        state.screen = Screen::Main;
-    }
 }
 
 #[cfg(test)]
