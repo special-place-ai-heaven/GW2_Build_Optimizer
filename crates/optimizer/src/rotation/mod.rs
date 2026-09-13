@@ -2,6 +2,7 @@
 //! Simulates a time-step skill rotation to estimate real DPS, condition uptime,
 //! and buff uptime — validating AI build reasoning with concrete numbers.
 
+pub mod attunement;
 pub mod builder;
 pub mod combat_model;
 pub mod combo;
@@ -18,6 +19,7 @@ pub mod wvw_timeline;
 
 pub use combo::{ComboEngine, ComboOutcome, ComboOutcomeEffect, ComboSite, SELF_COMBATANT_ID};
 pub use trait_skill::resolve_trait_skill;
+pub use attunement::{apply_attunement_skill, AttunementState, Element};
 pub use trigger_bus::{
     land_foe_disable, BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST,
 };

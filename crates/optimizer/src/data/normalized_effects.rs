@@ -207,6 +207,8 @@ pub enum TriggerRule {
     OnElite,
     /// A modeled threshold crossed (health / similar); bus OnThreshold.
     OnThreshold,
+    /// Primary attunement changed (AttunementState); bus OnAttunementSwap.
+    OnAttunementSwap,
 }
 
 /// Health prerequisite of an `OnHealthThreshold` / `Conditional` effect,
@@ -250,11 +252,17 @@ pub struct Prerequisite {
     /// The primary foe's health against a threshold.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foe_health: Option<HealthThreshold>,
+    /// Player primary attunement name (Fire/Water/Air/Earth). E3 while-attuned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attunement: Option<String>,
 }
 
 impl Prerequisite {
     pub fn is_empty(&self) -> bool {
-        self.foe_condition.is_none() && self.in_shroud.is_none() && self.foe_health.is_none()
+        self.foe_condition.is_none()
+            && self.in_shroud.is_none()
+            && self.foe_health.is_none()
+            && self.attunement.is_none()
     }
 }
 
@@ -1364,6 +1372,7 @@ mod tests {
             (TriggerRule::OnDisableFoe, "\"OnDisableFoe\""),
             (TriggerRule::OnElite, "\"OnElite\""),
             (TriggerRule::OnThreshold, "\"OnThreshold\""),
+            (TriggerRule::OnAttunementSwap, "\"OnAttunementSwap\""),
         ] {
             let mut effect = minimal_effect("kind");
             effect.trigger_rule = rule.clone();
@@ -1395,6 +1404,7 @@ mod tests {
                 above: false,
                 percent: FactualValue::Resolved(50.0),
             }),
+            attunement: None,
         });
         effect.scale_by = Some(ScaleBy::ConditionsRemoved);
         effect.healing_power_coefficient = Some(FactualValue::Resolved(0.1));
@@ -1542,6 +1552,7 @@ mod tests {
                             | TriggerRule::OnDisableFoe
                             | TriggerRule::OnElite
                             | TriggerRule::OnThreshold
+                            | TriggerRule::OnAttunementSwap
                     )
                     || matches!(
                         effect.inner_category.as_ref().unwrap_or(&effect.category),

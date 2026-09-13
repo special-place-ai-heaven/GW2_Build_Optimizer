@@ -11473,22 +11473,30 @@
       }
     },
     {
-      "effect_id": "trait:224:coverage",
+      "effect_id": "trait:224:0",
       "source_type": "Trait",
       "source_id": 224,
       "source_name": "One with Air",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnAttunementSwap",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/One_with_Air (read 2026-09-13: Superspeed when attuning to air)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "attunement"
+      "source": "https://wiki.guildwars2.com/wiki/One_with_Air (read 2026-09-13: Superspeed 3 s when attuning to air)",
+      "trigger_scope": {
+        "Status": "Air"
+      },
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Superspeed",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000
       }
     },
     {
@@ -11549,22 +11557,27 @@
       }
     },
     {
-      "effect_id": "trait:268:coverage",
+      "effect_id": "trait:268:0",
       "source_type": "Trait",
       "source_id": 268,
       "source_name": "Arcane Prowess",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnAttunementSwap",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Arcane_Prowess (read 2026-09-13: Gain boons when you switch attunements)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "attunement"
+      "source": "https://wiki.guildwars2.com/wiki/Arcane_Prowess (read 2026-09-13: Fury 2 s in WvW when you switch attunements)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 2000
       }
     },
     {
@@ -11747,22 +11760,31 @@
       }
     },
     {
-      "effect_id": "trait:281:coverage",
+      "effect_id": "trait:281:0",
       "source_type": "Trait",
       "source_id": 281,
       "source_name": "Rock Solid",
-      "category": "FlatStat",
-      "value": null,
-      "stacking_rule": "Additive",
-      "trigger_rule": "Passive",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnAttunementSwap",
       "uptime_model": {
         "kind": "Unknown"
       },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Rock_Solid (read 2026-09-13: Grant stability to nearby allies when attuning to earth)",
-      "coverage": {
-        "class": "NeedsMechanic",
-        "mechanic": "attunement"
+      "source": "https://wiki.guildwars2.com/wiki/Rock_Solid (read 2026-09-13: Stability 3 s when attuning to earth; radius 240)",
+      "trigger_scope": {
+        "Status": "Earth"
+      },
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Stability",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "target_count": 5,
+        "base_duration_ms": 3000
       }
     },
     {

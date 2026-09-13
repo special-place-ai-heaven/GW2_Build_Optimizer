@@ -327,6 +327,9 @@ struct SimState {
     endurance: super::trigger_bus::EndurancePool,
     #[allow(dead_code)]
     dodge_action: super::trigger_bus::DodgeAction,
+    /// E3: shared AttunementState with wvw_timeline (sole current writer).
+    #[allow(dead_code)]
+    attunement: super::attunement::AttunementState,
 
     skills: Vec<RotationSkill>,
     skill_states: Vec<SkillState>,
@@ -397,6 +400,7 @@ impl SimState {
             trigger_bus: super::trigger_bus::TriggerBus::new(),
             endurance: super::trigger_bus::EndurancePool::new_full(),
             dodge_action: super::trigger_bus::DodgeAction::new(),
+            attunement: super::attunement::AttunementState::new(),
             skills: skills.to_vec(),
             skill_states,
             duration_ms,
@@ -698,6 +702,14 @@ impl SimState {
 
         // Record the cast
         *self.skill_casts.entry(skill_id).or_insert(0) += 1;
+
+        // E3: profession attune skills mutate shared AttunementState + bus.
+        let _ = super::attunement::apply_attunement_skill(
+            &mut self.attunement,
+            &mut self.trigger_bus,
+            self.current_time_ms,
+            &skill_name,
+        );
 
         for effect in &effects {
             match effect {
@@ -2955,6 +2967,8 @@ mod tests {
         // Same types the timeline holds — not a second dodge path.
         let _also: TriggerBus = TriggerBus::new();
         let _also_pool: EndurancePool = EndurancePool::new_full();
+        let _also_attune: super::super::attunement::AttunementState =
+            super::super::attunement::AttunementState::new();
     }
 
     /// E1 Kent: flow CrowdControl that lands emits OnDisableFoe; Stability does not.

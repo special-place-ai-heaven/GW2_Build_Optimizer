@@ -1452,6 +1452,7 @@ mod tests {
                 dodge_count: 0,
                 bus_on_dodge: 0,
                 bus_on_disable_foe: 0,
+                bus_on_attunement_swap: 0,
             }),
         }
     }

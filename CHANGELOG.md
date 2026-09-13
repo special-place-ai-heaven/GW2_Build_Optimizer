@@ -2,12 +2,24 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.25 - 2026-09-13
+
+NeedsMechanic Engine E3: Elementalist AttunementState + TriggerBus OnAttunementSwap. SCHEMA CHANGE = N.
+
+- NEW `rotation/attunement.rs` `AttunementState` sole writer of current (+ Weaver secondary on this state). Default Fire. Shared by flow sim and WvW timeline. Not an aura engine; no overload / dual-attack bar / jade / familiar.
+- One new bus event/rule: `OnAttunementSwap` on the existing TriggerBus. Element filter uses existing `TriggerScope::Status` (Air/Earth/...). No OnAttuneToFire/Water/Air/Earth. While-attuned via `is(current)` and optional `prerequisite.attunement`.
+- Profession attune skills mutate state (Weaver: secondary = outgoing primary; non-Weaver: secondary = None) and emit OnAttunementSwap only when primary changes.
+- Executable records: One with Air (swap-to-Air -> Superspeed 3 s), Rock Solid (swap-to-Earth -> Stability 3 s), Arcane Prowess (any swap -> Fury 2 s WvW). NeedsMechanic:attunement -> record for those three.
+- ValidatedBuild SCHEMA = N; TargetState SCHEMA = N; TriggerBus += OnAttunementSwap only.
+- Kent causal micro-proof: Fire->Water changes current; while-Earth off in Fire / on in Earth; swap-to-Air fires One with Air only; no-trait = 0; >=3 attunement traits executing.
+
 ## 1.14.24 - 2026-09-13
 
 Settings Refresh Game Data no longer wipes the cache. SCHEMA CHANGE = N.
 
 - Refresh button removed `cache.clear_all()` and no longer clears `cache_build_number` before `RefreshMode::Default`.
 - Warm cache + same build can take the FOLD3 skip path again (0 catalog body fetches); Clear Cache still wipes explicitly.
+
 
 ## 1.14.22 - 2026-09-13
 
