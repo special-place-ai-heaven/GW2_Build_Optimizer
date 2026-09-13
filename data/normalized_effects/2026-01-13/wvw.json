@@ -7727,6 +7727,1678 @@
         "class": "NeedsMechanic",
         "mechanic": "trait skill"
       }
+    },
+    {
+      "effect_id": "trait:562:0",
+      "source_type": "Trait",
+      "source_id": 562,
+      "source_name": "Empowering Might",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Empowering_Might (read 2026-09-13: Might 6 s in WvW/PvP to nearby allies on crit; ICD 1 s; 5 targets)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 6000,
+        "internal_cooldown_ms": 1000,
+        "target_count": 5
+      },
+      "internal_cooldown": 1.0
+    },
+    {
+      "effect_id": "trait:574:0",
+      "source_type": "Trait",
+      "source_id": 574,
+      "source_name": "Healer's Resolution",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Healer%27s_Resolution (read 2026-09-13: Resolution 8 s when you use a healing skill; ICD 20 s)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Resolution",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 8000,
+        "internal_cooldown_ms": 20000
+      },
+      "internal_cooldown": 20.0,
+      "trigger_scope": {
+        "Slot": "Heal"
+      }
+    },
+    {
+      "effect_id": "trait:577:0",
+      "source_type": "Trait",
+      "source_id": 577,
+      "source_name": "Inner Fire",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Inner_Fire (read 2026-09-13: Fury 8 s when you strike a burning foe; ICD 10 s; stack threshold 3 is API fact (any burning gates the record))",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 8000,
+        "internal_cooldown_ms": 10000
+      },
+      "internal_cooldown": 10.0,
+      "prerequisite": {
+        "foe_condition": "Burning"
+      }
+    },
+    {
+      "effect_id": "trait:2101:0",
+      "source_type": "Trait",
+      "source_id": 2101,
+      "source_name": "Liberator's Vow",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Liberator%27s_Vow (read 2026-09-13: Quickness 1 s in WvW to nearby allies when you use a heal skill; ICD 7 s; 5 targets)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Quickness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 1000,
+        "internal_cooldown_ms": 7000,
+        "target_count": 5
+      },
+      "internal_cooldown": 7.0,
+      "trigger_scope": {
+        "Slot": "Heal"
+      }
+    },
+    {
+      "effect_id": "trait:1898:0",
+      "source_type": "Trait",
+      "source_id": 1898,
+      "source_name": "Hunter's Premonition",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hunter%27s_Premonition (read 2026-09-13: Aegis 3 s when you use a Trap skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Aegis",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000
+      },
+      "trigger_scope": {
+        "Category": "Trap"
+      }
+    },
+    {
+      "effect_id": "trait:588:0",
+      "source_type": "Trait",
+      "source_id": 588,
+      "source_name": "Strength of the Fallen",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "Periodic",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Strength_of_the_Fallen (read 2026-09-13: Remove 1 condition every 10 s; downed degeneration is NeedsMechanic downed)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "internal_cooldown_ms": 10000
+      },
+      "internal_cooldown": 10.0
+    },
+    {
+      "effect_id": "trait:588:coverage",
+      "source_type": "Trait",
+      "source_id": 588,
+      "source_name": "Strength of the Fallen",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Strength_of_the_Fallen (read 2026-09-13: Health degenerates more slowly while downed (33%))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "downed"
+      }
+    },
+    {
+      "effect_id": "trait:2410:0",
+      "source_type": "Trait",
+      "source_id": 2410,
+      "source_name": "Shimmering Stances",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shimmering_Stances (read 2026-09-13: Stance skills: Protection 3 s to affected allies)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Protection",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 3000
+      },
+      "trigger_scope": {
+        "Category": "Stance"
+      }
+    },
+    {
+      "effect_id": "trait:2410:1",
+      "source_type": "Trait",
+      "source_id": 2410,
+      "source_name": "Shimmering Stances",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shimmering_Stances (read 2026-09-13: Stance skills: Blinded 3 s to affected enemies)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Blinded",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 3000
+      },
+      "trigger_scope": {
+        "Category": "Stance"
+      }
+    },
+    {
+      "effect_id": "trait:635:0",
+      "source_type": "Trait",
+      "source_id": 635,
+      "source_name": "Eternal Armory",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Eternal_Armory (read 2026-09-13: Spirit Weapon hits: burning 4 s in competitive splits; additional ammunition is NeedsMechanic ammunition)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Burning",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 4000
+      },
+      "trigger_scope": {
+        "Category": "SpiritWeapon"
+      }
+    },
+    {
+      "effect_id": "trait:635:coverage",
+      "source_type": "Trait",
+      "source_id": 635,
+      "source_name": "Eternal Armory",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Eternal_Armory (read 2026-09-13: Spirit Weapons gain additional casts)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ammunition"
+      }
+    },
+    {
+      "effect_id": "trait:604:0",
+      "source_type": "Trait",
+      "source_id": 604,
+      "source_name": "Virtue of Resolution",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Virtue_of_Resolution (read 2026-09-13: Resolution 3 s when you activate a Virtue; resolution duration increase is NeedsMechanic boon extension)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Resolution",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 3000
+      },
+      "trigger_scope": {
+        "Category": "Virtue"
+      }
+    },
+    {
+      "effect_id": "trait:604:coverage",
+      "source_type": "Trait",
+      "source_id": 604,
+      "source_name": "Virtue of Resolution",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Virtue_of_Resolution (read 2026-09-13: Resolution you grant has +25% duration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "boon extension"
+      }
+    },
+    {
+      "effect_id": "trait:2222:0",
+      "source_type": "Trait",
+      "source_id": 2222,
+      "source_name": "Righteous Sprint",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Righteous_Sprint (read 2026-09-13: Swiftness 5 s when you activate a Virtue; +25% movement speed is NeedsMechanic movement skill)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Swiftness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 5000
+      },
+      "trigger_scope": {
+        "Category": "Virtue"
+      }
+    },
+    {
+      "effect_id": "trait:2222:coverage",
+      "source_type": "Trait",
+      "source_id": 2222,
+      "source_name": "Righteous Sprint",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Righteous_Sprint (read 2026-09-13: +25% movement speed)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "movement skill"
+      }
+    },
+    {
+      "effect_id": "trait:2105:0",
+      "source_type": "Trait",
+      "source_id": 2105,
+      "source_name": "Stoic Demeanor",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stoic_Demeanor (read 2026-09-13: Immobilize a foe: Resistance 2 s to nearby allies; ICD 5 s in WvW; disable trigger and tome passive are NeedsMechanic)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Resistance",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 2000,
+        "internal_cooldown_ms": 5000
+      },
+      "internal_cooldown": 5.0,
+      "trigger_scope": {
+        "Status": "Immobile"
+      }
+    },
+    {
+      "effect_id": "trait:2105:1",
+      "source_type": "Trait",
+      "source_id": 2105,
+      "source_name": "Stoic Demeanor",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stoic_Demeanor (read 2026-09-13: Immobilize a foe: Might x2 for 6 s in WvW to nearby allies; ICD 5 s)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 2.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 6000,
+        "internal_cooldown_ms": 5000
+      },
+      "internal_cooldown": 5.0,
+      "trigger_scope": {
+        "Status": "Immobile"
+      }
+    },
+    {
+      "effect_id": "trait:2105:2",
+      "source_type": "Trait",
+      "source_id": 2105,
+      "source_name": "Stoic Demeanor",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stoic_Demeanor (read 2026-09-13: Slow a foe: Resistance 2 s to nearby allies; ICD 5 s in WvW)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Resistance",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 2000,
+        "internal_cooldown_ms": 5000
+      },
+      "internal_cooldown": 5.0,
+      "trigger_scope": {
+        "Status": "Slow"
+      }
+    },
+    {
+      "effect_id": "trait:2105:3",
+      "source_type": "Trait",
+      "source_id": 2105,
+      "source_name": "Stoic Demeanor",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stoic_Demeanor (read 2026-09-13: Slow a foe: Might x2 for 6 s in WvW to nearby allies; ICD 5 s)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 2.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 6000,
+        "internal_cooldown_ms": 5000
+      },
+      "internal_cooldown": 5.0,
+      "trigger_scope": {
+        "Status": "Slow"
+      }
+    },
+    {
+      "effect_id": "trait:2105:coverage",
+      "source_type": "Trait",
+      "source_id": 2105,
+      "source_name": "Stoic Demeanor",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stoic_Demeanor (read 2026-09-13: Disable trigger boons; retain Tome of Courage passive while recharging)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:564:coverage",
+      "source_type": "Trait",
+      "source_id": 564,
+      "source_name": "Vigorous Precision",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Vigorous_Precision (read 2026-09-13: Vigor at end of dodge roll)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1899:coverage",
+      "source_type": "Trait",
+      "source_id": 1899,
+      "source_name": "Invigorated Bulwark",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Invigorated_Bulwark (read 2026-09-13: Healing stacks and mace recharge/boon duration on block)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "block"
+      }
+    },
+    {
+      "effect_id": "trait:559:coverage",
+      "source_type": "Trait",
+      "source_id": 559,
+      "source_name": "Protective Reviver",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Protective_Reviver (read 2026-09-13: Lesser Shield of Absorption on revive start)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "revive"
+      }
+    },
+    {
+      "effect_id": "trait:654:coverage",
+      "source_type": "Trait",
+      "source_id": 654,
+      "source_name": "Protector's Restoration",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Protector%27s_Restoration (read 2026-09-13: Cast Lesser Symbol of Protection on heal skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:1685:coverage",
+      "source_type": "Trait",
+      "source_id": 1685,
+      "source_name": "Purity of Body",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Purity_of_Body (read 2026-09-13: Virtue 2 passive also regenerates endurance)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "endurance"
+      }
+    },
+    {
+      "effect_id": "trait:1682:coverage",
+      "source_type": "Trait",
+      "source_id": 1682,
+      "source_name": "Force of Will",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Force_of_Will (read 2026-09-13: Vitality and healing-to-others scaled by vitality)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "vitality scaling"
+      }
+    },
+    {
+      "effect_id": "trait:572:coverage",
+      "source_type": "Trait",
+      "source_id": 572,
+      "source_name": "Justice is Blind",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Justice_is_Blind (read 2026-09-13: Light aura and blind on Virtue 1 activate)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:571:coverage",
+      "source_type": "Trait",
+      "source_id": 571,
+      "source_name": "Renewed Justice",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Renewed_Justice (read 2026-09-13: Virtue 1 renewed on foe kill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "kill"
+      }
+    },
+    {
+      "effect_id": "trait:578:coverage",
+      "source_type": "Trait",
+      "source_id": 578,
+      "source_name": "Wrath of Justice",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wrath_of_Justice (read 2026-09-13: Virtue 1 burn strike casts Lesser Signet of Wrath)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:579:coverage",
+      "source_type": "Trait",
+      "source_id": 579,
+      "source_name": "Perfect Inscriptions",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Perfect_Inscriptions (read 2026-09-13: Signet passives improved and persist while recharging)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "signets"
+      }
+    },
+    {
+      "effect_id": "trait:582:coverage",
+      "source_type": "Trait",
+      "source_id": 582,
+      "source_name": "Valorous Defense",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Valorous_Defense (read 2026-09-13: Aegis when struck below 50% health)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming strike"
+      }
+    },
+    {
+      "effect_id": "trait:581:coverage",
+      "source_type": "Trait",
+      "source_id": 581,
+      "source_name": "Smiter's Boon",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Smiter%27s_Boon (read 2026-09-13: Cast Lesser Smite Condition on heal skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:633:coverage",
+      "source_type": "Trait",
+      "source_id": 633,
+      "source_name": "Focus Mastery",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Focus_Mastery (read 2026-09-13: Focus skills grant protection/resolution and reduced recharge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "recharge"
+      }
+    },
+    {
+      "effect_id": "trait:594:coverage",
+      "source_type": "Trait",
+      "source_id": 594,
+      "source_name": "Steadfast Courage",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Steadfast_Courage (read 2026-09-13: Protection when aegis blocks an attack)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aegis"
+      }
+    },
+    {
+      "effect_id": "trait:584:coverage",
+      "source_type": "Trait",
+      "source_id": 584,
+      "source_name": "Redemption",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Redemption (read 2026-09-13: Cast Lesser Litany of Wrath on Virtue 3 activate)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:1684:coverage",
+      "source_type": "Trait",
+      "source_id": 1684,
+      "source_name": "Communal Defenses",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Communal_Defenses (read 2026-09-13: Blocking grants aegis to nearby allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "block"
+      }
+    },
+    {
+      "effect_id": "trait:583:coverage",
+      "source_type": "Trait",
+      "source_id": 583,
+      "source_name": "Might of the Protector",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Might_of_the_Protector (read 2026-09-13: Might when you block attacks)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "block"
+      }
+    },
+    {
+      "effect_id": "trait:589:coverage",
+      "source_type": "Trait",
+      "source_id": 589,
+      "source_name": "Tenacious Defense",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Tenacious_Defense (read 2026-09-13: Aegis block reduces Virtue 3 recharge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aegis"
+      }
+    },
+    {
+      "effect_id": "trait:625:coverage",
+      "source_type": "Trait",
+      "source_id": 625,
+      "source_name": "Resolute Subconscious",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Resolute_Subconscious (read 2026-09-13: Resolution and aegis when disabled)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:617:coverage",
+      "source_type": "Trait",
+      "source_id": 617,
+      "source_name": "Master of Consecrations",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Master_of_Consecrations (read 2026-09-13: Consecrations gain increased duration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "consecrations"
+      }
+    },
+    {
+      "effect_id": "trait:603:coverage",
+      "source_type": "Trait",
+      "source_id": 603,
+      "source_name": "Inspiring Virtue",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Inspiring_Virtue (read 2026-09-13: Strike damage increased after activating a virtue)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:610:coverage",
+      "source_type": "Trait",
+      "source_id": 610,
+      "source_name": "Absolute Resolve",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Absolute_Resolve (read 2026-09-13: Virtue 2 activate cleanses allies; stronger passive)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:622:coverage",
+      "source_type": "Trait",
+      "source_id": 622,
+      "source_name": "Permeating Wrath",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Permeating_Wrath (read 2026-09-13: Justice passive burns in an area faster)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:554:coverage",
+      "source_type": "Trait",
+      "source_id": 554,
+      "source_name": "Battle Presence",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Battle_Presence (read 2026-09-13: Allies gain Virtue 2 passive; Willbender heal on Resolve)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:612:coverage",
+      "source_type": "Trait",
+      "source_id": 612,
+      "source_name": "Indomitable Courage",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Indomitable_Courage (read 2026-09-13: Virtue 3 breaks stun and grants stability; shorter passive interval)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:648:coverage",
+      "source_type": "Trait",
+      "source_id": 648,
+      "source_name": "Zealot's Resolution",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Zealot%27s_Resolution (read 2026-09-13: Lesser Symbol of Resolution when striking below health threshold)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "trait skill"
+      }
+    },
+    {
+      "effect_id": "trait:563:coverage",
+      "source_type": "Trait",
+      "source_id": 563,
+      "source_name": "Wrathful Spirit",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Wrathful_Spirit (read 2026-09-13: Aegis grants resolution and fury when it ends)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aegis"
+      }
+    },
+    {
+      "effect_id": "trait:1925:coverage",
+      "source_type": "Trait",
+      "source_id": 1925,
+      "source_name": "Zealous Scepter",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Zealous_Scepter (read 2026-09-13: Might when Justice passive triggers; more with scepter)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:649:coverage",
+      "source_type": "Trait",
+      "source_id": 649,
+      "source_name": "Symbolic Avenger",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Symbolic_Avenger (read 2026-09-13: Strike damage stacks when Symbols hit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "symbols"
+      }
+    },
+    {
+      "effect_id": "trait:637:coverage",
+      "source_type": "Trait",
+      "source_id": 637,
+      "source_name": "Shattered Aegis",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shattered_Aegis (read 2026-09-13: Aegis block unleashes Mystic Rebuke)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "aegis"
+      }
+    },
+    {
+      "effect_id": "trait:1848:coverage",
+      "source_type": "Trait",
+      "source_id": 1848,
+      "source_name": "Virtuous Action",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Virtuous_Action (read 2026-09-13: Virtues become physical aspects; access to Traps)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "traps"
+      }
+    },
+    {
+      "effect_id": "trait:1983:coverage",
+      "source_type": "Trait",
+      "source_id": 1983,
+      "source_name": "Dulled Senses",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dulled_Senses (read 2026-09-13: Cripple enemies you disable)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "disable trigger"
+      }
+    },
+    {
+      "effect_id": "trait:1911:coverage",
+      "source_type": "Trait",
+      "source_id": 1911,
+      "source_name": "Soaring Devastation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Soaring_Devastation (read 2026-09-13: Wings of Resolve landing attack and movement speed)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:2037:coverage",
+      "source_type": "Trait",
+      "source_id": 2037,
+      "source_name": "Hunter's Determination",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hunter%27s_Determination (read 2026-09-13: Elite breaks stun and grants endurance)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "endurance"
+      }
+    },
+    {
+      "effect_id": "trait:1943:coverage",
+      "source_type": "Trait",
+      "source_id": 1943,
+      "source_name": "Bulwark",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bulwark (read 2026-09-13: Shield of Courage radius and duration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:2089:coverage",
+      "source_type": "Trait",
+      "source_id": 2089,
+      "source_name": "Purity of Word",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Purity_of_Word (read 2026-09-13: Virtues become Tomes; access to Mantras; page regen)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "tomes"
+      }
+    },
+    {
+      "effect_id": "trait:2075:coverage",
+      "source_type": "Trait",
+      "source_id": 2075,
+      "source_name": "Unrelenting Criticism",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unrelenting_Criticism (read 2026-09-13: Axe skills chance to inflict bleeding)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon-scoped"
+      }
+    },
+    {
+      "effect_id": "trait:2086:coverage",
+      "source_type": "Trait",
+      "source_id": 2086,
+      "source_name": "Archivist of Whispers",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Archivist_of_Whispers (read 2026-09-13: Virtues/Tomes gain additional pages)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pages"
+      }
+    },
+    {
+      "effect_id": "trait:2062:coverage",
+      "source_type": "Trait",
+      "source_id": 2062,
+      "source_name": "Swift Scholar",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Swift_Scholar (read 2026-09-13: Equipping a Virtue/Tome grants quickness; third tome skill grants pages)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "tomes"
+      }
+    },
+    {
+      "effect_id": "trait:2063:coverage",
+      "source_type": "Trait",
+      "source_id": 2063,
+      "source_name": "Weighty Terms",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Weighty_Terms (read 2026-09-13: Mantra final charge slows foes and grants pages)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "mantras"
+      }
+    },
+    {
+      "effect_id": "trait:2076:coverage",
+      "source_type": "Trait",
+      "source_id": 2076,
+      "source_name": "Stalwart Speed",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Stalwart_Speed (read 2026-09-13: Granting aegis or stability also grants quickness)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "boon grant"
+      }
+    },
+    {
+      "effect_id": "trait:2116:coverage",
+      "source_type": "Trait",
+      "source_id": 2116,
+      "source_name": "Legendary Lore",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Legendary_Lore (read 2026-09-13: Tome skills gain margin bonuses (boons per tome))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "tomes"
+      }
+    },
+    {
+      "effect_id": "trait:2179:coverage",
+      "source_type": "Trait",
+      "source_id": 2179,
+      "source_name": "Quickfire",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Quickfire (read 2026-09-13: Granting quickness also grants Ashes of the Just; retain Justice passive)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "ashes"
+      }
+    },
+    {
+      "effect_id": "trait:2159:coverage",
+      "source_type": "Trait",
+      "source_id": 2159,
+      "source_name": "Loremaster",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Loremaster (read 2026-09-13: Retain Resolve passive; generate pages faster)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "pages"
+      }
+    },
+    {
+      "effect_id": "trait:2381:coverage",
+      "source_type": "Trait",
+      "source_id": 2381,
+      "source_name": "Luminary",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Luminary (read 2026-09-13: Access to Radiant Forge and stance skills)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "radiant forge"
+      }
+    },
+    {
+      "effect_id": "trait:2417:coverage",
+      "source_type": "Trait",
+      "source_id": 2417,
+      "source_name": "Resolute Blessing",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Resolute_Blessing (read 2026-09-13: Luminary's Blessing reduces incoming condition damage)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "radiant forge"
+      }
+    },
+    {
+      "effect_id": "trait:2329:coverage",
+      "source_type": "Trait",
+      "source_id": 2329,
+      "source_name": "Persistent Blessing",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Persistent_Blessing (read 2026-09-13: Refresh blessing and heal on Radiant Forge exit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "radiant forge"
+      }
+    },
+    {
+      "effect_id": "trait:2330:coverage",
+      "source_type": "Trait",
+      "source_id": 2330,
+      "source_name": "Resplendent Weaponry",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Resplendent_Weaponry (read 2026-09-13: Boons to allies when equipping a radiant weapon)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "radiant forge"
+      }
+    },
+    {
+      "effect_id": "trait:2401:coverage",
+      "source_type": "Trait",
+      "source_id": 2401,
+      "source_name": "Purging Light",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Purging_Light (read 2026-09-13: Light aura on heal; cleanse allies when granting yourself light aura)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "light aura"
+      }
+    },
+    {
+      "effect_id": "trait:2419:coverage",
+      "source_type": "Trait",
+      "source_id": 2419,
+      "source_name": "Empowered Armaments",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Empowered_Armaments (read 2026-09-13: Strike damage when equipping a radiant weapon)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "radiant forge"
+      }
+    },
+    {
+      "effect_id": "trait:2435:coverage",
+      "source_type": "Trait",
+      "source_id": 2435,
+      "source_name": "Radiant Armaments",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Radiant_Armaments (read 2026-09-13: Bonus by radiant weapon; lingers after forge exit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "radiant forge"
+      }
+    },
+    {
+      "effect_id": "trait:2368:coverage",
+      "source_type": "Trait",
+      "source_id": 2368,
+      "source_name": "Illuminating Inspiration",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Illuminating_Inspiration (read 2026-09-13: Virtue recharge when equipping a radiant weapon)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "radiant forge"
+      }
+    },
+    {
+      "effect_id": "trait:2328:coverage",
+      "source_type": "Trait",
+      "source_id": 2328,
+      "source_name": "Sovereign of Light",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sovereign_of_Light (read 2026-09-13: Light aura on Radiant Forge enter; detonate on Luminary skills)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "light aura"
+      }
+    },
+    {
+      "effect_id": "trait:2388:coverage",
+      "source_type": "Trait",
+      "source_id": 2388,
+      "source_name": "Master-at-Arms",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Master-at-Arms (read 2026-09-13: Virtue use recharges matching radiant weapon skills)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "radiant forge"
+      }
+    },
+    {
+      "effect_id": "trait:2200:coverage",
+      "source_type": "Trait",
+      "source_id": 2200,
+      "source_name": "Willbender Training",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Willbender_Training (read 2026-09-13: Virtues become movement-based; access to Physical skills)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "physical"
+      }
+    },
+    {
+      "effect_id": "trait:2197:coverage",
+      "source_type": "Trait",
+      "source_id": 2197,
+      "source_name": "Restorative Virtues",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Restorative_Virtues (read 2026-09-13: Virtue triggers reduce weapon cooldowns; vigor on Flowing Resolve)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:2210:coverage",
+      "source_type": "Trait",
+      "source_id": 2210,
+      "source_name": "Holy Reckoning",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Holy_Reckoning (read 2026-09-13: Virtue triggers grant might; fury on Rushing Justice)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:2199:coverage",
+      "source_type": "Trait",
+      "source_id": 2199,
+      "source_name": "Vanguard Tactics",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Vanguard_Tactics (read 2026-09-13: Courage grants resistance; shadowstep grants resolution and protection)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shadowstep"
+      }
+    },
+    {
+      "effect_id": "trait:2189:coverage",
+      "source_type": "Trait",
+      "source_id": 2189,
+      "source_name": "Lethal Tempo",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lethal_Tempo (read 2026-09-13: Damage stacks on virtue activate or passive trigger)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:2195:coverage",
+      "source_type": "Trait",
+      "source_id": 2195,
+      "source_name": "Phoenix Protocol",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Phoenix_Protocol (read 2026-09-13: Boons on Resolve trigger and Flowing Resolve; modified resolve duration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
+    },
+    {
+      "effect_id": "trait:2198:coverage",
+      "source_type": "Trait",
+      "source_id": 2198,
+      "source_name": "Deathless Courage",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Deathless_Courage (read 2026-09-13: Incoming damage reduction while Courage is active)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "virtues"
+      }
     }
   ]
 }

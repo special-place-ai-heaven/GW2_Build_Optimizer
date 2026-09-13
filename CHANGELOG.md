@@ -2,7 +2,19 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.9 - 2026-09-13
+
+Guardian trait catalogue: every Guardian trait is classified; the coverage table's Guardian NoRecord column is 0.
+
+### Guardian trait triggers
+
+- The Guardian's 108 traits are catalogued: every trait is executed from its facts, executed from a dated wiki record, or classified with the mechanic it still needs (virtues, aegis, block, tomes, pages, mantras, ashes, radiant forge, light aura, consecrations, symbols, signets, traps, physical, disable trigger, dodge, trait skill, and the rest).
+- New wiki records fire on existing sites: on-crit (Empowering Might might), heal skill use (Healer's Resolution resolution, Liberator's Vow ally quickness), on-hit with burning gate (Inner Fire fury), trap skill use (Hunter's Premonition aegis), periodic cleanse (Strength of the Fallen), stance skill use (Shimmering Stances protection and blind), spirit-weapon on-hit (Eternal Armory burning), virtue skill use (Virtue of Resolution resolution, Righteous Sprint swiftness), and on-condition-applied immobilize/slow (Stoic Demeanor ally resistance and might).
+- Honest NeedsMechanic names cover virtues, aegis block-end, tomes/pages/mantras/ashes, radiant forge, light aura, consecrations, symbols, signets, weapon-scoped axe/focus, incoming strike, boon grant, vitality scaling, and the elite-line unlocks.
+- `SHIPPED_PROFESSIONS` now includes Guardian; `docs/audit/trait-coverage.md` regenerated with Guardian NoRecord 0.
+
 ## 1.14.8 - 2026-09-13
+
 
 Warrior trait catalogue: every Warrior trait is classified; the coverage table's Warrior NoRecord column is 0.
 
