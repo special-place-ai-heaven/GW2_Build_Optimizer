@@ -2,6 +2,14 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.28 - 2026-09-13
+
+UX strings for durable items fill modes. SCHEMA CHANGE = N.
+
+- Setup Data Download and Settings Refresh progress show distinct copy for `items_fill_kind`: FirstFill, Resume, SameBuildSkip.
+- `None` (normal refresh / Verify / build mismatch) keeps existing downloading/Refreshing labels.
+- Presentation only; download and cache semantics unchanged. No RefreshDelta panel.
+
 ## 1.14.27 - 2026-09-13
 
 Durable first-fill resume for the items catalog via `items.partial`. SCHEMA CHANGE = N.

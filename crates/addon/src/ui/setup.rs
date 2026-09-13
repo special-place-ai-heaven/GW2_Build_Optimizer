@@ -1,6 +1,6 @@
 use nexus::imgui::Ui;
 
-use crate::state::{AddonState, DownloadState, KeyStatus, Screen, SetupStep};
+use crate::state::{self, AddonState, DownloadState, KeyStatus, Screen, SetupStep};
 use crate::ui::theme;
 use gw2_core::config::LlmProvider;
 use gw2_core::i18n::{t, tf};
@@ -591,6 +591,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                     inner_total: 0,
                     done: false,
                     error: None,
+                    items_fill_kind: None,
                 });
 
                 let cache_dir = state.addon_dir.join("cache");
@@ -621,6 +622,13 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                 };
                                 let cache = gw2_api::cache::DataCache::new(&cache_dir);
 
+                                let fill_kind = state::probe_items_fill_kind(&client, &cache);
+                                crate::state::with_state(|s| {
+                                    if let Some(ref mut dl) = s.setup.download_progress {
+                                        dl.items_fill_kind = fill_kind;
+                                    }
+                                });
+
                                 let token_inner = token.clone();
                                 let result = gw2_api::download::download_game_and_names(
                                     &client,
@@ -637,6 +645,11 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                             } else {
                                                 progress.step_name.clone()
                                             };
+                                            let fill = s
+                                                .setup
+                                                .download_progress
+                                                .as_ref()
+                                                .and_then(|d| d.items_fill_kind);
                                             s.setup.download_progress = Some(DownloadState {
                                                 current_step: progress.current_step,
                                                 total_steps: progress.total_steps,
@@ -645,6 +658,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                                 inner_total: progress.inner_total,
                                                 done: progress.done,
                                                 error: None,
+                                                items_fill_kind: fill,
                                             });
                                         });
                                     },
@@ -703,6 +717,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                 inner_total: 0,
                                 done: true,
                                 error: Some("thread panicked".into()),
+                                items_fill_kind: None,
                             });
                         });
                     }
@@ -716,11 +731,15 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                         inner_total: 0,
                         done: true,
                         error: Some("could not start download".into()),
+                        items_fill_kind: None,
                     });
                 }
             }
         }
         Some(dl) => {
+            if let Some(kind) = dl.items_fill_kind {
+                ui.text_colored(theme::pal().muted, t(state::items_fill_i18n_key(kind)));
+            }
             let overlay = format!("{}/{} — {}", dl.current_step, dl.total_steps, dl.step_name);
             theme::download_scribble(ui, dl.fraction(), &overlay);
 
