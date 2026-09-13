@@ -646,6 +646,9 @@ enum ConditionalKind {
         max: u32,
         duration_ms: u32,
         scope: crate::data::normalized_effects::TriggerScope,
+        /// When true, landed hits feed stacks via gain_conditional_stacks.
+        /// Compounding Power (723) is false: stacks only on OnCloneCreated.
+        hit_fed: bool,
     },
     /// Holds while the player is in shroud (Sprint 3, US1).
     InShroud,
@@ -1194,6 +1197,7 @@ impl<'a> Timeline<'a> {
                         max,
                         duration_ms: (duration * 1_000.0).round() as u32,
                         scope: effect.trigger_scope.clone().unwrap_or_default(),
+                        hit_fed: true,
                     },
                     percent,
                     crit_damage: false,
@@ -3247,10 +3251,15 @@ impl<'a> Timeline<'a> {
                 max,
                 duration_ms,
                 ref scope,
+                hit_fed,
             } = self.conditional_specs[idx].kind
             else {
                 continue;
             };
+            // Spawn-only stackers (723 Compounding Power) are not hit-fed.
+            if !hit_fed {
+                continue;
+            }
             if !self.scope_admits(scope, Some(skill_id)) {
                 continue;
             }
@@ -3467,6 +3476,7 @@ impl<'a> Timeline<'a> {
                                         max,
                                         duration_ms,
                                         scope: Default::default(),
+                                        hit_fed: false,
                                     };
                                 }
                                 spec.expires_at_ms = until;
@@ -3478,6 +3488,7 @@ impl<'a> Timeline<'a> {
                                     max,
                                     duration_ms,
                                     scope: Default::default(),
+                                    hit_fed: false,
                                 },
                                 percent: value,
                                 crit_damage: false,
@@ -5091,6 +5102,89 @@ mod tests {
             ">=3 Mes clone traits must execute; dodge={:?} heal={:?}",
             dodge_report.trait_fire_counts,
             heal_report.trait_fire_counts
+        );
+    }
+
+    /// E4 Kent: one successful clone + N ordinary hits must leave Compounding
+    /// Power at 1 stack until the next successful spawn (not hit-rate fed).
+    #[test]
+    fn kent_e4_compounding_power_stacks_only_on_clone_spawn() {
+        use crate::data::normalized_effects::{effects, SourceType};
+        use crate::rotation::illusion::spawn_clone;
+
+        let effects_wvw = effects().effects_for_mode("WvW");
+        let active: Vec<&_> = effects_wvw
+            .iter()
+            .filter(|e| {
+                e.source_type == SourceType::Trait && e.coverage.is_none() && e.source_id == 723
+            })
+            .collect();
+        assert!(!active.is_empty(), "723 Compounding Power must be present");
+
+        let skills = [skill(
+            1,
+            SkillSlot::Weapon1,
+            250,
+            0,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let params = params();
+        let mut run = Timeline::new(
+            &skills,
+            &params,
+            profile(1_000, vec![]),
+            open_enemy(false),
+            &active,
+            &[],
+            true,
+            Vec::new(),
+        );
+
+        let cp_stacks = |run: &Timeline<'_>| -> u32 {
+            run.conditional_specs
+                .iter()
+                .filter(|s| s.source_name.eq_ignore_ascii_case("Compounding Power"))
+                .map(|s| s.stacks)
+                .max()
+                .unwrap_or(0)
+        };
+
+        // First successful spawn installs 723 at 1 stack.
+        assert!(spawn_clone(&mut run.illusion, &mut run.trigger_bus, 0));
+        run.now_ms = 0;
+        run.trigger_procs(TriggerRule::OnCloneCreated, Some(1), false, 1.0);
+        assert_eq!(cp_stacks(&run), 1, "first spawn must install 1 stack");
+        assert!(
+            run.conditional_specs.iter().any(|s| {
+                s.source_name.eq_ignore_ascii_case("Compounding Power")
+                    && matches!(s.kind, ConditionalKind::Stacking { hit_fed: false, .. })
+            }),
+            "723 must be hit_fed=false"
+        );
+
+        // N ordinary hits must not mutate 723 stacks.
+        for i in 1..=25 {
+            run.now_ms = i * 100;
+            run.gain_conditional_stacks(1);
+        }
+        assert_eq!(
+            cp_stacks(&run),
+            1,
+            "ordinary hits must not raise 723; fires={:?}",
+            run.report().trait_fire_counts
+        );
+
+        // Next successful spawn raises stacks to 2 (PIN: OnCloneCreated only).
+        assert!(spawn_clone(&mut run.illusion, &mut run.trigger_bus, 3_000));
+        run.now_ms = 3_000;
+        run.trigger_procs(TriggerRule::OnCloneCreated, Some(1), false, 1.0);
+        assert_eq!(
+            cp_stacks(&run),
+            2,
+            "second successful spawn must raise 723 to 2 stacks"
         );
     }
 
