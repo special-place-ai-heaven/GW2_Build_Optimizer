@@ -23,6 +23,7 @@ use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::trait_skill::{
     catalog_from_skills, resolve_trait_skill, skill_effects_from_status_operation,
 };
+use super::attunement::{apply_attunement_skill, AttunementState, Element};
 use super::trigger_bus::{
     land_foe_disable, BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST,
 };
@@ -251,6 +252,8 @@ pub struct WvwCombatReport {
     pub bus_on_dodge: u32,
     /// Bus OnDisableFoe emissions this fight (landed foe disables).
     pub bus_on_disable_foe: u32,
+    /// Bus OnAttunementSwap emissions this fight.
+    pub bus_on_attunement_swap: u32,
 }
 
 /// Upper bound on [`WvwCombatReport::trace`]. The 513th event is dropped and
@@ -807,6 +810,8 @@ struct Timeline<'a> {
     trigger_bus: TriggerBus,
     endurance: EndurancePool,
     dodge_action: DodgeAction,
+    /// E3: sole attunement owner (current + Weaver secondary).
+    attunement: AttunementState,
     /// E2: lesser skill SkillEffects keyed by cast_skill_id.
     cast_skill_catalog: HashMap<u32, Vec<SkillEffect>>,
     /// E0: OnThreshold fired once for the 50% health crossing.
@@ -1003,6 +1008,7 @@ impl<'a> Timeline<'a> {
             trigger_bus: TriggerBus::new(),
             endurance: EndurancePool::new_full(),
             dodge_action: DodgeAction::new(),
+            attunement: AttunementState::new(),
             cast_skill_catalog: catalog_from_skills(skills),
             threshold_50_emitted: false,
             protection_multiplier: crate::data::boon_condition_formulas::boons()
@@ -1204,6 +1210,7 @@ impl<'a> Timeline<'a> {
                     | TriggerRule::OnDisableFoe
                     | TriggerRule::OnElite
                     | TriggerRule::OnThreshold
+                    | TriggerRule::OnAttunementSwap
             ) || (matches!(effect.trigger_rule, TriggerRule::OnSkillUse)
                 // A skill's own record, or a trait's that names its skills (US2).
                 && (matches!(effect.source_type, SourceType::Skill) || scoped));
@@ -1495,6 +1502,24 @@ impl<'a> Timeline<'a> {
         if matches!(skill.slot, super::SkillSlot::Elite) {
             self.trigger_bus.emit(BusEvent::OnElite, self.now_ms);
             self.trigger_procs(TriggerRule::OnElite, Some(skill.skill_id), false, 1.0);
+        }
+        // E3: profession attune skills mutate AttunementState and emit OnAttunementSwap.
+        let attune_name = skill.name.clone();
+        let attune_id = skill.skill_id;
+        if let Some(element) = apply_attunement_skill(
+            &mut self.attunement,
+            &mut self.trigger_bus,
+            self.now_ms,
+            &attune_name,
+        ) {
+            self.trigger_status = Some(element.as_str().to_string());
+            self.trigger_procs(
+                TriggerRule::OnAttunementSwap,
+                Some(attune_id),
+                false,
+                1.0,
+            );
+            self.trigger_status = None;
         }
         self.resource_blocked_skills.remove(&skill.skill_id);
         if let Some(rule) = self.resource_rules.get(&skill.skill_id).cloned() {
@@ -3083,6 +3108,14 @@ impl<'a> Timeline<'a> {
                 ));
             }
         }
+        if let Some(want) = &prerequisite.attunement {
+            let Some(element) = Element::parse(want) else {
+                return Err(format!("unknown attunement {want}"));
+            };
+            if !self.attunement.is(element) {
+                return Err(format!("not attuned to {want}"));
+            }
+        }
         Ok(())
     }
 
@@ -3485,6 +3518,7 @@ impl<'a> Timeline<'a> {
                         TriggerRule::OnDisableFoe => " on disable foe".to_string(),
                         TriggerRule::OnElite => " on elite".to_string(),
                         TriggerRule::OnThreshold => " on threshold".to_string(),
+                        TriggerRule::OnAttunementSwap => " on attunement swap".to_string(),
                         _ => String::new(),
                     };
                     self.trace(
@@ -3867,6 +3901,7 @@ impl<'a> Timeline<'a> {
             dodge_count: self.dodge_action.dodges,
             bus_on_dodge: self.trigger_bus.count(BusEvent::OnDodge),
             bus_on_disable_foe: self.trigger_bus.count(BusEvent::OnDisableFoe),
+            bus_on_attunement_swap: self.trigger_bus.count(BusEvent::OnAttunementSwap),
         }
     }
 
@@ -4052,6 +4087,7 @@ fn trigger_label(trigger: &TriggerRule) -> &'static str {
         TriggerRule::OnDisableFoe => "on-disable-foe",
         TriggerRule::OnElite => "on-elite",
         TriggerRule::OnThreshold => "on-threshold",
+        TriggerRule::OnAttunementSwap => "on-attunement-swap",
     }
 }
 
@@ -4079,6 +4115,7 @@ struct PrerequisiteView {
     foe_conditions: Vec<String>,
     foe_stacks: Vec<(String, u32)>,
     foe_ratio: Option<f64>,
+    attunement: Element,
 }
 
 impl PrerequisiteView {
@@ -4104,6 +4141,7 @@ impl PrerequisiteView {
                 .target_health
                 .filter(|h| *h > 0.0)
                 .map(|target| timeline.enemy_hp() / target),
+            attunement: timeline.attunement.current,
         }
     }
 
@@ -4145,6 +4183,14 @@ impl PrerequisiteView {
                 return false;
             }
         }
+        if let Some(want) = &prerequisite.attunement {
+            let Some(element) = Element::parse(want) else {
+                return false;
+            };
+            if self.attunement != element {
+                return false;
+            }
+        }
         true
     }
 }
@@ -4178,6 +4224,7 @@ fn same_trigger(left: &TriggerRule, right: &TriggerRule) -> bool {
             | (TriggerRule::OnDisableFoe, TriggerRule::OnDisableFoe)
             | (TriggerRule::OnElite, TriggerRule::OnElite)
             | (TriggerRule::OnThreshold, TriggerRule::OnThreshold)
+            | (TriggerRule::OnAttunementSwap, TriggerRule::OnAttunementSwap)
     )
 }
 
@@ -4590,6 +4637,181 @@ mod tests {
         assert!(
             executing >= 3,
             ">=3 formerly NeedsMechanic trait-skill traits must execute; got {executing}; {:?}",
+            live_report.trait_fire_counts
+        );
+    }
+
+
+    /// E3 Kent: Fire->Water changes current; swap-to-Air fires One with Air only;
+    /// while-Earth off in Fire / on in Earth; no-trait = 0.
+    #[test]
+    fn kent_e3_causal_attunement_swap_fires_scoped_traits() {
+        use crate::data::normalized_effects::{effects, SourceType};
+
+        let effects_wvw = effects().effects_for_mode("WvW");
+        let attune_records: Vec<&_> = effects_wvw
+            .iter()
+            .filter(|e| {
+                e.source_type == SourceType::Trait
+                    && e.trigger_rule == TriggerRule::OnAttunementSwap
+                    && e.coverage.is_none()
+                    && matches!(e.source_id, 224 | 268 | 281)
+            })
+            .collect();
+        assert!(
+            attune_records.len() >= 3,
+            "E3 must ship >=3 executable OnAttunementSwap trait records; got {}",
+            attune_records.len()
+        );
+
+        // Micro-proof on AttunementState alone (Kent bars).
+        let mut state = AttunementState::new();
+        let mut bus = TriggerBus::new();
+        assert!(state.is(Element::Fire));
+        assert!(!state.is(Element::Earth));
+        assert!(apply_attunement_skill(&mut state, &mut bus, 0, "Water Attunement").is_some());
+        assert!(state.is(Element::Water));
+        assert_eq!(bus.count(BusEvent::OnAttunementSwap), 1);
+        assert!(!state.is(Element::Earth));
+        assert!(apply_attunement_skill(&mut state, &mut bus, 50, "Earth Attunement").is_some());
+        assert!(state.is(Element::Earth));
+
+        let skills = [
+            skill(5493, SkillSlot::Profession, 0, 0, vec![]),
+            skill(5494, SkillSlot::Profession, 0, 1_000, vec![]),
+            skill(5495, SkillSlot::Profession, 0, 1_000, vec![]),
+            skill(1, SkillSlot::Weapon1, 250, 0, vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }]),
+        ];
+        let mut named = skills;
+        named[0].name = "Water Attunement".into();
+        named[1].name = "Air Attunement".into();
+        named[2].name = "Earth Attunement".into();
+        let params = params();
+        let active: Vec<&_> = attune_records;
+
+        let opener_live = [5493u32, 5494, 5495];
+        let mut live = Timeline::new(
+            &named,
+            &params,
+            profile(6_000, vec![]),
+            open_enemy(false),
+            &active,
+            &[],
+            true,
+            Vec::new(),
+        );
+        live.opener = &opener_live;
+        live.run();
+        let live_report = live.report();
+        assert!(
+            live.trigger_bus.count(BusEvent::OnAttunementSwap) >= 1,
+            "attune skills must emit OnAttunementSwap"
+        );
+        assert_eq!(
+            live_report.bus_on_attunement_swap,
+            live.trigger_bus.count(BusEvent::OnAttunementSwap)
+        );
+
+        let air_fires = live_report
+            .trait_fire_counts
+            .get("One with Air")
+            .copied()
+            .unwrap_or(0);
+        assert!(
+            air_fires >= 1,
+            "One with Air must fire on swap-to-Air; fires={air_fires}; counts={:?}",
+            live_report.trait_fire_counts
+        );
+        // Buff durations (2-3 s) may expire before fight end; causal proof is
+        // trait_fire_counts + bus emissions, not leftover buff leftovers.
+
+        // Swap-to-Air scope: Rock Solid (Earth) must not fire from Air-only swap path
+        // when Earth was never entered — but this opener enters Water/Air/Earth.
+        // Prove Status("Air") gate: Water swap alone must not fire One with Air.
+        let water_only = [named[0].clone()];
+        let opener_water = [5493u32];
+        let mut water_run = Timeline::new(
+            &water_only,
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &active,
+            &[],
+            true,
+            Vec::new(),
+        );
+        water_run.opener = &opener_water;
+        water_run.run();
+        let water_report = water_run.report();
+        assert_eq!(
+            water_report
+                .trait_fire_counts
+                .get("One with Air")
+                .copied()
+                .unwrap_or(0),
+            0,
+            "One with Air must not fire on Water swap"
+        );
+        assert!(
+            water_report
+                .trait_fire_counts
+                .get("Arcane Prowess")
+                .copied()
+                .unwrap_or(0)
+                >= 1,
+            "Arcane Prowess (Any) must fire on Water swap"
+        );
+
+        let opener_inactive = [5493u32, 5494, 5495];
+        let mut inactive = Timeline::new(
+            &named,
+            &params,
+            profile(6_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            Vec::new(),
+        );
+        inactive.opener = &opener_inactive;
+        inactive.run();
+        let inactive_report = inactive.report();
+        assert_eq!(
+            inactive_report
+                .trait_fire_counts
+                .get("One with Air")
+                .copied()
+                .unwrap_or(0),
+            0
+        );
+        assert_eq!(
+            inactive_report
+                .trait_fire_counts
+                .get("Arcane Prowess")
+                .copied()
+                .unwrap_or(0),
+            0
+        );
+        assert_eq!(
+            inactive_report
+                .trait_fire_counts
+                .get("Rock Solid")
+                .copied()
+                .unwrap_or(0),
+            0,
+            "no-trait = 0"
+        );
+
+        let executing = ["One with Air", "Rock Solid", "Arcane Prowess"]
+            .iter()
+            .filter(|n| live_report.trait_fire_counts.get(**n).copied().unwrap_or(0) >= 1)
+            .count();
+        assert!(
+            executing >= 3,
+            ">=3 attunement traits must execute; got {executing}; {:?}",
             live_report.trait_fire_counts
         );
     }
