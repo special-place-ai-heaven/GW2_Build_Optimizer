@@ -256,6 +256,128 @@ pub struct EnemyDummy {
     pub hp: Option<f64>,
 }
 
+/// One timed condition on the primary foe.
+///
+/// Shared by the flow simulator and the WvW timeline (Phase 3): one foe-condition
+/// ledger, not competing `SimState.conditions` vs `outgoing_conditions`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimedFoeCondition {
+    pub name: String,
+    pub stacks: u32,
+    pub expires_at_ms: u32,
+    pub next_tick_ms: u32,
+}
+
+/// Live foe state during a simulation. Seeded from [`EnemyDummy`]; mutated as
+/// conditions, disables, strips and damage land. This is the resolve-time target
+/// for Vulnerability and deferred vs-target modifiers (Success [5]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TargetState {
+    pub protection: bool,
+    pub stability: bool,
+    /// `None` = open dummy (no HP / encounter-outcome tracking).
+    pub hp: Option<f64>,
+    /// Wall-clock ms until which the foe is hard-disabled (stun/daze/…).
+    pub disabled_until_ms: u32,
+    /// Foe conditions (damaging and non-damaging), intensity-stacked.
+    pub conditions: Vec<TimedFoeCondition>,
+}
+
+impl TargetState {
+    /// Seed live state from the scenario dummy. No conditions, not disabled.
+    pub fn from_seed(enemy: EnemyDummy) -> Self {
+        Self {
+            protection: enemy.protection,
+            stability: enemy.stability,
+            hp: enemy.hp,
+            disabled_until_ms: 0,
+            conditions: Vec::new(),
+        }
+    }
+
+    /// Test/helper: start with named stacks that outlive any practical window.
+    pub fn with_condition_stacks(mut self, name: &str, stacks: u32) -> Self {
+        if stacks > 0 {
+            self.conditions.push(TimedFoeCondition {
+                name: name.to_string(),
+                stacks,
+                expires_at_ms: u32::MAX,
+                next_tick_ms: u32::MAX,
+            });
+        }
+        self
+    }
+
+    /// Unexpired stacks of `name` (canonical or alias), summed across entries.
+    pub fn stacks_of(&self, name: &str, now_ms: u32) -> u32 {
+        let want = crate::data::boon_condition_formulas::canonical_condition_name(name);
+        self.conditions
+            .iter()
+            .filter(|c| {
+                c.expires_at_ms > now_ms
+                    && crate::data::boon_condition_formulas::canonical_condition_name(&c.name)
+                        .eq_ignore_ascii_case(want)
+            })
+            .map(|c| c.stacks)
+            .sum()
+    }
+
+    pub fn is_disabled(&self, now_ms: u32) -> bool {
+        self.disabled_until_ms > now_ms
+    }
+
+    /// Apply stacks under the intensity cap from `conditions.json`.
+    pub fn apply_condition(
+        &mut self,
+        name: &str,
+        stacks: u32,
+        duration_ms: u32,
+        now_ms: u32,
+        cap: u32,
+    ) {
+        if stacks == 0 || duration_ms == 0 || cap == 0 {
+            return;
+        }
+        let canonical =
+            crate::data::boon_condition_formulas::canonical_condition_name(name).to_string();
+        let current = self.stacks_of(&canonical, now_ms);
+        let can_apply = stacks.min(cap.saturating_sub(current));
+        if can_apply == 0 {
+            return;
+        }
+        self.conditions.push(TimedFoeCondition {
+            name: canonical,
+            stacks: can_apply,
+            expires_at_ms: now_ms.saturating_add(duration_ms),
+            next_tick_ms: now_ms.saturating_add(1_000),
+        });
+    }
+
+    pub fn extend_disable(&mut self, until_ms: u32) {
+        self.disabled_until_ms = self.disabled_until_ms.max(until_ms);
+    }
+
+    pub fn clear_boons(&mut self) {
+        self.protection = false;
+        self.stability = false;
+    }
+
+    pub fn retain_active(&mut self, now_ms: u32) {
+        self.conditions.retain(|c| c.expires_at_ms > now_ms);
+    }
+
+    /// Vulnerability incoming-damage multiplier from `data/formulas/conditions.json`
+    /// (`incoming_damage_pct_per_stack`, cap `max_stacks`).
+    pub fn vulnerability_multiplier(&self, now_ms: u32, mode: &gw2_core::types::GameMode) -> f64 {
+        let stacks = self
+            .stacks_of("Vulnerability", now_ms)
+            .min(crate::data::boon_condition_formulas::conditions().vulnerability_max_stacks());
+        let pct = crate::data::boon_condition_formulas::conditions()
+            .vulnerability_incoming_pct_per_stack(mode);
+        1.0 + stacks as f64 * pct
+    }
+}
+
 impl EnemyDummy {
     pub fn open() -> Self {
         Self::default()

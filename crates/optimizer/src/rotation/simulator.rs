@@ -19,10 +19,12 @@ use std::collections::HashMap;
 
 use gw2_core::types::GameMode;
 
+#[cfg(test)]
+use super::combat_model::TimedFoeCondition;
 use super::combat_model::{
     kit_escape_kinds, kit_has_corrupt, kit_has_cover_answer, kit_has_interrupt,
     kit_has_mobility_out, kit_has_stability_cover, kit_has_strip, setup_priority,
-    setup_window_ms_for_mode, EnemyDummy,
+    setup_window_ms_for_mode, EnemyDummy, TargetState,
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::{RotationSkill, SimulationResult, SkillEffect, SkillSlot, SkillUsage};
@@ -55,16 +57,6 @@ pub(super) fn reference_armor() -> f64 {
     crate::data::universal_formulas::formulas().tooltip_reference_armor
 }
 
-/// Active condition stack being tracked.
-#[derive(Debug, Clone)]
-struct ConditionStack {
-    /// Index into `SimState::condition_slots`.
-    slot: usize,
-    remaining_ms: u32,
-    /// Per-application pulse clock (apply + 1s, then +1s). Not a global wall pulse.
-    next_tick_ms: u32,
-}
-
 /// One distinct condition name in a sim, with its tick formula resolved once.
 /// Tick damage is linear in condition damage (wiki), so a 60s run never
 /// looks the formula up again: 25 Bleeding stacks x 600 ticks did, and cost
@@ -72,8 +64,6 @@ struct ConditionStack {
 #[derive(Debug, Clone)]
 struct ConditionSlot {
     name: String,
-    base: f64,
-    per_condition_damage: f64,
 }
 
 /// Active buff being tracked.
@@ -213,6 +203,8 @@ pub struct SimParams {
     /// of damage per cast time, so heals, boons and control get cast on an
     /// open dummy. `None` is the gate simulation's pure DPCT.
     pub intent: Option<OptimizationWeights>,
+    /// Target-conditional percents evaluated at land against live TargetState.
+    pub deferred_target: Vec<crate::combat::DeferredTargetModifier>,
 }
 
 impl SimParams {
@@ -238,6 +230,7 @@ impl SimParams {
             armor: 2_000.0,
             mode: GameMode::PvE,
             intent: None,
+            deferred_target: Vec::new(),
         }
     }
 }
@@ -292,13 +285,24 @@ pub fn simulate_with(
     params: &SimParams,
     enemy: EnemyDummy,
 ) -> SimulationResult {
+    simulate_with_target(skills, duration_ms, params, TargetState::from_seed(enemy))
+}
+
+/// Like [`simulate_with`], but the caller supplies a live [`TargetState`]
+/// (Phase 3 Kent probes: pre-stacked Vulnerability, etc.).
+pub fn simulate_with_target(
+    skills: &[RotationSkill],
+    duration_ms: u32,
+    params: &SimParams,
+    target: TargetState,
+) -> SimulationResult {
     let duration = if duration_ms == 0 {
         DEFAULT_DURATION_MS
     } else {
         duration_ms
     };
 
-    let mut sim = SimState::new(skills, duration, enemy, params.clone());
+    let mut sim = SimState::new(skills, duration, target, params.clone());
     sim.setup_until_ms = setup_window_ms_for_mode(duration, params.mode == GameMode::WvW);
     sim.run();
     sim.into_result()
@@ -329,14 +333,13 @@ struct SimState {
     has_weapon_sets: bool,
     /// Prefer CC/strip/cover over DPCT until this time (0 = never).
     setup_until_ms: u32,
-    enemy: EnemyDummy,
-    remaining_hp: Option<f64>,
+    /// Live foe ledger (conditions / disable / prot / stab / hp). Seeded from EnemyDummy.
+    target: TargetState,
     downed: bool,
     invuln_until_ms: u32,
     stomp_ends_ms: u32,
 
     // Tracking
-    conditions: Vec<ConditionStack>,
     condition_slots: Vec<ConditionSlot>,
     buffs: Vec<BuffInstance>,
     buff_slots: Vec<String>,
@@ -354,7 +357,6 @@ struct SimState {
     total_healing: f64,
     /// Control-seconds in ms: hard CC non-overlapping, soft control at half.
     control_ms: f64,
-    enemy_disabled_until_ms: u32,
     might_stack_ms: f64,
     params: SimParams,
 }
@@ -363,7 +365,7 @@ impl SimState {
     fn new(
         skills: &[RotationSkill],
         duration_ms: u32,
-        enemy: EnemyDummy,
+        target: TargetState,
         params: SimParams,
     ) -> Self {
         let skill_states = skills
@@ -376,7 +378,7 @@ impl SimState {
         let has_weapon_sets = skills.iter().any(|s| s.weapon_set > 0);
         let static_casts = skills
             .iter()
-            .map(|skill| StaticCast::new(skill, &params, enemy.stability))
+            .map(|skill| StaticCast::new(skill, &params, target.stability))
             .collect();
 
         Self {
@@ -390,12 +392,10 @@ impl SimState {
             weapon_swap_cooldown_ms: 0,
             has_weapon_sets,
             setup_until_ms: 0,
-            remaining_hp: enemy.hp,
             downed: false,
             invuln_until_ms: 0,
             stomp_ends_ms: 0,
-            enemy,
-            conditions: Vec::new(),
+            target,
             condition_slots: Vec::new(),
             buffs: Vec::new(),
             buff_slots: Vec::new(),
@@ -409,7 +409,6 @@ impl SimState {
             buff_active_ms: Vec::new(),
             total_healing: 0.0,
             control_ms: 0.0,
-            enemy_disabled_until_ms: 0,
             might_stack_ms: 0.0,
             params,
         }
@@ -603,13 +602,8 @@ impl SimState {
         if let Some(i) = self.condition_slots.iter().position(|c| c.name == name) {
             return i;
         }
-        let mode = &self.params.mode;
-        let base = condition_tick_damage(name, 0.0, mode);
-        let per_condition_damage = (condition_tick_damage(name, 1_000.0, mode) - base) / 1_000.0;
         self.condition_slots.push(ConditionSlot {
             name: name.to_string(),
-            base,
-            per_condition_damage,
         });
         self.condition_ticks.push(0.0);
         self.condition_slots.len() - 1
@@ -657,9 +651,18 @@ impl SimState {
                 self.params.ferocity,
                 self.params.crit_chance_bonus + fury_bonus,
             ) * self.params.strike_mult;
-            if self.enemy.protection {
+            if self.target.protection {
                 damage *= crate::data::boon_condition_formulas::boons().protection_multiplier();
             }
+            damage *= self
+                .target
+                .vulnerability_multiplier(self.current_time_ms, &self.params.mode);
+            damage *= crate::combat::deferred_target_multiplier(
+                &self.params.deferred_target,
+                &self.target,
+                self.current_time_ms,
+                crate::combat::TargetModAxis::Strike,
+            );
             self.total_strike_damage += damage;
             *self.skill_damage.entry(hit.skill_id).or_insert(0.0) += damage;
             self.apply_dummy_damage(damage);
@@ -706,20 +709,34 @@ impl SimState {
                     duration_ms,
                 } => {
                     let cap = condition_stack_cap(condition, &self.params.mode);
-                    let slot = self.condition_slot(condition);
-                    let current = self.conditions.iter().filter(|s| s.slot == slot).count();
-                    let can_apply = (*stacks as usize).min(cap.saturating_sub(current));
-                    for _ in 0..can_apply {
-                        self.conditions.push(ConditionStack {
-                            slot,
-                            remaining_ms: (*duration_ms as f64
-                                * self.params.condition_duration_mult)
-                                .round() as u32,
-                            next_tick_ms: self
-                                .current_time_ms
-                                .saturating_add(CONDITION_TICK_INTERVAL_MS),
-                        });
-                    }
+                    let _ = self.condition_slot(condition);
+                    let duration =
+                        (*duration_ms as f64 * self.params.condition_duration_mult).round() as u32;
+                    self.target.apply_condition(
+                        condition,
+                        *stacks,
+                        duration,
+                        self.current_time_ms,
+                        cap as u32,
+                    );
+                }
+                SkillEffect::ApplyBuff {
+                    buff,
+                    stacks,
+                    duration_ms,
+                } if crate::data::boon_condition_formulas::is_condition(buff) => {
+                    // Non-damaging foe conditions (Vulnerability, Chilled, …):
+                    // one shared TargetState ledger with WvW (Phase 3).
+                    let cap = condition_stack_cap(buff, &self.params.mode);
+                    let duration =
+                        (*duration_ms as f64 * self.params.condition_duration_mult).round() as u32;
+                    self.target.apply_condition(
+                        buff,
+                        *stacks,
+                        duration,
+                        self.current_time_ms,
+                        cap as u32,
+                    );
                 }
                 SkillEffect::ApplyBuff {
                     buff,
@@ -728,13 +745,7 @@ impl SimState {
                 } => {
                     let kind = buff_kind(buff);
                     let slot = self.buff_slot(buff);
-                    // The builder files non-damaging conditions here too;
-                    // those are on the enemy and follow Expertise, not
-                    // Concentration.
-                    let duration_mult = match kind {
-                        BuffKind::SoftControl(_) => self.params.condition_duration_mult,
-                        _ => self.params.boon_duration_mult,
-                    };
+                    let duration_mult = self.params.boon_duration_mult;
                     for _ in 0..*stacks {
                         self.buffs.push(BuffInstance {
                             remaining_ms: (*duration_ms as f64 * duration_mult).round() as u32,
@@ -764,13 +775,14 @@ impl SimState {
                 SkillEffect::CrowdControl { duration_ms, .. } => {
                     // Non-overlapping disabled time; nothing lands through
                     // Stability. Same accounting as the WvW timeline.
-                    if !self.enemy.stability {
-                        let previous_end = self.enemy_disabled_until_ms.max(self.current_time_ms);
+                    if !self.target.stability {
+                        let previous_end = self.target.disabled_until_ms.max(self.current_time_ms);
                         let new_end = self
-                            .enemy_disabled_until_ms
+                            .target
+                            .disabled_until_ms
                             .max(self.current_time_ms.saturating_add(*duration_ms));
                         self.control_ms += new_end.saturating_sub(previous_end) as f64;
-                        self.enemy_disabled_until_ms = new_end;
+                        self.target.disabled_until_ms = new_end;
                     }
                 }
                 SkillEffect::ConvertConditions
@@ -779,8 +791,7 @@ impl SimState {
                 SkillEffect::StripBoons { .. }
                 | SkillEffect::CorruptBoons
                 | SkillEffect::StealBoons => {
-                    self.enemy.protection = false;
-                    self.enemy.stability = false;
+                    self.target.clear_boons();
                 }
             }
         }
@@ -808,11 +819,11 @@ impl SimState {
     }
 
     /// Soft control present this tick: half weight per distinct condition.
-    /// The builder files non-damaging conditions under `buffs`.
+    /// Soft control lives on the shared foe TargetState ledger (Phase 3).
     fn soft_control_weight(&self) -> f64 {
         let mut present = 0u8;
-        for b in &self.buffs {
-            if let BuffKind::SoftControl(i) = b.kind {
+        for (i, name) in SOFT_CONTROL.iter().enumerate() {
+            if self.target.stacks_of(name, self.current_time_ms) > 0 {
                 present |= 1 << i;
             }
         }
@@ -830,61 +841,85 @@ impl SimState {
     /// Tick all active conditions — apply damage for each stack, remove expired.
     ///
     /// Wiki Condition: full seconds tick normally; the leftover fraction of a
-    /// second pays that fraction of one tick. Per-application `next_tick_ms`,
-    /// not a global `t % 1000` pulse.
+    /// second pays that fraction of one tick. Per-application `next_tick_ms`.
+    /// Foe ledger is shared [`TargetState`] (Phase 3).
     fn tick_conditions(&mut self, condition_damage: f64) {
-        // Wiki Might: +condition_damage_per_stack (boons.json, 30 at L80) and
-        // "Current conditions are still affected by might." Same fold as
-        // wvw_timeline::tick_conditions. Dummy stays unbooned; this is the
-        // player's live Might, not EnemyDummy cover.
         let condition_damage = condition_damage
             + self.live_might_stacks()
                 * crate::data::boon_condition_formulas::boons().might_condi_per_stack();
 
         let now = self.current_time_ms;
-        let mut tick_total = 0.0;
-        for stack in &mut self.conditions {
-            let slot = &self.condition_slots[stack.slot];
-            let tick_dmg = (slot.base + slot.per_condition_damage * condition_damage)
-                * self.params.condition_mult;
+        let vuln = self.target.vulnerability_multiplier(now, &self.params.mode);
+        let deferred = crate::combat::deferred_target_multiplier(
+            &self.params.deferred_target,
+            &self.target,
+            now,
+            crate::combat::TargetModAxis::Condition,
+        );
+        let incoming_mult = vuln * deferred;
 
-            while stack.next_tick_ms <= now && stack.remaining_ms >= CONDITION_TICK_INTERVAL_MS {
+        let mut tick_total = 0.0;
+        for condition in &mut self.target.conditions {
+            let tick_dmg =
+                condition_tick_damage(&condition.name, condition_damage, &self.params.mode)
+                    * condition.stacks as f64
+                    * self.params.condition_mult
+                    * incoming_mult;
+
+            while condition.next_tick_ms <= now {
+                // Remaining duration budget from the prior boundary (apply or last
+                // full tick) - same as the pre-Phase-3 remaining_ms countdown.
+                let last_boundary = condition
+                    .next_tick_ms
+                    .saturating_sub(CONDITION_TICK_INTERVAL_MS);
+                let remaining_budget = condition.expires_at_ms.saturating_sub(last_boundary);
+                if remaining_budget < CONDITION_TICK_INTERVAL_MS {
+                    break;
+                }
                 self.total_condition_damage += tick_dmg;
                 tick_total += tick_dmg;
-                self.condition_ticks[stack.slot] += 1.0;
-                stack.remaining_ms -= CONDITION_TICK_INTERVAL_MS;
-                stack.next_tick_ms = stack
+                if let Some(slot) = self
+                    .condition_slots
+                    .iter()
+                    .position(|c| c.name.eq_ignore_ascii_case(&condition.name))
+                {
+                    self.condition_ticks[slot] += 1.0;
+                }
+                condition.next_tick_ms = condition
                     .next_tick_ms
                     .saturating_add(CONDITION_TICK_INTERVAL_MS);
             }
 
-            // Expiry: leftover < 1s pays (remaining_ms/1000)*tick, not a full pulse.
-            let last_boundary = stack
-                .next_tick_ms
-                .saturating_sub(CONDITION_TICK_INTERVAL_MS);
-            let expires_at = last_boundary.saturating_add(stack.remaining_ms);
-            if stack.remaining_ms > 0
-                && stack.remaining_ms < CONDITION_TICK_INTERVAL_MS
-                && now >= expires_at
-            {
-                let frac = stack.remaining_ms as f64 / CONDITION_TICK_INTERVAL_MS as f64;
-                let frac_dmg = tick_dmg * frac;
-                self.total_condition_damage += frac_dmg;
-                tick_total += frac_dmg;
-                self.condition_ticks[stack.slot] += frac;
-                stack.remaining_ms = 0;
+            if condition.expires_at_ms <= now {
+                let last_boundary = condition
+                    .next_tick_ms
+                    .saturating_sub(CONDITION_TICK_INTERVAL_MS);
+                let remaining = condition.expires_at_ms.saturating_sub(last_boundary);
+                if remaining > 0 && remaining < CONDITION_TICK_INTERVAL_MS {
+                    let frac = remaining as f64 / CONDITION_TICK_INTERVAL_MS as f64;
+                    let frac_dmg = tick_dmg * frac;
+                    self.total_condition_damage += frac_dmg;
+                    tick_total += frac_dmg;
+                    if let Some(slot) = self
+                        .condition_slots
+                        .iter()
+                        .position(|c| c.name.eq_ignore_ascii_case(&condition.name))
+                    {
+                        self.condition_ticks[slot] += frac;
+                    }
+                }
             }
         }
-        self.apply_dummy_damage(tick_total);
 
-        self.conditions.retain(|s| s.remaining_ms > 0);
+        self.apply_dummy_damage(tick_total);
+        self.target.retain_active(now);
     }
 
     fn apply_dummy_damage(&mut self, damage: f64) {
         if self.downed || self.current_time_ms < self.invuln_until_ms {
             return;
         }
-        let Some(hp) = self.remaining_hp.as_mut() else {
+        let Some(hp) = self.target.hp.as_mut() else {
             return;
         };
         *hp -= damage;
@@ -2389,11 +2424,17 @@ mod tests {
 
     fn paid_bleed_ticks(remaining_ms: u32, window_ms: u32) -> (f64, f64) {
         let params = SimParams::basic(1_000.0, 1_000.0, 1_100.0);
-        let mut sim = SimState::new(&[], window_ms, EnemyDummy::open(), params);
+        let mut sim = SimState::new(
+            &[],
+            window_ms,
+            TargetState::from_seed(EnemyDummy::open()),
+            params,
+        );
         let slot = sim.condition_slot("Bleeding");
-        sim.conditions.push(ConditionStack {
-            slot,
-            remaining_ms,
+        sim.target.conditions.push(TimedFoeCondition {
+            name: "Bleeding".into(),
+            stacks: 1,
+            expires_at_ms: remaining_ms,
             next_tick_ms: CONDITION_TICK_INTERVAL_MS,
         });
         while sim.current_time_ms < window_ms {
@@ -2555,13 +2596,23 @@ mod tests {
         );
 
         let skills = vec![strike, condi];
-        let sim_old = SimState::new(&skills, 5_000, EnemyDummy::open(), no_crit);
+        let sim_old = SimState::new(
+            &skills,
+            5_000,
+            TargetState::from_seed(EnemyDummy::open()),
+            no_crit,
+        );
         assert_eq!(
             sim_old.pick_skill(power),
             Some(1),
             "old formula / no-crit params pick condi"
         );
-        let sim_new = SimState::new(&skills, 5_000, EnemyDummy::open(), high_crit);
+        let sim_new = SimState::new(
+            &skills,
+            5_000,
+            TargetState::from_seed(EnemyDummy::open()),
+            high_crit,
+        );
         assert_eq!(
             sim_new.pick_skill(power),
             Some(0),
@@ -2636,9 +2687,102 @@ mod tests {
             a > base && b > base,
             "each factor alone raises damage: {base} {a} {b}"
         );
+
         assert!(
             interaction > 1.0,
             "multiplicative model predicts a positive interaction; got {interaction} (base {base}, might {a}, mult {b}, both {ab})"
         );
+    }
+
+    // --- Phase 3 Kent probes (Success [5]) ---
+
+    #[test]
+    fn kent_a_prestacked_vulnerability_boosts_strike_cap_25() {
+        let skills = [auto_attack()];
+        let params = SimParams::basic(2_000.0, 0.0, 1_100.0);
+        let open = simulate_with_target(
+            &skills,
+            5_000,
+            &params,
+            TargetState::from_seed(EnemyDummy::open()),
+        );
+        let vuln10 = simulate_with_target(
+            &skills,
+            5_000,
+            &params,
+            TargetState::from_seed(EnemyDummy::open()).with_condition_stacks("Vulnerability", 10),
+        );
+        let vuln25 = simulate_with_target(
+            &skills,
+            5_000,
+            &params,
+            TargetState::from_seed(EnemyDummy::open()).with_condition_stacks("Vulnerability", 25),
+        );
+        let vuln30 = simulate_with_target(
+            &skills,
+            5_000,
+            &params,
+            TargetState::from_seed(EnemyDummy::open()).with_condition_stacks("Vulnerability", 30),
+        );
+        assert!(
+            vuln10.strike_dps > open.strike_dps,
+            "10 Vulnerability stacks must raise strike vs open seed"
+        );
+        let ratio10 = vuln10.strike_dps / open.strike_dps;
+        assert!(
+            (ratio10 - 1.10).abs() < 1e-6,
+            "10 stacks = +10% incoming; got ratio {ratio10}"
+        );
+        let ratio25 = vuln25.strike_dps / open.strike_dps;
+        assert!(
+            (ratio25 - 1.25).abs() < 1e-6,
+            "25 stacks = +25% incoming; got ratio {ratio25}"
+        );
+        assert!(
+            (vuln30.strike_dps - vuln25.strike_dps).abs() < 1e-6,
+            "Vulnerability intensity caps at 25"
+        );
+    }
+
+    #[test]
+    fn kent_c_enemy_dummy_seed_only_prot_stab_hp() {
+        let seed = EnemyDummy {
+            protection: true,
+            stability: true,
+            hp: Some(13_000.0),
+        };
+        let live = TargetState::from_seed(seed);
+        assert!(live.protection);
+        assert!(live.stability);
+        assert_eq!(live.hp, Some(13_000.0));
+        assert_eq!(live.disabled_until_ms, 0);
+        assert!(live.conditions.is_empty());
+        // Seed shape stays three fields — from_seed copies them and adds live ledger fields.
+        let open = EnemyDummy::open();
+        assert!(!open.protection && !open.stability && open.hp.is_none());
+    }
+
+    #[test]
+    fn kent_d_flow_and_wvw_share_one_target_state_ledger() {
+        // Both flow sim and WvW timeline import TargetState / TimedFoeCondition from
+        // combat_model; WvW aliases TimedCondition = TimedFoeCondition (no second foe model).
+        let mut ledger = TargetState::from_seed(EnemyDummy::open());
+        ledger.apply_condition("Vulnerability", 5, 10_000, 0, 25);
+        ledger.extend_disable(3_000);
+        assert_eq!(ledger.stacks_of("Vulnerability", 0), 5);
+        assert!(ledger.is_disabled(1_000));
+        assert!(!ledger.is_disabled(3_000));
+        assert_eq!(ledger.conditions.len(), 1);
+        assert_eq!(ledger.conditions[0].name, "Vulnerability");
+        assert_eq!(ledger.conditions[0].stacks, 5);
+        // Same TimedFoeCondition shape the WvW timeline pushes onto target.conditions.
+        let shared = TimedFoeCondition {
+            name: "Burning".into(),
+            stacks: 2,
+            expires_at_ms: 8_000,
+            next_tick_ms: 1_000,
+        };
+        ledger.conditions.push(shared);
+        assert_eq!(ledger.stacks_of("Burning", 0), 2);
     }
 }
