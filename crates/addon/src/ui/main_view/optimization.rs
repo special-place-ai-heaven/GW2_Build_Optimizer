@@ -665,6 +665,7 @@ pub(super) fn simulate_suggestion_rotation(
             armor: stats.map(|s| s.armor as f64).unwrap_or(2_597.0),
             mode,
             intent: None,
+            deferred_target: Vec::new(),
         },
         gw2_optimizer::rotation::combat_model::EnemyDummy::default(),
     );
