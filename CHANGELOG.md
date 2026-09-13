@@ -2,6 +2,17 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.12 - 2026-09-13
+
+Mesmer trait catalogue: every Mesmer trait is classified; the coverage table's Mesmer NoRecord column is 0.
+
+### Mesmer trait triggers
+
+- The Mesmer's 108 traits are catalogued: every trait is executed from its facts, executed from a dated wiki record, or classified with the mechanic it still needs (clones, phantasms, shatter, mirage cloak, continuum split, distortion, deceptions, ambush, blades, bladesong, instruments, interrupt, disable trigger, dodge, and the rest).
+- New wiki records fire on existing sites: heal skill use (Metaphysical Rejuvenation ally regeneration), Manipulation skill use (Master of Manipulation ally aegis), on-crit (Critical Infusion vigor, Master Fencer ally fury), on-condition-applied blinded (Ineptitude confusion), and Glamour skill use (Temporal Enchanter ally resistance). Superspeed / interrupt-blind halves stay NeedsMechanic — no fake clone, phantasm, shatter, mirage cloak, or continuum-split records and no new trigger enum variants.
+- Honest NeedsMechanic names cover clones, phantasms, shatter, mirage cloak, continuum split, distortion, deceptions, ambush, blades, bladesong, instruments, notes, alacrity, interrupt, disable trigger, dodge, trait skill, aura, stealth, recharge, weapon-scoped, signets, revive, block, and the elite-line unlocks.
+- `SHIPPED_PROFESSIONS` now includes Mesmer; `docs/audit/trait-coverage.md` regenerated with Mesmer NoRecord 0.
+
 ## 1.14.11 - 2026-09-13
 
 Elementalist trait catalogue: every Elementalist trait is classified; the coverage table's Elementalist NoRecord column is 0.
