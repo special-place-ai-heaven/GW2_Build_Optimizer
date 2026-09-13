@@ -26,14 +26,21 @@ fn key_field_is_masked(revealed: bool) -> bool {
 const SETUP_NAV_BTN_W: f32 = 120.0;
 const SETUP_NAV_GAP: f32 = 8.0;
 
-/// One centered horizontal nav row: Back then Next (`same_line`, gap 8, width 120).
-/// Center with `(avail - row_w) / 2`. Never stacks Back under Next.
+/// One centered horizontal nav row: Back then primary CTA (`same_line`, gap 8).
+/// Buttons are at least `SETUP_NAV_BTN_W` wide and grow to fit the label so
+/// "Get Started >>" centers correctly. Never stacks Back under the CTA.
 fn setup_nav_row(ui: &Ui, back: Option<&str>, next: Option<&str>) -> (bool, bool) {
     let n = u32::from(back.is_some()) + u32::from(next.is_some());
     if n == 0 {
         return (false, false);
     }
-    let row_w = (n as f32) * SETUP_NAV_BTN_W + if n == 2 { SETUP_NAV_GAP } else { 0.0 };
+    let back_w = back
+        .map(|l| theme::gold_button_width(ui, l).max(SETUP_NAV_BTN_W))
+        .unwrap_or(0.0);
+    let next_w = next
+        .map(|l| theme::gold_button_width(ui, l).max(SETUP_NAV_BTN_W))
+        .unwrap_or(0.0);
+    let row_w = back_w + next_w + if n == 2 { SETUP_NAV_GAP } else { 0.0 };
     let avail = ui.content_region_avail()[0];
     let pad = ((avail - row_w) / 2.0).max(0.0);
     let at = ui.cursor_pos();
@@ -42,13 +49,13 @@ fn setup_nav_row(ui: &Ui, back: Option<&str>, next: Option<&str>) -> (bool, bool
     let mut back_clicked = false;
     let mut next_clicked = false;
     if let Some(label) = back {
-        back_clicked = theme::gold_button_sized(ui, label, [SETUP_NAV_BTN_W, 0.0]);
+        back_clicked = theme::gold_button_sized(ui, label, [back_w, 0.0]);
     }
     if let Some(label) = next {
         if back.is_some() {
             ui.same_line_with_spacing(0.0, SETUP_NAV_GAP);
         }
-        next_clicked = theme::gold_button_sized(ui, label, [SETUP_NAV_BTN_W, 0.0]);
+        next_clicked = theme::gold_button_sized(ui, label, [next_w, 0.0]);
     }
     (back_clicked, next_clicked)
 }
@@ -60,7 +67,7 @@ pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
     let s_gw2 = t("setup.step_gw2");
     let s_ai = t("setup.step_ai");
     let s_data = t("setup.step_data");
-    // Complete is not a wizard step — DataDownload Next goes straight to Main.
+    // Complete is not a wizard step — DataDownload Get Started goes straight to Main.
     let steps = [
         (SetupStep::Language, s_lang.as_str()),
         (SetupStep::Gw2ApiKey, s_gw2.as_str()),
@@ -91,7 +98,7 @@ pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
         SetupStep::Gw2ApiKey => render_gw2_key_step(ui, state),
         SetupStep::LlmApiKey => render_llm_key_step(ui, state),
         SetupStep::DataDownload => render_download_step(ui, state),
-        // Unreachable in normal flow (download Next -> Main). Keep as safety net.
+        // Unreachable in normal flow (download Get Started -> Main). Keep as safety net.
         SetupStep::Complete => {
             state.screen = Screen::Main;
         }
@@ -730,8 +737,8 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
         }
     }
 
-    // Nav row (never while downloading). Idle/error: Back only. Done: Back | Next
-    // one centered row. Start/Retry stay in the body above.
+    // Nav row (never while downloading). Idle/error: Back only. Done: Back | Get Started
+    // one centered row → Main (Complete/Ready screen+pill removed). Start/Retry stay in body.
     let is_downloading = state
         .setup
         .download_progress
@@ -746,7 +753,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
     if !is_downloading {
         ui.spacing();
         let next_label = if download_done {
-            Some(t("btn.next"))
+            Some(t("btn.get_started"))
         } else {
             None
         };
@@ -755,7 +762,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
             state.screen = Screen::Setup(SetupStep::LlmApiKey);
         }
         if next {
-            // Skip SetupStep::Complete / Get Started — go straight to Main.
+            // Skip SetupStep::Complete — Get Started goes straight to Main.
             state.screen = Screen::Main;
         }
     }
@@ -790,23 +797,6 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
             },
         );
     });
-}
-
-/// Kept out of the happy path: DataDownload Next goes to [`Screen::Main`].
-#[allow(dead_code)]
-fn render_complete_step(ui: &Ui, state: &mut AddonState) {
-    theme::header(ui, &t("setup.complete_header"));
-    ui.spacing();
-
-    ui.text_colored(theme::OPTIMIZED, t("setup.ready_msg"));
-    ui.spacing();
-
-    ui.text_wrapped(t("setup.hotkey_hint"));
-    ui.spacing();
-
-    if theme::gold_button_sized(ui, t("btn.get_started"), [160.0, 0.0]) {
-        state.screen = Screen::Main;
-    }
 }
 
 #[cfg(test)]
