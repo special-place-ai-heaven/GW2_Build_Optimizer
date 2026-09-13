@@ -17,9 +17,9 @@ pub mod trait_skill;
 pub mod trigger_bus;
 pub mod wvw_timeline;
 
+pub use attunement::{apply_attunement_skill, AttunementState, Element};
 pub use combo::{ComboEngine, ComboOutcome, ComboOutcomeEffect, ComboSite, SELF_COMBATANT_ID};
 pub use trait_skill::resolve_trait_skill;
-pub use attunement::{apply_attunement_skill, AttunementState, Element};
 pub use trigger_bus::{
     land_foe_disable, BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST,
 };

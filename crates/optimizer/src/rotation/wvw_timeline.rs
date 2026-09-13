@@ -15,6 +15,7 @@ use crate::data::normalized_effects::{Prerequisite, ScaleBy};
 use crate::data::quality::{CoverageEntry, FactualValue};
 use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
 
+use super::attunement::{apply_attunement_skill, AttunementState, Element};
 use super::combat_model::{corrupt_into, EnemyDummy, TargetState, TimedFoeCondition};
 use super::simulator::{
     alacrity_cd_advance_ms, condition_tick_damage, crit_chance_fraction, reference_armor, SimParams,
@@ -23,7 +24,6 @@ use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::trait_skill::{
     catalog_from_skills, resolve_trait_skill, skill_effects_from_status_operation,
 };
-use super::attunement::{apply_attunement_skill, AttunementState, Element};
 use super::trigger_bus::{
     land_foe_disable, BusEvent, DodgeAction, EndurancePool, TriggerBus, DODGE_COST,
 };
@@ -1513,12 +1513,7 @@ impl<'a> Timeline<'a> {
             &attune_name,
         ) {
             self.trigger_status = Some(element.as_str().to_string());
-            self.trigger_procs(
-                TriggerRule::OnAttunementSwap,
-                Some(attune_id),
-                false,
-                1.0,
-            );
+            self.trigger_procs(TriggerRule::OnAttunementSwap, Some(attune_id), false, 1.0);
             self.trigger_status = None;
         }
         self.resource_blocked_skills.remove(&skill.skill_id);
@@ -4641,7 +4636,6 @@ mod tests {
         );
     }
 
-
     /// E3 Kent: Fire->Water changes current; swap-to-Air fires One with Air only;
     /// while-Earth off in Fire / on in Earth; no-trait = 0.
     #[test]
@@ -4680,10 +4674,16 @@ mod tests {
             skill(5493, SkillSlot::Profession, 0, 0, vec![]),
             skill(5494, SkillSlot::Profession, 0, 1_000, vec![]),
             skill(5495, SkillSlot::Profession, 0, 1_000, vec![]),
-            skill(1, SkillSlot::Weapon1, 250, 0, vec![SkillEffect::StrikeDamage {
-                hit_count: 1,
-                dmg_multiplier: 1.0,
-            }]),
+            skill(
+                1,
+                SkillSlot::Weapon1,
+                250,
+                0,
+                vec![SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 1.0,
+                }],
+            ),
         ];
         let mut named = skills;
         named[0].name = "Water Attunement".into();

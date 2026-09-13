@@ -2,6 +2,10 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.26
+
+### Fixed
+- `cargo fmt --all` import order / wrapping after E3 land (SCHEMA=N).
 ## 1.14.25 - 2026-09-13
 
 NeedsMechanic Engine E3: Elementalist AttunementState + TriggerBus OnAttunementSwap. SCHEMA CHANGE = N.
