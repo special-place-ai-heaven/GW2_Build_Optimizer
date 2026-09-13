@@ -4534,6 +4534,1540 @@
         "class": "NeedsMechanic",
         "mechanic": "pet"
       }
+    },
+    {
+      "effect_id": "trait:1209:0",
+      "source_type": "Trait",
+      "source_id": 1209,
+      "source_name": "Assassin's Fury",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Assassin%27s_Fury (read 2026-09-13: Might x2 for 6 s in WvW/PvP when you gain fury; ICD 2 s (API))",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 2.0,
+        "target_scope": "self",
+        "base_duration_ms": 6000,
+        "internal_cooldown_ms": 2000
+      },
+      "trigger_scope": {
+        "Status": "Fury"
+      },
+      "internal_cooldown": 2.0
+    },
+    {
+      "effect_id": "trait:1210:0",
+      "source_type": "Trait",
+      "source_id": 1210,
+      "source_name": "Unrelenting Strikes",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnCrit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unrelenting_Strikes (read 2026-09-13: Fury 4 s to self and nearby allies on crit; ICD 8 s; 5 targets radius 360)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "Ally",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies",
+        "base_duration_ms": 4000,
+        "internal_cooldown_ms": 8000,
+        "target_count": 5
+      },
+      "internal_cooldown": 8.0
+    },
+    {
+      "effect_id": "trait:1280:0",
+      "source_type": "Trait",
+      "source_id": 1280,
+      "source_name": "Lotus Poison",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lotus_Poison (read 2026-09-13: Weakness 3 s in WvW/PvP when you poison; ICD 10 s (API))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Weakness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 3000,
+        "internal_cooldown_ms": 10000
+      },
+      "trigger_scope": {
+        "Status": "Poisoned"
+      },
+      "internal_cooldown": 10.0
+    },
+    {
+      "effect_id": "trait:1280:1",
+      "source_type": "Trait",
+      "source_id": 1280,
+      "source_name": "Lotus Poison",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lotus_Poison (read 2026-09-13: Might x3 for 10 s when you poison; ICD 10 s (API))",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Might",
+        "amount_mode": "Stacks",
+        "amount_value": 3.0,
+        "target_scope": "self",
+        "base_duration_ms": 10000,
+        "internal_cooldown_ms": 10000
+      },
+      "trigger_scope": {
+        "Status": "Poisoned"
+      },
+      "internal_cooldown": 10.0
+    },
+    {
+      "effect_id": "trait:1170:0",
+      "source_type": "Trait",
+      "source_id": 1170,
+      "source_name": "Sundering Shade",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sundering_Shade (read 2026-09-13: Stealth Attack hits: vulnerability x10 for 5 s; ICD 1 s (API))",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Vulnerability",
+        "amount_mode": "Stacks",
+        "amount_value": 10.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 5000,
+        "internal_cooldown_ms": 1000
+      },
+      "trigger_scope": {
+        "Category": "StealthAttack"
+      },
+      "internal_cooldown": 1.0
+    },
+    {
+      "effect_id": "trait:1170:1",
+      "source_type": "Trait",
+      "source_id": 1170,
+      "source_name": "Sundering Shade",
+      "category": "AppliesBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sundering_Shade (read 2026-09-13: Stealth Attack hits: fury 6 s in WvW/PvP)",
+      "status_operation": {
+        "operation_type": "AppliesBoon",
+        "target_side": "self",
+        "status_kind": "Fury",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "self",
+        "base_duration_ms": 6000,
+        "internal_cooldown_ms": 1000
+      },
+      "trigger_scope": {
+        "Category": "StealthAttack"
+      },
+      "internal_cooldown": 1.0
+    },
+    {
+      "effect_id": "trait:1286:0",
+      "source_type": "Trait",
+      "source_id": 1286,
+      "source_name": "Trickster",
+      "category": "RemovesCondition",
+      "value": 2.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Trickster (read 2026-09-13: Trick skills remove 2 conditions)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 2.0,
+        "target_scope": "self"
+      },
+      "trigger_scope": {
+        "Category": "Trick"
+      }
+    },
+    {
+      "effect_id": "trait:2272:0",
+      "source_type": "Trait",
+      "source_id": 2272,
+      "source_name": "Dark Sentry",
+      "category": "OutgoingHealingPct",
+      "value": 10.0,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "AlwaysOn"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dark_Sentry (read 2026-09-13: +10% healing to others in WvW/PvP; Rot Wallow Venom on barrier is NeedsMechanic barrier)"
+    },
+    {
+      "effect_id": "trait:2272:coverage",
+      "source_type": "Trait",
+      "source_id": 2272,
+      "source_name": "Dark Sentry",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Dark_Sentry (read 2026-09-13: Rot Wallow Venom applied when granting barrier)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "barrier"
+      }
+    },
+    {
+      "effect_id": "trait:1169:0",
+      "source_type": "Trait",
+      "source_id": 1169,
+      "source_name": "Even the Odds",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Even_the_Odds (read 2026-09-13: Stealth Attack hits: crippled 5 s; vulnerability on steal is NeedsMechanic steal)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Crippled",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 5000
+      },
+      "trigger_scope": {
+        "Category": "StealthAttack"
+      }
+    },
+    {
+      "effect_id": "trait:1169:1",
+      "source_type": "Trait",
+      "source_id": 1169,
+      "source_name": "Even the Odds",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Even_the_Odds (read 2026-09-13: Stealth Attack hits: blinded 5 s)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Blinded",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 5000
+      },
+      "trigger_scope": {
+        "Category": "StealthAttack"
+      }
+    },
+    {
+      "effect_id": "trait:1169:coverage",
+      "source_type": "Trait",
+      "source_id": 1169,
+      "source_name": "Even the Odds",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Even_the_Odds (read 2026-09-13: Vulnerability x10 when you steal (6 s in WvW/PvP))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "steal"
+      }
+    },
+    {
+      "effect_id": "trait:1284:0",
+      "source_type": "Trait",
+      "source_id": 1284,
+      "source_name": "Hidden Thief",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hidden_Thief (read 2026-09-13: Stealth Attacks inflict weakness 3 s; ICD 2 s; blindness on steal is NeedsMechanic steal)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Weakness",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 3000,
+        "internal_cooldown_ms": 2000
+      },
+      "trigger_scope": {
+        "Category": "StealthAttack"
+      },
+      "internal_cooldown": 2.0
+    },
+    {
+      "effect_id": "trait:1284:coverage",
+      "source_type": "Trait",
+      "source_id": 1284,
+      "source_name": "Hidden Thief",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hidden_Thief (read 2026-09-13: Stealing inflicts blindness 3 s)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "steal"
+      }
+    },
+    {
+      "effect_id": "trait:1162:0",
+      "source_type": "Trait",
+      "source_id": 1162,
+      "source_name": "Rending Shade",
+      "category": "RemovesBoon",
+      "value": 2.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnHit",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Rending_Shade (read 2026-09-13: Stealth Attack hits steal 2 boons; barrier break on boonless foe is NeedsMechanic barrier)",
+      "status_operation": {
+        "operation_type": "RemovesBoon",
+        "target_side": "Enemy",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 2.0,
+        "target_scope": "SingleTarget"
+      },
+      "trigger_scope": {
+        "Category": "StealthAttack"
+      }
+    },
+    {
+      "effect_id": "trait:1162:coverage",
+      "source_type": "Trait",
+      "source_id": 1162,
+      "source_name": "Rending Shade",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Rending_Shade (read 2026-09-13: Stealth Attack on boonless foe breaks barrier)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "barrier"
+      }
+    },
+    {
+      "effect_id": "trait:1292:0",
+      "source_type": "Trait",
+      "source_id": 1292,
+      "source_name": "Panic Strike",
+      "category": "AppliesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnConditionApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Panic_Strike (read 2026-09-13: Immobilizing a foe poisons them 1 s in WvW/PvP; unique-condition immobilize threshold is NeedsMechanic)",
+      "status_operation": {
+        "operation_type": "AppliesCondition",
+        "target_side": "Enemy",
+        "status_kind": "Poisoned",
+        "amount_mode": "Stacks",
+        "amount_value": 1.0,
+        "target_scope": "SingleTarget",
+        "base_duration_ms": 1000
+      },
+      "trigger_scope": {
+        "Status": "Immobile"
+      }
+    },
+    {
+      "effect_id": "trait:1292:coverage",
+      "source_type": "Trait",
+      "source_id": 1292,
+      "source_name": "Panic Strike",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Panic_Strike (read 2026-09-13: Strike immobilizes when unique conditions >= 3 (1.5 s WvW))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "unique condition count"
+      }
+    },
+    {
+      "effect_id": "trait:1703:0",
+      "source_type": "Trait",
+      "source_id": 1703,
+      "source_name": "Don't Stop",
+      "category": "RemovesCondition",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnBoonApplied",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Don%27t_Stop (read 2026-09-13: Gaining swiftness removes a movement-impairing condition; 80% duration cut while swift is NeedsMechanic)",
+      "status_operation": {
+        "operation_type": "RemovesCondition",
+        "target_side": "self",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "self"
+      },
+      "trigger_scope": {
+        "Status": "Swiftness"
+      }
+    },
+    {
+      "effect_id": "trait:1703:coverage",
+      "source_type": "Trait",
+      "source_id": 1703,
+      "source_name": "Don't Stop",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Don%27t_Stop (read 2026-09-13: 80% shorter movement-impairing conditions while you have swiftness)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "incoming condition duration"
+      }
+    },
+    {
+      "effect_id": "trait:1240:coverage",
+      "source_type": "Trait",
+      "source_id": 1240,
+      "source_name": "Expeditious Dodger",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Expeditious_Dodger (read 2026-09-13: Swiftness 6 s on dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1112:coverage",
+      "source_type": "Trait",
+      "source_id": 1112,
+      "source_name": "Instant Reflexes",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Instant_Reflexes (read 2026-09-13: Evasion (Instant Reflexes effect) on elite; 1.5 s in WvW)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1289:coverage",
+      "source_type": "Trait",
+      "source_id": 1289,
+      "source_name": "Pumping Up",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Pumping_Up (read 2026-09-13: Might on dodge (1 stack 20 s in WvW/PvP))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1237:coverage",
+      "source_type": "Trait",
+      "source_id": 1237,
+      "source_name": "Pain Response",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Pain_Response (read 2026-09-13: Dodging removes a damaging condition)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1234:coverage",
+      "source_type": "Trait",
+      "source_id": 1234,
+      "source_name": "Feline Grace",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Feline_Grace (read 2026-09-13: Vigor on evade (3 s in WvW/PvP))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1241:coverage",
+      "source_type": "Trait",
+      "source_id": 1241,
+      "source_name": "Guarded Initiation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Guarded_Initiation (read 2026-09-13: Resistance 2 s on movement skills; ICD 5 s)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "movement skill"
+      }
+    },
+    {
+      "effect_id": "trait:1290:coverage",
+      "source_type": "Trait",
+      "source_id": 1290,
+      "source_name": "Hard to Catch",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hard_to_Catch (read 2026-09-13: Endurance on shadowstep (5 in competitive))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shadowstep"
+      }
+    },
+    {
+      "effect_id": "trait:1242:coverage",
+      "source_type": "Trait",
+      "source_id": 1242,
+      "source_name": "Fluid Strikes",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Fluid_Strikes (read 2026-09-13: +10% strike damage 5 s after shadowstep or movement skill)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shadowstep"
+      }
+    },
+    {
+      "effect_id": "trait:1295:coverage",
+      "source_type": "Trait",
+      "source_id": 1295,
+      "source_name": "Upper Hand",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Upper_Hand (read 2026-09-13: Initiative on dodge/evade and regen on evade; initiative unmodeled)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1267:coverage",
+      "source_type": "Trait",
+      "source_id": 1267,
+      "source_name": "Signets of Power",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Signets_of_Power (read 2026-09-13: Signets grant 3 initiative on activation)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "initiative"
+      }
+    },
+    {
+      "effect_id": "trait:1215:coverage",
+      "source_type": "Trait",
+      "source_id": 1215,
+      "source_name": "Hidden Killer",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Hidden_Killer (read 2026-09-13: +100% crit chance while stealthed; lingers 4 s after reveal)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "stealth"
+      }
+    },
+    {
+      "effect_id": "trait:1702:coverage",
+      "source_type": "Trait",
+      "source_id": 1702,
+      "source_name": "Invigorating Precision",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Invigorating_Precision (read 2026-09-13: Heal for % of crit damage (10%/20% with fury in WvW/PvP))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "damage-scaled heal"
+      }
+    },
+    {
+      "effect_id": "trait:1279:coverage",
+      "source_type": "Trait",
+      "source_id": 1279,
+      "source_name": "Serpent's Touch",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Serpent%27s_Touch (read 2026-09-13: Stealing poisons; downed attacks poison is NeedsMechanic downed (steal is primary))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "steal"
+      }
+    },
+    {
+      "effect_id": "trait:1257:coverage",
+      "source_type": "Trait",
+      "source_id": 1257,
+      "source_name": "Exposed Weakness",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Exposed_Weakness (read 2026-09-13: +3% strike damage per unique condition on foe in WvW/PvP)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "unique condition count"
+      }
+    },
+    {
+      "effect_id": "trait:1167:coverage",
+      "source_type": "Trait",
+      "source_id": 1167,
+      "source_name": "Improvisation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Improvisation (read 2026-09-13: Stolen skills usable twice; utility recharge on steal; Specter siphon bonus)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "stolen skill"
+      }
+    },
+    {
+      "effect_id": "trait:1293:coverage",
+      "source_type": "Trait",
+      "source_id": 1293,
+      "source_name": "Shadow's Embrace",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shadow%27s_Embrace (read 2026-09-13: Remove a damaging condition on enter/exit stealth)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "stealth"
+      }
+    },
+    {
+      "effect_id": "trait:1136:coverage",
+      "source_type": "Trait",
+      "source_id": 1136,
+      "source_name": "Meld with Shadows",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Meld_with_Shadows (read 2026-09-13: Superspeed 2 s on enter/exit stealth in WvW)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "stealth"
+      }
+    },
+    {
+      "effect_id": "trait:1134:coverage",
+      "source_type": "Trait",
+      "source_id": 1134,
+      "source_name": "Cover of Shadow",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Cover_of_Shadow (read 2026-09-13: Protection field on steal; dark-aura condition removal)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "steal"
+      }
+    },
+    {
+      "effect_id": "trait:1135:coverage",
+      "source_type": "Trait",
+      "source_id": 1135,
+      "source_name": "Shadow's Rejuvenation",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shadow%27s_Rejuvenation (read 2026-09-13: Initiative on enter/exit stealth (1 enter / 1 exit in WvW))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "stealth"
+      }
+    },
+    {
+      "effect_id": "trait:1137:coverage",
+      "source_type": "Trait",
+      "source_id": 1137,
+      "source_name": "Kleptomaniac",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Kleptomaniac (read 2026-09-13: Stealing grants 2 initiative)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "steal"
+      }
+    },
+    {
+      "effect_id": "trait:1159:coverage",
+      "source_type": "Trait",
+      "source_id": 1159,
+      "source_name": "Uncatchable",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Uncatchable (read 2026-09-13: Lesser Caltrops on dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1252:coverage",
+      "source_type": "Trait",
+      "source_id": 1252,
+      "source_name": "Burst of Agility",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Burst_of_Agility (read 2026-09-13: Lesser Haste when attacking from behind/side or defiant)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "flanking"
+      }
+    },
+    {
+      "effect_id": "trait:1163:coverage",
+      "source_type": "Trait",
+      "source_id": 1163,
+      "source_name": "Thrill of the Crime",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Thrill_of_the_Crime (read 2026-09-13: Fury/might/swiftness to allies on Steal (might 6 s x3 in WvW))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "steal"
+      }
+    },
+    {
+      "effect_id": "trait:1277:coverage",
+      "source_type": "Trait",
+      "source_id": 1277,
+      "source_name": "Bountiful Theft",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bountiful_Theft (read 2026-09-13: Vigor and boon rip to allies on Steal (2 boons in WvW))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "steal"
+      }
+    },
+    {
+      "effect_id": "trait:1190:coverage",
+      "source_type": "Trait",
+      "source_id": 1190,
+      "source_name": "Pressure Striking",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Pressure_Striking (read 2026-09-13: Torment x2 8 s on interrupt; defiance-bar ICD 3 s)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "interrupt"
+      }
+    },
+    {
+      "effect_id": "trait:1187:coverage",
+      "source_type": "Trait",
+      "source_id": 1187,
+      "source_name": "Quick Pockets",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Quick_Pockets (read 2026-09-13: Initiative on weapon swap in combat (2 in PvP; WvW shares PvE 3 per API split))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "weapon swap"
+      }
+    },
+    {
+      "effect_id": "trait:1158:coverage",
+      "source_type": "Trait",
+      "source_id": 1158,
+      "source_name": "Sleight of Hand",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sleight_of_Hand (read 2026-09-13: Daze 1 s on Steal; Steal recharge -20%)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "steal"
+      }
+    },
+    {
+      "effect_id": "trait:2403:coverage",
+      "source_type": "Trait",
+      "source_id": 2403,
+      "source_name": "Trinket Collector",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Trinket_Collector (read 2026-09-13: Steal replaced with Skritt Swipe; offensive/defensive artifacts)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "artifact"
+      }
+    },
+    {
+      "effect_id": "trait:2423:coverage",
+      "source_type": "Trait",
+      "source_id": 2423,
+      "source_name": "Card Swap",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Card_Swap (read 2026-09-13: Reshuffle; condition remove on reshuffle/artifact use)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "artifact"
+      }
+    },
+    {
+      "effect_id": "trait:2365:coverage",
+      "source_type": "Trait",
+      "source_id": 2365,
+      "source_name": "Repeat Ransacker",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Repeat_Ransacker (read 2026-09-13: Skritt Swipe recharge reduced on artifact use)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "artifact"
+      }
+    },
+    {
+      "effect_id": "trait:2346:coverage",
+      "source_type": "Trait",
+      "source_id": 2346,
+      "source_name": "Prolific Plunderer",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Prolific_Plunderer (read 2026-09-13: Extra artifact slot and random artifact on pilfer)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "artifact"
+      }
+    },
+    {
+      "effect_id": "trait:2400:coverage",
+      "source_type": "Trait",
+      "source_id": 2400,
+      "source_name": "Scoundrel's Luck",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Scoundrel%27s_Luck (read 2026-09-13: Scoundrel's Luck on Skritt Swipe for double-edge skills)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "artifact"
+      }
+    },
+    {
+      "effect_id": "trait:2431:coverage",
+      "source_type": "Trait",
+      "source_id": 2431,
+      "source_name": "Meticulous Custodian",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Meticulous_Custodian (read 2026-09-13: Artifacts more effective; beneficial effects last longer)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "artifact"
+      }
+    },
+    {
+      "effect_id": "trait:2350:coverage",
+      "source_type": "Trait",
+      "source_id": 2350,
+      "source_name": "Exhilarating Ephemera",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Exhilarating_Ephemera (read 2026-09-13: Damage buff after using an artifact)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "artifact"
+      }
+    },
+    {
+      "effect_id": "trait:2409:coverage",
+      "source_type": "Trait",
+      "source_id": 2409,
+      "source_name": "Prodigious Pincher",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Prodigious_Pincher (read 2026-09-13: Pilfer after spending initiative threshold)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "artifact"
+      }
+    },
+    {
+      "effect_id": "trait:2393:coverage",
+      "source_type": "Trait",
+      "source_id": 2393,
+      "source_name": "Possessive Hoarder",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Possessive_Hoarder (read 2026-09-13: Artifacts grant ally boons; barrier share)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "artifact"
+      }
+    },
+    {
+      "effect_id": "trait:1994:coverage",
+      "source_type": "Trait",
+      "source_id": 1994,
+      "source_name": "Physical Supremacy",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Physical_Supremacy (read 2026-09-13: Physical skills unlocked; endurance threshold +50)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "endurance"
+      }
+    },
+    {
+      "effect_id": "trait:1949:coverage",
+      "source_type": "Trait",
+      "source_id": 1949,
+      "source_name": "Brawler's Tenacity",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Brawler%27s_Tenacity (read 2026-09-13: Physical skills grant 15 endurance)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "endurance"
+      }
+    },
+    {
+      "effect_id": "trait:1975:coverage",
+      "source_type": "Trait",
+      "source_id": 1975,
+      "source_name": "Impacting Disruption",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Impacting_Disruption (read 2026-09-13: Pulmonary impact and Steal recharge on interrupt)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "interrupt"
+      }
+    },
+    {
+      "effect_id": "trait:1837:coverage",
+      "source_type": "Trait",
+      "source_id": 1837,
+      "source_name": "Endurance Thief",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Endurance_Thief (read 2026-09-13: Endurance on successful steal (25 in competitive))",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "steal"
+      }
+    },
+    {
+      "effect_id": "trait:1833:coverage",
+      "source_type": "Trait",
+      "source_id": 1833,
+      "source_name": "Lotus Training",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Lotus_Training (read 2026-09-13: Dodge becomes Impaling Lotus; condition damage after dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:1964:coverage",
+      "source_type": "Trait",
+      "source_id": 1964,
+      "source_name": "Unhindered Combatant",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Unhindered_Combatant (read 2026-09-13: Dodge becomes dash; removes inhibiting conditions)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:2047:coverage",
+      "source_type": "Trait",
+      "source_id": 2047,
+      "source_name": "Bounding Dodger",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Bounding_Dodger (read 2026-09-13: Dodge becomes Bound; strike damage after dodge)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "dodge"
+      }
+    },
+    {
+      "effect_id": "trait:2171:coverage",
+      "source_type": "Trait",
+      "source_id": 2171,
+      "source_name": "Deadeye's Gaze",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Deadeye%27s_Gaze (read 2026-09-13: Steal replaced with Deadeye's Mark; malice; rifles and cantrips)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "deadeye mark"
+      }
+    },
+    {
+      "effect_id": "trait:2145:coverage",
+      "source_type": "Trait",
+      "source_id": 2145,
+      "source_name": "Malicious Intent",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Malicious_Intent (read 2026-09-13: Mark or stealth-attack on mark grants malice)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "malice"
+      }
+    },
+    {
+      "effect_id": "trait:2173:coverage",
+      "source_type": "Trait",
+      "source_id": 2173,
+      "source_name": "Collateral Damage",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Collateral_Damage (read 2026-09-13: Burst of Shadows when marked foe dies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "deadeye mark"
+      }
+    },
+    {
+      "effect_id": "trait:2172:coverage",
+      "source_type": "Trait",
+      "source_id": 2172,
+      "source_name": "Renewing Gaze",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Renewing_Gaze (read 2026-09-13: Mark recharges on mark defeat; regeneration)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "deadeye mark"
+      }
+    },
+    {
+      "effect_id": "trait:2078:coverage",
+      "source_type": "Trait",
+      "source_id": 2078,
+      "source_name": "Payback",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Payback (read 2026-09-13: Heal/utility/elite recharge when Renewing Gaze triggers)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "deadeye mark"
+      }
+    },
+    {
+      "effect_id": "trait:2111:coverage",
+      "source_type": "Trait",
+      "source_id": 2111,
+      "source_name": "Maleficent Seven",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Maleficent_Seven (read 2026-09-13: Malice cap 7; initiative and boons at max malice)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "malice"
+      }
+    },
+    {
+      "effect_id": "trait:2146:coverage",
+      "source_type": "Trait",
+      "source_id": 2146,
+      "source_name": "Fire for Effect",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Fire_for_Effect (read 2026-09-13: Stolen skill grants ally boons; always Steal Time)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "stolen skill"
+      }
+    },
+    {
+      "effect_id": "trait:2184:coverage",
+      "source_type": "Trait",
+      "source_id": 2184,
+      "source_name": "Specter",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Specter (read 2026-09-13: Siphon and Shadow Shroud; scepter; shadow force from initiative)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shadow shroud"
+      }
+    },
+    {
+      "effect_id": "trait:2299:coverage",
+      "source_type": "Trait",
+      "source_id": 2299,
+      "source_name": "Shallow Grave",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shallow_Grave (read 2026-09-13: Transfer/remove conditions on Siphon by target side)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "siphon"
+      }
+    },
+    {
+      "effect_id": "trait:2275:coverage",
+      "source_type": "Trait",
+      "source_id": 2275,
+      "source_name": "Consume Shadows",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Consume_Shadows (read 2026-09-13: Heal allies from shadow force stacks on shroud exit)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shadow shroud"
+      }
+    },
+    {
+      "effect_id": "trait:2288:coverage",
+      "source_type": "Trait",
+      "source_id": 2288,
+      "source_name": "Amplified Siphoning",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Amplified_Siphoning (read 2026-09-13: More shadow force / barrier effectiveness on Siphon)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "siphon"
+      }
+    },
+    {
+      "effect_id": "trait:2289:coverage",
+      "source_type": "Trait",
+      "source_id": 2289,
+      "source_name": "Shadestep",
+      "category": "FlatStat",
+      "value": null,
+      "stacking_rule": "Additive",
+      "trigger_rule": "Passive",
+      "uptime_model": {
+        "kind": "Unknown"
+      },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Shadestep (read 2026-09-13: Shadow Shroud skills support nearby and tethered allies)",
+      "coverage": {
+        "class": "NeedsMechanic",
+        "mechanic": "shadow shroud"
+      }
     }
   ]
 }

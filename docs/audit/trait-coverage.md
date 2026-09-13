@@ -9,7 +9,7 @@
 | Necromancer | 108 | 2 | 27 | 20 | 1 | 56 | 0 | 2 |
 | Ranger | 108 | 42 | 6 | 0 | 0 | 60 | 0 | 0 |
 | Revenant | 108 | 36 | 0 | 0 | 0 | 0 | 72 | 0 |
-| Thief | 108 | 42 | 0 | 0 | 0 | 0 | 66 | 0 |
+| Thief | 108 | 42 | 11 | 0 | 0 | 55 | 0 | 0 |
 | Warrior | 108 | 38 | 1 | 1 | 0 | 0 | 68 | 0 |
 
 ## Elementalist
@@ -807,114 +807,114 @@
 
 | Line | Id | Trait | State | Source |
 |---|---|---|---|---|
-| Acrobatics | 1240 | Expeditious Dodger | NoRecord |  |
-| Acrobatics | 1112 | Instant Reflexes | NoRecord |  |
-| Acrobatics | 1289 | Pumping Up | NoRecord |  |
-| Acrobatics | 1237 | Pain Response | NoRecord |  |
-| Acrobatics | 1234 | Feline Grace | NoRecord |  |
-| Acrobatics | 1241 | Guarded Initiation | NoRecord |  |
+| Acrobatics | 1240 | Expeditious Dodger | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Expeditious_Dodger (read 2026-09-13: Swiftness 6 s on dodge) |
+| Acrobatics | 1112 | Instant Reflexes | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Instant_Reflexes (read 2026-09-13: Evasion (Instant Reflexes effect) on elite; 1.5 s in WvW) |
+| Acrobatics | 1289 | Pumping Up | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Pumping_Up (read 2026-09-13: Might on dodge (1 stack 20 s in WvW/PvP)) |
+| Acrobatics | 1237 | Pain Response | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Pain_Response (read 2026-09-13: Dodging removes a damaging condition) |
+| Acrobatics | 1234 | Feline Grace | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Feline_Grace (read 2026-09-13: Vigor on evade (3 s in WvW/PvP)) |
+| Acrobatics | 1241 | Guarded Initiation | NeedsMechanic: movement skill | https://wiki.guildwars2.com/wiki/Guarded_Initiation (read 2026-09-13: Resistance 2 s on movement skills; ICD 5 s) |
 | Acrobatics | 1192 | Swindler's Equilibrium | facts |  |
-| Acrobatics | 1290 | Hard to Catch | NoRecord |  |
-| Acrobatics | 1242 | Fluid Strikes | NoRecord |  |
+| Acrobatics | 1290 | Hard to Catch | NeedsMechanic: shadowstep | https://wiki.guildwars2.com/wiki/Hard_to_Catch (read 2026-09-13: Endurance on shadowstep (5 in competitive)) |
+| Acrobatics | 1242 | Fluid Strikes | NeedsMechanic: shadowstep | https://wiki.guildwars2.com/wiki/Fluid_Strikes (read 2026-09-13: +10% strike damage 5 s after shadowstep or movement skill) |
 | Acrobatics | 1238 | Assassin's Reward | facts |  |
-| Acrobatics | 1295 | Upper Hand | NoRecord |  |
-| Acrobatics | 1703 | Don't Stop | NoRecord |  |
+| Acrobatics | 1295 | Upper Hand | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Upper_Hand (read 2026-09-13: Initiative on dodge/evade and regen on evade; initiative unmodeled) |
+| Acrobatics | 1703 | Don't Stop | record | https://wiki.guildwars2.com/wiki/Don%27t_Stop (read 2026-09-13: Gaining swiftness removes a movement-impairing condition; 80% duration cut while swift is NeedsMechanic) |
 | Critical Strikes | 1281 | Keen Observer | facts |  |
-| Critical Strikes | 1209 | Assassin's Fury | NoRecord |  |
-| Critical Strikes | 1267 | Signets of Power | NoRecord |  |
+| Critical Strikes | 1209 | Assassin's Fury | record | https://wiki.guildwars2.com/wiki/Assassin%27s_Fury (read 2026-09-13: Might x2 for 6 s in WvW/PvP when you gain fury; ICD 2 s (API)) |
+| Critical Strikes | 1267 | Signets of Power | NeedsMechanic: initiative | https://wiki.guildwars2.com/wiki/Signets_of_Power (read 2026-09-13: Signets grant 3 initiative on activation) |
 | Critical Strikes | 1268 | Twin Fangs | facts |  |
-| Critical Strikes | 1210 | Unrelenting Strikes | NoRecord |  |
-| Critical Strikes | 1170 | Sundering Shade | NoRecord |  |
+| Critical Strikes | 1210 | Unrelenting Strikes | record | https://wiki.guildwars2.com/wiki/Unrelenting_Strikes (read 2026-09-13: Fury 4 s to self and nearby allies on crit; ICD 8 s; 5 targets radius 360) |
+| Critical Strikes | 1170 | Sundering Shade | record | https://wiki.guildwars2.com/wiki/Sundering_Shade (read 2026-09-13: Stealth Attack hits: vulnerability x10 for 5 s; ICD 1 s (API)) |
 | Critical Strikes | 1272 | Practiced Tolerance | facts |  |
 | Critical Strikes | 1299 | Deadly Aim | facts |  |
 | Critical Strikes | 1282 | Ferocious Strikes | facts |  |
 | Critical Strikes | 1904 | No Quarter | facts |  |
-| Critical Strikes | 1215 | Hidden Killer | NoRecord |  |
-| Critical Strikes | 1702 | Invigorating Precision | NoRecord |  |
-| Deadly Arts | 1279 | Serpent's Touch | NoRecord |  |
+| Critical Strikes | 1215 | Hidden Killer | NeedsMechanic: stealth | https://wiki.guildwars2.com/wiki/Hidden_Killer (read 2026-09-13: +100% crit chance while stealthed; lingers 4 s after reveal) |
+| Critical Strikes | 1702 | Invigorating Precision | NeedsMechanic: damage-scaled heal | https://wiki.guildwars2.com/wiki/Invigorating_Precision (read 2026-09-13: Heal for % of crit damage (10%/20% with fury in WvW/PvP)) |
+| Deadly Arts | 1279 | Serpent's Touch | NeedsMechanic: steal | https://wiki.guildwars2.com/wiki/Serpent%27s_Touch (read 2026-09-13: Stealing poisons; downed attacks poison is NeedsMechanic downed (steal is primary)) |
 | Deadly Arts | 1245 | Dagger Training | facts |  |
 | Deadly Arts | 1276 | Mug | facts |  |
 | Deadly Arts | 1164 | Deadly Ambition | facts |  |
-| Deadly Arts | 1280 | Lotus Poison | NoRecord |  |
-| Deadly Arts | 1169 | Even the Odds | NoRecord |  |
-| Deadly Arts | 1292 | Panic Strike | NoRecord |  |
+| Deadly Arts | 1280 | Lotus Poison | record | https://wiki.guildwars2.com/wiki/Lotus_Poison (read 2026-09-13: Weakness 3 s in WvW/PvP when you poison; ICD 10 s (API)) |
+| Deadly Arts | 1169 | Even the Odds | record | https://wiki.guildwars2.com/wiki/Even_the_Odds (read 2026-09-13: Stealth Attack hits: crippled 5 s; vulnerability on steal is NeedsMechanic steal) |
+| Deadly Arts | 1292 | Panic Strike | record | https://wiki.guildwars2.com/wiki/Panic_Strike (read 2026-09-13: Immobilizing a foe poisons them 1 s in WvW/PvP; unique-condition immobilize threshold is NeedsMechanic) |
 | Deadly Arts | 1704 | Revealed Training | facts |  |
-| Deadly Arts | 1257 | Exposed Weakness | NoRecord |  |
+| Deadly Arts | 1257 | Exposed Weakness | NeedsMechanic: unique condition count | https://wiki.guildwars2.com/wiki/Exposed_Weakness (read 2026-09-13: +3% strike damage per unique condition on foe in WvW/PvP) |
 | Deadly Arts | 1291 | Potent Poison | facts |  |
-| Deadly Arts | 1167 | Improvisation | NoRecord |  |
+| Deadly Arts | 1167 | Improvisation | NeedsMechanic: stolen skill | https://wiki.guildwars2.com/wiki/Improvisation (read 2026-09-13: Stolen skills usable twice; utility recharge on steal; Specter siphon bonus) |
 | Deadly Arts | 1269 | Executioner | facts |  |
 | Shadow Arts | 1294 | Merciful Ambush | facts |  |
 | Shadow Arts | 1160 | Shielding Restoration | facts |  |
-| Shadow Arts | 1293 | Shadow's Embrace | NoRecord |  |
-| Shadow Arts | 1284 | Hidden Thief | NoRecord |  |
-| Shadow Arts | 1136 | Meld with Shadows | NoRecord |  |
+| Shadow Arts | 1293 | Shadow's Embrace | NeedsMechanic: stealth | https://wiki.guildwars2.com/wiki/Shadow%27s_Embrace (read 2026-09-13: Remove a damaging condition on enter/exit stealth) |
+| Shadow Arts | 1284 | Hidden Thief | record | https://wiki.guildwars2.com/wiki/Hidden_Thief (read 2026-09-13: Stealth Attacks inflict weakness 3 s; ICD 2 s; blindness on steal is NeedsMechanic steal) |
+| Shadow Arts | 1136 | Meld with Shadows | NeedsMechanic: stealth | https://wiki.guildwars2.com/wiki/Meld_with_Shadows (read 2026-09-13: Superspeed 2 s on enter/exit stealth in WvW) |
 | Shadow Arts | 1297 | Shadow Savior | facts |  |
 | Shadow Arts | 1130 | Leeching Venoms | facts |  |
 | Shadow Arts | 1300 | Cloaked in Shadow | facts |  |
 | Shadow Arts | 1705 | Shadow Siphoning | facts |  |
-| Shadow Arts | 1134 | Cover of Shadow | NoRecord |  |
-| Shadow Arts | 1135 | Shadow's Rejuvenation | NoRecord |  |
-| Shadow Arts | 1162 | Rending Shade | NoRecord |  |
-| Trickery | 1137 | Kleptomaniac | NoRecord |  |
-| Trickery | 1159 | Uncatchable | NoRecord |  |
-| Trickery | 1252 | Burst of Agility | NoRecord |  |
-| Trickery | 1163 | Thrill of the Crime | NoRecord |  |
+| Shadow Arts | 1134 | Cover of Shadow | NeedsMechanic: steal | https://wiki.guildwars2.com/wiki/Cover_of_Shadow (read 2026-09-13: Protection field on steal; dark-aura condition removal) |
+| Shadow Arts | 1135 | Shadow's Rejuvenation | NeedsMechanic: stealth | https://wiki.guildwars2.com/wiki/Shadow%27s_Rejuvenation (read 2026-09-13: Initiative on enter/exit stealth (1 enter / 1 exit in WvW)) |
+| Shadow Arts | 1162 | Rending Shade | record | https://wiki.guildwars2.com/wiki/Rending_Shade (read 2026-09-13: Stealth Attack hits steal 2 boons; barrier break on boonless foe is NeedsMechanic barrier) |
+| Trickery | 1137 | Kleptomaniac | NeedsMechanic: steal | https://wiki.guildwars2.com/wiki/Kleptomaniac (read 2026-09-13: Stealing grants 2 initiative) |
+| Trickery | 1159 | Uncatchable | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Uncatchable (read 2026-09-13: Lesser Caltrops on dodge) |
+| Trickery | 1252 | Burst of Agility | NeedsMechanic: flanking | https://wiki.guildwars2.com/wiki/Burst_of_Agility (read 2026-09-13: Lesser Haste when attacking from behind/side or defiant) |
+| Trickery | 1163 | Thrill of the Crime | NeedsMechanic: steal | https://wiki.guildwars2.com/wiki/Thrill_of_the_Crime (read 2026-09-13: Fury/might/swiftness to allies on Steal (might 6 s x3 in WvW)) |
 | Trickery | 1232 | Preparedness | facts |  |
-| Trickery | 1277 | Bountiful Theft | NoRecord |  |
-| Trickery | 1286 | Trickster | NoRecord |  |
-| Trickery | 1190 | Pressure Striking | NoRecord |  |
+| Trickery | 1277 | Bountiful Theft | NeedsMechanic: steal | https://wiki.guildwars2.com/wiki/Bountiful_Theft (read 2026-09-13: Vigor and boon rip to allies on Steal (2 boons in WvW)) |
+| Trickery | 1286 | Trickster | record | https://wiki.guildwars2.com/wiki/Trickster (read 2026-09-13: Trick skills remove 2 conditions) |
+| Trickery | 1190 | Pressure Striking | NeedsMechanic: interrupt | https://wiki.guildwars2.com/wiki/Pressure_Striking (read 2026-09-13: Torment x2 8 s on interrupt; defiance-bar ICD 3 s) |
 | Trickery | 1157 | Lead Attacks | facts |  |
-| Trickery | 1187 | Quick Pockets | NoRecord |  |
-| Trickery | 1158 | Sleight of Hand | NoRecord |  |
+| Trickery | 1187 | Quick Pockets | NeedsMechanic: weapon swap | https://wiki.guildwars2.com/wiki/Quick_Pockets (read 2026-09-13: Initiative on weapon swap in combat (2 in PvP; WvW shares PvE 3 per API split)) |
+| Trickery | 1158 | Sleight of Hand | NeedsMechanic: steal | https://wiki.guildwars2.com/wiki/Sleight_of_Hand (read 2026-09-13: Daze 1 s on Steal; Steal recharge -20%) |
 | Trickery | 1706 | Deadly Ambush | facts |  |
-| Antiquary | 2403 | Trinket Collector | NoRecord |  |
-| Antiquary | 2423 | Card Swap | NoRecord |  |
-| Antiquary | 2365 | Repeat Ransacker | NoRecord |  |
-| Antiquary | 2346 | Prolific Plunderer | NoRecord |  |
+| Antiquary | 2403 | Trinket Collector | NeedsMechanic: artifact | https://wiki.guildwars2.com/wiki/Trinket_Collector (read 2026-09-13: Steal replaced with Skritt Swipe; offensive/defensive artifacts) |
+| Antiquary | 2423 | Card Swap | NeedsMechanic: artifact | https://wiki.guildwars2.com/wiki/Card_Swap (read 2026-09-13: Reshuffle; condition remove on reshuffle/artifact use) |
+| Antiquary | 2365 | Repeat Ransacker | NeedsMechanic: artifact | https://wiki.guildwars2.com/wiki/Repeat_Ransacker (read 2026-09-13: Skritt Swipe recharge reduced on artifact use) |
+| Antiquary | 2346 | Prolific Plunderer | NeedsMechanic: artifact | https://wiki.guildwars2.com/wiki/Prolific_Plunderer (read 2026-09-13: Extra artifact slot and random artifact on pilfer) |
 | Antiquary | 2337 | Magpie's Defense | facts |  |
-| Antiquary | 2400 | Scoundrel's Luck | NoRecord |  |
-| Antiquary | 2431 | Meticulous Custodian | NoRecord |  |
-| Antiquary | 2350 | Exhilarating Ephemera | NoRecord |  |
+| Antiquary | 2400 | Scoundrel's Luck | NeedsMechanic: artifact | https://wiki.guildwars2.com/wiki/Scoundrel%27s_Luck (read 2026-09-13: Scoundrel's Luck on Skritt Swipe for double-edge skills) |
+| Antiquary | 2431 | Meticulous Custodian | NeedsMechanic: artifact | https://wiki.guildwars2.com/wiki/Meticulous_Custodian (read 2026-09-13: Artifacts more effective; beneficial effects last longer) |
+| Antiquary | 2350 | Exhilarating Ephemera | NeedsMechanic: artifact | https://wiki.guildwars2.com/wiki/Exhilarating_Ephemera (read 2026-09-13: Damage buff after using an artifact) |
 | Antiquary | 2362 | Enterprising Aristocrat | facts |  |
-| Antiquary | 2409 | Prodigious Pincher | NoRecord |  |
-| Antiquary | 2393 | Possessive Hoarder | NoRecord |  |
+| Antiquary | 2409 | Prodigious Pincher | NeedsMechanic: artifact | https://wiki.guildwars2.com/wiki/Prodigious_Pincher (read 2026-09-13: Pilfer after spending initiative threshold) |
+| Antiquary | 2393 | Possessive Hoarder | NeedsMechanic: artifact | https://wiki.guildwars2.com/wiki/Possessive_Hoarder (read 2026-09-13: Artifacts grant ally boons; barrier share) |
 | Antiquary | 2348 | Combat High | facts |  |
-| Daredevil | 1994 | Physical Supremacy | NoRecord |  |
+| Daredevil | 1994 | Physical Supremacy | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Physical_Supremacy (read 2026-09-13: Physical skills unlocked; endurance threshold +50) |
 | Daredevil | 1933 | Marauder's Resilience | facts |  |
 | Daredevil | 2023 | Escapist's Fortitude | facts |  |
-| Daredevil | 1949 | Brawler's Tenacity | NoRecord |  |
+| Daredevil | 1949 | Brawler's Tenacity | NeedsMechanic: endurance | https://wiki.guildwars2.com/wiki/Brawler%27s_Tenacity (read 2026-09-13: Physical skills grant 15 endurance) |
 | Daredevil | 1887 | Weakening Strikes | facts |  |
 | Daredevil | 1884 | Staff Master | facts |  |
 | Daredevil | 1893 | Havoc Specialist | facts |  |
-| Daredevil | 1975 | Impacting Disruption | NoRecord |  |
-| Daredevil | 1837 | Endurance Thief | NoRecord |  |
-| Daredevil | 1833 | Lotus Training | NoRecord |  |
-| Daredevil | 1964 | Unhindered Combatant | NoRecord |  |
-| Daredevil | 2047 | Bounding Dodger | NoRecord |  |
-| Deadeye | 2171 | Deadeye's Gaze | NoRecord |  |
-| Deadeye | 2145 | Malicious Intent | NoRecord |  |
-| Deadeye | 2173 | Collateral Damage | NoRecord |  |
+| Daredevil | 1975 | Impacting Disruption | NeedsMechanic: interrupt | https://wiki.guildwars2.com/wiki/Impacting_Disruption (read 2026-09-13: Pulmonary impact and Steal recharge on interrupt) |
+| Daredevil | 1837 | Endurance Thief | NeedsMechanic: steal | https://wiki.guildwars2.com/wiki/Endurance_Thief (read 2026-09-13: Endurance on successful steal (25 in competitive)) |
+| Daredevil | 1833 | Lotus Training | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Lotus_Training (read 2026-09-13: Dodge becomes Impaling Lotus; condition damage after dodge) |
+| Daredevil | 1964 | Unhindered Combatant | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Unhindered_Combatant (read 2026-09-13: Dodge becomes dash; removes inhibiting conditions) |
+| Daredevil | 2047 | Bounding Dodger | NeedsMechanic: dodge | https://wiki.guildwars2.com/wiki/Bounding_Dodger (read 2026-09-13: Dodge becomes Bound; strike damage after dodge) |
+| Deadeye | 2171 | Deadeye's Gaze | NeedsMechanic: deadeye mark | https://wiki.guildwars2.com/wiki/Deadeye%27s_Gaze (read 2026-09-13: Steal replaced with Deadeye's Mark; malice; rifles and cantrips) |
+| Deadeye | 2145 | Malicious Intent | NeedsMechanic: malice | https://wiki.guildwars2.com/wiki/Malicious_Intent (read 2026-09-13: Mark or stealth-attack on mark grants malice) |
+| Deadeye | 2173 | Collateral Damage | NeedsMechanic: deadeye mark | https://wiki.guildwars2.com/wiki/Collateral_Damage (read 2026-09-13: Burst of Shadows when marked foe dies) |
 | Deadeye | 2136 | One in the Chamber | facts |  |
-| Deadeye | 2172 | Renewing Gaze | NoRecord |  |
+| Deadeye | 2172 | Renewing Gaze | NeedsMechanic: deadeye mark | https://wiki.guildwars2.com/wiki/Renewing_Gaze (read 2026-09-13: Mark recharges on mark defeat; regeneration) |
 | Deadeye | 2118 | Silent Scope | facts |  |
-| Deadeye | 2078 | Payback | NoRecord |  |
+| Deadeye | 2078 | Payback | NeedsMechanic: deadeye mark | https://wiki.guildwars2.com/wiki/Payback (read 2026-09-13: Heal/utility/elite recharge when Renewing Gaze triggers) |
 | Deadeye | 2160 | Premeditation | facts |  |
 | Deadeye | 2084 | Iron Sight | facts |  |
-| Deadeye | 2111 | Maleficent Seven | NoRecord |  |
+| Deadeye | 2111 | Maleficent Seven | NeedsMechanic: malice | https://wiki.guildwars2.com/wiki/Maleficent_Seven (read 2026-09-13: Malice cap 7; initiative and boons at max malice) |
 | Deadeye | 2093 | Be Quick or Be Killed | facts |  |
-| Deadeye | 2146 | Fire for Effect | NoRecord |  |
-| Specter | 2184 | Specter | NoRecord |  |
+| Deadeye | 2146 | Fire for Effect | NeedsMechanic: stolen skill | https://wiki.guildwars2.com/wiki/Fire_for_Effect (read 2026-09-13: Stolen skill grants ally boons; always Steal Time) |
+| Specter | 2184 | Specter | NeedsMechanic: shadow shroud | https://wiki.guildwars2.com/wiki/Specter (read 2026-09-13: Siphon and Shadow Shroud; scepter; shadow force from initiative) |
 | Specter | 2284 | Second Opinion | facts |  |
-| Specter | 2299 | Shallow Grave | NoRecord |  |
-| Specter | 2275 | Consume Shadows | NoRecord |  |
-| Specter | 2272 | Dark Sentry | NoRecord |  |
+| Specter | 2299 | Shallow Grave | NeedsMechanic: siphon | https://wiki.guildwars2.com/wiki/Shallow_Grave (read 2026-09-13: Transfer/remove conditions on Siphon by target side) |
+| Specter | 2275 | Consume Shadows | NeedsMechanic: shadow shroud | https://wiki.guildwars2.com/wiki/Consume_Shadows (read 2026-09-13: Heal allies from shadow force stacks on shroud exit) |
+| Specter | 2272 | Dark Sentry | record | https://wiki.guildwars2.com/wiki/Dark_Sentry (read 2026-09-13: +10% healing to others in WvW/PvP; Rot Wallow Venom on barrier is NeedsMechanic barrier) |
 | Specter | 2290 | Larcenous Torment | facts |  |
-| Specter | 2288 | Amplified Siphoning | NoRecord |  |
+| Specter | 2288 | Amplified Siphoning | NeedsMechanic: siphon | https://wiki.guildwars2.com/wiki/Amplified_Siphoning (read 2026-09-13: More shadow force / barrier effectiveness on Siphon) |
 | Specter | 2285 | Traversing Dusk | facts |  |
 | Specter | 2280 | Panaku's Ambition | facts |  |
 | Specter | 2264 | Strength of Shadows | facts |  |
 | Specter | 2300 | Hungering Darkness | facts |  |
-| Specter | 2289 | Shadestep | NoRecord |  |
+| Specter | 2289 | Shadestep | NeedsMechanic: shadow shroud | https://wiki.guildwars2.com/wiki/Shadestep (read 2026-09-13: Shadow Shroud skills support nearby and tethered allies) |
 
 ## Warrior
 
