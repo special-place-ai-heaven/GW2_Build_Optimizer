@@ -2,6 +2,15 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.22 - 2026-09-13
+
+NeedsMechanic Engine E2: trait-skill cast scheduler via existing TriggerRule sites. SCHEMA CHANGE = N.
+
+- Optional `cast_skill_id` on NormalizedEffect; shared `resolve_trait_skill` applies lesser SkillEffects on the existing apply path (wvw_timeline + simulator). No OnTraitSkill; OnSkillUse stays the when, never "I cast a lesser".
+- Executable trait-skill records: Final Shielding (OnElite → Lesser Arcane Shield), Defy Pain (OnElite → Lesser Endure Pain), Protector's Restoration (OnSkillUse Heal → Lesser Symbol of Protection). NeedsMechanic:trait skill → record.
+- Lesser resolve does not emit OnElite/OnDisableFoe unless those events actually land. One TriggerBus.
+- Kent causal micro-proof: elite + Final Shielding inactive vs active changes Arcane Shield; ICD holds; ≥3 trait-skill traits executing.
+
 ## 1.14.21 - 2026-09-13
 
 NeedsMechanic Engine E1: TriggerBus OnDisableFoe fires on landed foe disable. SCHEMA CHANGE = N.

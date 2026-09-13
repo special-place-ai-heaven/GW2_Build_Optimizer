@@ -505,6 +505,10 @@ pub struct NormalizedEffect {
     /// Classified, not executed: the trait's reason for the coverage line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage: Option<CoverageBlock>,
+    /// NeedsMechanic Engine E2: lesser skill cast when this record fires.
+    /// Ids come from the record payload (trait.skills), never a hardcoded map.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cast_skill_id: Option<u32>,
 }
 
 /// A single normalized effects file for one game mode in a specific patch.
@@ -813,6 +817,7 @@ mod tests {
             healing_power_coefficient: None,
             derived_from: Vec::new(),
             coverage: None,
+            cast_skill_id: None,
         }
     }
 
@@ -856,6 +861,7 @@ mod tests {
             healing_power_coefficient: None,
             derived_from: Vec::new(),
             coverage: None,
+            cast_skill_id: None,
         }
     }
 
