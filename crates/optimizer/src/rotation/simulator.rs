@@ -26,8 +26,9 @@ use super::combat_model::{
     kit_has_mobility_out, kit_has_stability_cover, kit_has_strip, setup_priority,
     setup_window_ms_for_mode, EnemyDummy, TargetState,
 };
+use super::combo::{ComboEngine, ComboOutcome, ComboOutcomeEffect, ComboSite, SELF_COMBATANT_ID};
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
-use super::{RotationSkill, SimulationResult, SkillEffect, SkillSlot, SkillUsage};
+use super::{CoverKind, RotationSkill, SimulationResult, SkillEffect, SkillSlot, SkillUsage};
 use crate::scoring::{
     OptimizationWeights, PROTECTION_REDUCTION, REALIZED_BOON_NORM, REALIZED_CONDI_DPS_NORM,
     REALIZED_CONTROL_NORM, REALIZED_HEALING_NORM, REALIZED_STRIKE_DPS_NORM,
@@ -368,6 +369,8 @@ struct SimState {
     control_ms: f64,
     might_stack_ms: f64,
     params: SimParams,
+    /// Live combo fields (Phase 4). World/sim state, not TargetState.
+    combo: ComboEngine,
 }
 
 impl SimState {
@@ -423,6 +426,7 @@ impl SimState {
             control_ms: 0.0,
             might_stack_ms: 0.0,
             params,
+            combo: ComboEngine::new(),
         }
     }
 
@@ -766,8 +770,37 @@ impl SimState {
                         });
                     }
                 }
-                SkillEffect::ComboField { .. } | SkillEffect::ComboFinisher { .. } => {
-                    // Combo fields tracked but not simulated for damage
+                SkillEffect::ComboField {
+                    field_type,
+                    duration_ms,
+                } => {
+                    // Fields before finishers: placed here in effect order; skills
+                    // that list both should list the field first (ledger ordering).
+                    self.combo.place_field(
+                        field_type,
+                        *duration_ms,
+                        self.current_time_ms,
+                        ComboSite::Ground,
+                        SELF_COMBATANT_ID,
+                    );
+                }
+                SkillEffect::ComboFinisher {
+                    finisher_type,
+                    percent,
+                } => {
+                    // Interrupted leap = no finisher: flow open-dummy has no CC
+                    // interrupt of the pending cast yet; pass interrupted=false.
+                    // Engine still honors the flag for Kent / future CC wiring.
+                    if let Some(outcome) = self.combo.try_finisher(
+                        finisher_type,
+                        *percent,
+                        self.current_time_ms,
+                        SELF_COMBATANT_ID,
+                        ComboSite::Ground,
+                        false,
+                    ) {
+                        self.apply_combo_outcome(outcome);
+                    }
                 }
                 SkillEffect::Healing { hit_count } => {
                     // Same conservative model as the WvW timeline. The open
@@ -840,6 +873,115 @@ impl SimState {
             }
         }
         present.count_ones() as f64 * 0.5
+    }
+
+    fn apply_combo_outcome(&mut self, outcome: ComboOutcome) {
+        let scale = outcome.proc_scale;
+        if scale <= 0.0 {
+            return;
+        }
+        match outcome.effect {
+            ComboOutcomeEffect::Buff {
+                name,
+                stacks,
+                duration_ms,
+            } => {
+                let duration =
+                    ((duration_ms as f64) * scale * self.params.boon_duration_mult).round() as u32;
+                if duration == 0 || stacks == 0 {
+                    return;
+                }
+                let kind = buff_kind(&name);
+                let slot = self.buff_slot(&name);
+                for _ in 0..stacks {
+                    self.buffs.push(BuffInstance {
+                        remaining_ms: duration,
+                        kind,
+                        slot,
+                    });
+                }
+            }
+            ComboOutcomeEffect::Condition {
+                name,
+                stacks,
+                duration_ms,
+            } => {
+                let duration = ((duration_ms as f64) * scale * self.params.condition_duration_mult)
+                    .round() as u32;
+                if duration == 0 || stacks == 0 {
+                    return;
+                }
+                let cap = condition_stack_cap(&name, &self.params.mode);
+                let _ = self.condition_slot(&name);
+                self.target.apply_condition(
+                    &name,
+                    stacks,
+                    duration,
+                    self.current_time_ms,
+                    cap as u32,
+                );
+            }
+            ComboOutcomeEffect::Healing {
+                base,
+                healing_power_coef,
+            } => {
+                let amount = (base + self.params.healing_power * healing_power_coef)
+                    * scale
+                    * self.params.healing_mult;
+                self.total_healing += amount;
+            }
+            ComboOutcomeEffect::LifeSteal {
+                damage_base,
+                damage_power_coef,
+                heal_base,
+                heal_healing_power_coef,
+            } => {
+                let damage = (damage_base + damage_power_coef * self.params.power) * scale;
+                let healing =
+                    (heal_base + heal_healing_power_coef * self.params.healing_power) * scale;
+                self.total_strike_damage += damage;
+                self.total_healing += healing;
+            }
+            ComboOutcomeEffect::ConditionCleanse { count } => {
+                // Roster-level cleanse accounting matches RemovesCondition.
+                let _ = ((count as f64) * scale).round() as u32;
+            }
+            ComboOutcomeEffect::Cover { kind, duration_ms } => {
+                // Flow open-dummy: model Stealth/Blind as timed self buffs when
+                // CoverKind has no dedicated ledger here.
+                let name = match kind {
+                    CoverKind::Stealth => "Stealth",
+                    CoverKind::Blind => "Blinded",
+                    _ => return,
+                };
+                let duration =
+                    ((duration_ms as f64) * scale * self.params.boon_duration_mult).round() as u32;
+                if duration == 0 {
+                    return;
+                }
+                let bkind = buff_kind(name);
+                let slot = self.buff_slot(name);
+                self.buffs.push(BuffInstance {
+                    remaining_ms: duration,
+                    kind: bkind,
+                    slot,
+                });
+            }
+            ComboOutcomeEffect::CrowdControl { duration_ms } => {
+                let duration = ((duration_ms as f64) * scale).round() as u32;
+                if duration == 0 || self.target.stability {
+                    return;
+                }
+                let previous_end = self.target.disabled_until_ms.max(self.current_time_ms);
+                let new_end = self
+                    .target
+                    .disabled_until_ms
+                    .max(self.current_time_ms.saturating_add(duration));
+                self.control_ms += new_end.saturating_sub(previous_end) as f64;
+                self.target.disabled_until_ms = new_end;
+            }
+            ComboOutcomeEffect::Unmodeled { .. } => {}
+        }
     }
 
     fn live_might_stacks(&self) -> f64 {
@@ -2815,5 +2957,232 @@ mod tests {
         // Same types the timeline holds — not a second dodge path.
         let _also: TriggerBus = TriggerBus::new();
         let _also_pool: EndurancePool = EndurancePool::new_full();
+    }
+
+    fn phase4_combo_skill(
+        id: u32,
+        name: &str,
+        effects: Vec<SkillEffect>,
+        cast_ms: u32,
+        cd_ms: u32,
+    ) -> RotationSkill {
+        RotationSkill {
+            skill_id: id,
+            name: name.into(),
+            slot: SkillSlot::Utility,
+            cast_time_ms: cast_ms,
+            cooldown_ms: cd_ms,
+            effects,
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+            categories: vec![],
+            slot_name: Some("Utility".into()),
+            targets: 1,
+        }
+    }
+
+    #[test]
+    fn phase4_fire_blast_might_requires_field() {
+        let field = phase4_combo_skill(
+            9001,
+            "Fire Field",
+            vec![
+                SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 0.05,
+                },
+                SkillEffect::ComboField {
+                    field_type: "Fire".into(),
+                    duration_ms: 5_000,
+                },
+            ],
+            300,
+            20_000,
+        );
+        let blast = phase4_combo_skill(
+            9002,
+            "Blast Finisher",
+            vec![
+                SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 0.04,
+                },
+                SkillEffect::ComboFinisher {
+                    finisher_type: "Blast".into(),
+                    percent: 100,
+                },
+            ],
+            300,
+            20_000,
+        );
+        let with_field = simulate(
+            &[field.clone(), blast.clone()],
+            2_500,
+            2_000.0,
+            0.0,
+            1_000.0,
+        );
+        let finisher_only = simulate(&[blast], 2_500, 2_000.0, 0.0, 1_000.0);
+        assert!(
+            with_field.might_stacks_avg > 0.5,
+            "Fire+Blast Might avg={}",
+            with_field.might_stacks_avg
+        );
+        assert!(
+            finisher_only.might_stacks_avg < 0.05,
+            "Blast alone Might avg={}",
+            finisher_only.might_stacks_avg
+        );
+    }
+
+    #[test]
+    fn phase4_water_blast_heal_scales_with_healing_power() {
+        let mk = |hp: f64| {
+            let field = phase4_combo_skill(
+                9011,
+                "Water Field",
+                vec![
+                    SkillEffect::StrikeDamage {
+                        hit_count: 1,
+                        dmg_multiplier: 0.05,
+                    },
+                    SkillEffect::ComboField {
+                        field_type: "Water".into(),
+                        duration_ms: 5_000,
+                    },
+                ],
+                300,
+                20_000,
+            );
+            let blast = phase4_combo_skill(
+                9012,
+                "Water Blast",
+                vec![
+                    SkillEffect::StrikeDamage {
+                        hit_count: 1,
+                        dmg_multiplier: 0.04,
+                    },
+                    SkillEffect::ComboFinisher {
+                        finisher_type: "Blast".into(),
+                        percent: 100,
+                    },
+                ],
+                300,
+                20_000,
+            );
+            let mut params = SimParams::basic(2_000.0, 0.0, 1_000.0);
+            params.healing_power = hp;
+            simulate_with(&[field, blast], 2_500, &params, EnemyDummy::open())
+        };
+        let low = mk(0.0);
+        let high = mk(1_000.0);
+        assert!(
+            high.healing_per_second > low.healing_per_second + 50.0,
+            "heal must rise with healing_power: {} vs {}",
+            high.healing_per_second,
+            low.healing_per_second
+        );
+    }
+
+    #[test]
+    fn phase4_fire_projectile_burning_via_target_state() {
+        let field = phase4_combo_skill(
+            9021,
+            "Fire Field",
+            vec![
+                SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 0.05,
+                },
+                SkillEffect::ComboField {
+                    field_type: "Fire".into(),
+                    duration_ms: 5_000,
+                },
+            ],
+            300,
+            20_000,
+        );
+        let proj = phase4_combo_skill(
+            9022,
+            "Fire Projectile",
+            vec![
+                SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 0.04,
+                },
+                SkillEffect::ComboFinisher {
+                    finisher_type: "Projectile".into(),
+                    percent: 100,
+                },
+            ],
+            300,
+            20_000,
+        );
+        let result = simulate(&[field, proj], 2_500, 2_000.0, 0.0, 1_000.0);
+        let burning = result
+            .condition_uptime
+            .get("Burning")
+            .copied()
+            .unwrap_or(0.0);
+        assert!(
+            burning > 0.0,
+            "Burning missing: {:?}",
+            result.condition_uptime
+        );
+    }
+
+    #[test]
+    fn phase4_projectile_ev_scales_20_vs_100() {
+        let mk = |percent: u32| {
+            let field = phase4_combo_skill(
+                9031,
+                "Fire Field",
+                vec![
+                    SkillEffect::StrikeDamage {
+                        hit_count: 1,
+                        dmg_multiplier: 0.05,
+                    },
+                    SkillEffect::ComboField {
+                        field_type: "Fire".into(),
+                        duration_ms: 5_000,
+                    },
+                ],
+                300,
+                20_000,
+            );
+            let proj = phase4_combo_skill(
+                9032,
+                "Proj",
+                vec![
+                    SkillEffect::StrikeDamage {
+                        hit_count: 1,
+                        dmg_multiplier: 0.04,
+                    },
+                    SkillEffect::ComboFinisher {
+                        finisher_type: "Projectile".into(),
+                        percent,
+                    },
+                ],
+                300,
+                20_000,
+            );
+            simulate(&[field, proj], 2_500, 2_000.0, 0.0, 1_000.0)
+        };
+        let b100 = mk(100)
+            .condition_uptime
+            .get("Burning")
+            .copied()
+            .unwrap_or(0.0);
+        let b20 = mk(20)
+            .condition_uptime
+            .get("Burning")
+            .copied()
+            .unwrap_or(0.0);
+        assert!(b100 > 0.0, "100% burning");
+        assert!(
+            (b20 / b100 - 0.20).abs() < 0.12,
+            "20% EV ~0.2x: {b20} vs {b100}"
+        );
     }
 }

@@ -2,6 +2,16 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.19 - 2026-09-13
+
+Phase 4 ComboEngine: shared field x finisher resolution from `data/formulas/combos.json`. SCHEMA CHANGE = N.
+
+- NEW `data/combos.rs` loads the wiki combo table (`include_str!` + `OnceLock`, boons.json pattern).
+- NEW `rotation/combo.rs` `ComboEngine` owns live fields (`ComboSite`, expiry, max 5 unique combatants) and emits `ComboOutcome`; one engine for flow sim and WvW timeline.
+- `simulator.rs` and `wvw_timeline.rs` call the engine; hardcoded `resolve_combo` field x finisher arms deleted. Foe conditions go through `TargetState::apply_condition` (Phase 3).
+- Projectile finishers honor API `percent` as deterministic EV (no RNG). Water heal / Dark whirl leech keep existing WvW coefficients; unread cells `note_unmodeled`.
+- Kent: Fire blast Might, Water heal scales with Healing Power, Burning via TargetState, 20% vs 100% EV, 5th combatant ok / 6th refused; reaper dark-whirl / expired-field retargeted to engine.
+
 ## 1.14.18 - 2026-09-13
 
 First-run setup nav/complete/news parity with Dieter DESIGN LOCK. SCHEMA CHANGE = N.
