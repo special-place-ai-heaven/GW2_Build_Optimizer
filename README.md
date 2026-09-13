@@ -75,7 +75,7 @@ defenses using profession, armor weight, gear, upgrades, traits, and the selecte
 game mode. Temporary effects and modeled rotation output stay in separately
 labeled sections instead of looking like permanent character-sheet values.
 
-![Stats comparison](docs/screenshots/stats.png)
+![Stats comparison](docs/screenshots/Stats.png)
 
 **Saves** keeps named optimized builds grouped by character. A saved result can
 be loaded back into the overlay, updated in place, or deleted when it is obsolete.
