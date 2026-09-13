@@ -2,6 +2,10 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.29
+
+### Fixed
+- clippy `redundant_closure` in Stats fill-mode i18n map (SCHEMA=N).
 ## 1.14.28 - 2026-09-13
 
 UX strings for durable items fill modes. SCHEMA CHANGE = N.

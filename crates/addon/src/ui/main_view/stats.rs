@@ -306,7 +306,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                                 .and_then(|d| d.items_fill_kind);
                             let mode = fill
                                 .map(crate::state::items_fill_i18n_key)
-                                .map(|k| gw2_core::i18n::t(k));
+                                .map(gw2_core::i18n::t);
                             let detail = if let Some(ref d) = progress.detail {
                                 format!("Refreshing: {} ({})", progress.step_name, d)
                             } else {
