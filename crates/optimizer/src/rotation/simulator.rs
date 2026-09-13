@@ -330,6 +330,9 @@ struct SimState {
     /// E3: shared AttunementState with wvw_timeline (sole current writer).
     #[allow(dead_code)]
     attunement: super::attunement::AttunementState,
+    /// E4: shared IllusionState with wvw_timeline (sole clone-count writer).
+    #[allow(dead_code)]
+    illusion: super::illusion::IllusionState,
 
     skills: Vec<RotationSkill>,
     skill_states: Vec<SkillState>,
@@ -401,6 +404,7 @@ impl SimState {
             endurance: super::trigger_bus::EndurancePool::new_full(),
             dodge_action: super::trigger_bus::DodgeAction::new(),
             attunement: super::attunement::AttunementState::new(),
+            illusion: super::illusion::IllusionState::new(),
             skills: skills.to_vec(),
             skill_states,
             duration_ms,
@@ -2969,6 +2973,8 @@ mod tests {
         let _also_pool: EndurancePool = EndurancePool::new_full();
         let _also_attune: super::super::attunement::AttunementState =
             super::super::attunement::AttunementState::new();
+        let _also_illusion: super::super::illusion::IllusionState =
+            super::super::illusion::IllusionState::new();
     }
 
     /// E1 Kent: flow CrowdControl that lands emits OnDisableFoe; Stability does not.

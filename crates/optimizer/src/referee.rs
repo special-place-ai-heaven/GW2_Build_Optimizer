@@ -1453,6 +1453,7 @@ mod tests {
                 bus_on_dodge: 0,
                 bus_on_disable_foe: 0,
                 bus_on_attunement_swap: 0,
+                bus_on_clone_created: 0,
             }),
         }
     }
