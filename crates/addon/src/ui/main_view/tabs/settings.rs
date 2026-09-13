@@ -1775,19 +1775,15 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
         theme::gold_button_sized(ui, t("btn.refreshing"), [160.0, 0.0]);
         style.pop();
     } else if theme::gold_button_sized(ui, t("btn.refresh_game"), [160.0, 0.0]) {
-        let cache = gw2_api::cache::DataCache::new(&cache_dir);
-        if let Err(e) = cache.clear_all() {
-            state.main.error = Some(tf("fmt.err_refresh", &[("err", &e.to_string())]));
-        } else {
-            state.config.cache_build_number = None;
-            crate::ui::save_config_detached(state);
-            state.main.game_db = None;
-            state.setup.download_progress = None;
-            // Force the cached "Cache: …" label to recompute on the next frame.
-            state.main.settings_cache_size_frames = 0;
-            invalidate_pack_status_cache();
-            stats::start_game_data_refresh(state);
-        }
+        // Do NOT wipe the on-disk cache here. RefreshMode::Default (FOLD3)
+        // skips KEPT catalog body fetches when CacheEntry.build matches live
+        // /v2/build; clear_all() deleted items.json and forced ~74k
+        // install_items, defeating FOLD3 and reopening setup (House DIAG).
+        // Explicit wipe remains only on Clear Cache above.
+        state.setup.download_progress = None;
+        // Force the cached "Cache: …" label to recompute after refresh.
+        state.main.settings_cache_size_frames = 0;
+        stats::start_game_data_refresh(state);
     }
 
     ui.spacing();
