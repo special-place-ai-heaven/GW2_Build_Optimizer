@@ -2,7 +2,7 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
-## 1.14.23 - 2026-09-13
+## 1.14.24 - 2026-09-13
 
 Settings Refresh Game Data no longer wipes the cache. SCHEMA CHANGE = N.
 
