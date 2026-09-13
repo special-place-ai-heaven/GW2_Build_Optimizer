@@ -97,7 +97,6 @@ pub fn land_worn_slots(validated: &ValidatedBuild) -> Vec<GearSlot> {
         .collect()
 }
 
-
 /// Prefer a sample Ascended item's `infusion_slots`; else canonical defaults.
 pub fn slot_flag_layout(slot: GearSlot, db: &GameDb) -> Vec<Vec<String>> {
     if let Some(flags) = db.sample_infusion_slot_flags(slot) {
@@ -327,10 +326,7 @@ pub fn assign_best_infusions(
     let mut enrichment_free = Vec::new();
     for &i in &free_indices {
         let flags = &validated.infusion_seats[i].flags;
-        if flags
-            .iter()
-            .any(|f| f.eq_ignore_ascii_case("Enrichment"))
-        {
+        if flags.iter().any(|f| f.eq_ignore_ascii_case("Enrichment")) {
             enrichment_free.push(i);
         } else {
             infusion_free.push(i);
@@ -611,20 +607,8 @@ mod tests {
 
     #[test]
     fn mode_flags_filter_catalog() {
-        let pve_only = test_infusion(
-            10,
-            "PvE Power",
-            &["Infusion"],
-            &[("Power", 9)],
-            &["Pve"],
-        );
-        let wvw_only = test_infusion(
-            11,
-            "WvW Power",
-            &["Infusion"],
-            &[("Power", 9)],
-            &["Wvw"],
-        );
+        let pve_only = test_infusion(10, "PvE Power", &["Infusion"], &[("Power", 9)], &["Pve"]);
+        let wvw_only = test_infusion(11, "WvW Power", &["Infusion"], &[("Power", 9)], &["Wvw"]);
         assert!(item_legal_for_mode(&pve_only, &GameMode::PvE));
         assert!(!item_legal_for_mode(&pve_only, &GameMode::WvW));
         assert!(item_legal_for_mode(&wvw_only, &GameMode::WvW));
@@ -673,12 +657,13 @@ mod tests {
         assert_eq!(clone.infusion_seats, build.infusion_seats);
 
         let mut locks = BuildLocks::default();
-        locks
-            .infusion_locks
-            .insert(GearSlot::Helm, vec![Some(30)]);
+        locks.infusion_locks.insert(GearSlot::Helm, vec![Some(30)]);
         let json = serde_json::to_string(&locks).expect("serialize");
         let back: BuildLocks = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(back.infusion_locks.get(&GearSlot::Helm), Some(&vec![Some(30)]));
+        assert_eq!(
+            back.infusion_locks.get(&GearSlot::Helm),
+            Some(&vec![Some(30)])
+        );
         let legacy = r#"{"specs":[null,null,null],"trait_locks":{}}"#;
         let old: BuildLocks = serde_json::from_str(legacy).expect("legacy");
         assert!(old.infusion_locks.is_empty());
@@ -686,13 +671,7 @@ mod tests {
 
     #[test]
     fn locked_seats_not_overwritten_including_agony() {
-        let better = test_infusion(
-            40,
-            "Huge Power",
-            &["Infusion"],
-            &[("Power", 50)],
-            &["Pve"],
-        );
+        let better = test_infusion(40, "Huge Power", &["Infusion"], &[("Power", 50)], &["Pve"]);
         let agony = test_infusion(
             41,
             "Agony Infusion",
@@ -769,11 +748,7 @@ mod tests {
         let infusion_fills: Vec<u32> = build
             .infusion_seats
             .iter()
-            .filter(|s| {
-                s.flags
-                    .iter()
-                    .any(|f| f.eq_ignore_ascii_case("Infusion"))
-            })
+            .filter(|s| s.flags.iter().any(|f| f.eq_ignore_ascii_case("Infusion")))
             .filter_map(|s| s.item.as_ref().map(|i| i.id))
             .collect();
         assert!(

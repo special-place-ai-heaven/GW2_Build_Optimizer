@@ -4,7 +4,6 @@ pub mod benchmark;
 pub mod build_template;
 pub mod combat;
 pub mod consumables;
-pub mod infusions;
 pub mod context;
 pub mod data;
 pub mod engine;
@@ -13,6 +12,7 @@ pub mod gemini;
 pub mod gemini_tools;
 #[cfg(test)]
 mod grouped_sheet;
+pub mod infusions;
 pub mod itemstat_pool;
 pub mod llm;
 #[cfg(test)]

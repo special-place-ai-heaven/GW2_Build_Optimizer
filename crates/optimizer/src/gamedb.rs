@@ -681,10 +681,18 @@ impl GameDb {
             _ => None,
         };
         for ty in want_types {
-            let ids = self.items_by_type.get(*ty).map(|v| v.as_slice()).unwrap_or(&[]);
+            let ids = self
+                .items_by_type
+                .get(*ty)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
             for id in ids {
-                let Some(item) = self.items.get(id) else { continue };
-                let Some(details) = item.details.as_ref() else { continue };
+                let Some(item) = self.items.get(id) else {
+                    continue;
+                };
+                let Some(details) = item.details.as_ref() else {
+                    continue;
+                };
                 if details.infusion_slots.is_empty() {
                     continue;
                 }
