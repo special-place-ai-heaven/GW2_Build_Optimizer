@@ -2,6 +2,16 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.27 - 2026-09-13
+
+Durable first-fill resume for the items catalog via `items.partial`. SCHEMA CHANGE = N.
+
+- Install path (`items.json` missing) commits `{ live_ids, fetched_ids, kept, skipped }` to DataCache key `items.partial` after each completed 200-id batch (atomic tmp+rename). `fetched_ids` is every id whose body was already requested (keep and discarded).
+- Resume: GET live ids, body-fetch only `live_ids` minus `fetched_ids` (same if build drifted). No partial -> first-fill.
+- Warm-complete is `exists("items")` only. Never save `items` / `items.ids` / `items.skipped` until install finishes; then write those three and delete `items.partial`. `refresh_items` unchanged; FOLD3 same-build 0-fetch still holds.
+- Hopper query: `items_fill_kind` -> FirstFill | Resume | SameBuildSkip (no RefreshDelta).
+- ValidatedBuild SCHEMA = N.
+
 ## 1.14.26
 
 ### Fixed
