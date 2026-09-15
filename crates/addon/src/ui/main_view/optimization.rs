@@ -1219,9 +1219,9 @@ pub(super) fn kitchen_brief(
     keep_weapons: bool,
 ) -> String {
     let keep = if keep_weapons {
-        "Keep equipped weapons.\n"
+        "Keep equipped weapons — write both set1 and set2 from Character; do not omit them.\n"
     } else {
-        ""
+        "Always write weapons.set1 and weapons.set2. If they stay the same, copy both from Character.\n"
     };
     format!(
         "Mode: {game_mode}\nScale: {scale}\nRole: {role}\n{role_brief}\n{keep}Character:\n{character}\nOn the pass:\n{pass}\nNote: get_optimizer_results is empty unless Optimize ran; cook from this brief and the dish on the pass.",
@@ -1376,6 +1376,37 @@ fn prefix_request_is_partial(order: &str, prefix: &str) -> bool {
     false
 }
 
+fn loadout_weapon_line(set: &gw2_core::types::ResolvedWeaponSet) -> Option<String> {
+    let main = set
+        .main_hand
+        .as_ref()
+        .map(|w| w.weapon_type.as_str())
+        .filter(|s| !s.is_empty())?;
+    match set.off_hand.as_ref().map(|w| w.weapon_type.as_str()) {
+        Some(off) if !off.is_empty() => Some(format!("{}: {main} / {off}", set.label)),
+        _ => Some(format!("{}: {main}", set.label)),
+    }
+}
+
+/// Same assignment as `parse_weapon_sets_from_response`: Set 1 / unlabeled first → set1.
+fn plate_weapon_slots(weapons: &[String]) -> (bool, bool) {
+    let mut s1 = false;
+    let mut s2 = false;
+    for w in weapons {
+        let label = w.split(':').next().unwrap_or("").trim();
+        if label.contains('1') {
+            s1 = true;
+        } else if label.contains('2') {
+            s2 = true;
+        } else if !s1 {
+            s1 = true;
+        } else {
+            s2 = true;
+        }
+    }
+    (s1, s2)
+}
+
 pub(super) fn fill_holes_from_loadout(
     parsed: &mut gw2_optimizer::prompts::GeminiBuildResponse,
     current: &gw2_core::types::ResolvedBuild,
@@ -1467,33 +1498,20 @@ pub(super) fn fill_holes_from_loadout(
         }
     }
 
-    // Weapons, sigils and relic. The prompt tells the model to copy weapons
-    // only when the player asked to keep them, so a plate that changes
-    // nothing about them omits all three by design - and nothing put them
-    // back, while `plate_is_servable` never required them. A complete heal
-    // Scourge therefore reached the Optimized tab with an empty WEAPONS
-    // column and no sigils (measured in-game 2026-09-05, 1.11.29). The plate
-    // names weapon *types* ("Staff"), not item names, so that is what the
-    // equipped set contributes.
-    if parsed.weapons.is_empty() {
-        for set in &current.weapons {
-            let main = set
-                .main_hand
-                .as_ref()
-                .map(|w| w.weapon_type.as_str())
-                .unwrap_or_default();
-            if main.is_empty() {
-                continue;
-            }
-            match set.off_hand.as_ref().map(|w| w.weapon_type.as_str()) {
-                Some(off) if !off.is_empty() => {
-                    parsed
-                        .weapons
-                        .push(format!("{}: {main} / {off}", set.label));
-                }
-                _ => parsed.weapons.push(format!("{}: {main}", set.label)),
-            }
+    // Weapons, sigils and relic. Choya often writes Set 1 only when the
+    // other kit did not change; that left Set 2 empty and the chat-code
+    // encoder with one land kit. Copy any missing set from the equipped
+    // loadout. Named sets stay. The plate speaks weapon *types*.
+    let (has1, has2) = plate_weapon_slots(&parsed.weapons);
+    for (i, set) in current.weapons.iter().enumerate() {
+        let Some(line) = loadout_weapon_line(set) else {
+            continue;
+        };
+        let is_set2 = set.label.contains('2') || (!set.label.contains('1') && i >= 1);
+        if (is_set2 && has2) || (!is_set2 && has1) {
+            continue;
         }
+        parsed.weapons.push(line);
     }
     if parsed.sigils.is_empty() {
         parsed.sigils = current
@@ -1827,6 +1845,8 @@ mod tests {
         assert!(!brief.contains("Locks:"), "{brief}");
         assert!(brief.contains("On the pass:"), "{brief}");
         assert!(brief.contains("get_optimizer_results is empty"), "{brief}");
+        assert!(brief.contains("weapons.set1"), "{brief}");
+        assert!(brief.contains("copy both from Character"), "{brief}");
     }
 
     #[test]
@@ -2326,7 +2346,7 @@ mod tests {
         assert_eq!(parsed.sigils.len(), 2, "sigils ride the equipped weapons");
         assert_eq!(parsed.relic, "Relic of the Water");
 
-        // A plate that named its own weapons keeps them.
+        // A plate that named Set 1 keeps that set and still gets Set 2.
         let mut chosen = gw2_optimizer::prompts::GeminiBuildResponse {
             specializations: vec![("Blood Magic".into(), vec!["Blood Renewal".into()])],
             weapons: vec!["Set 1: Greatsword".into()],
@@ -2334,7 +2354,13 @@ mod tests {
             ..Default::default()
         };
         fill_holes_from_loadout(&mut chosen, &current);
-        assert_eq!(chosen.weapons, vec!["Set 1: Greatsword".to_string()]);
+        assert_eq!(
+            chosen.weapons,
+            vec![
+                "Set 1: Greatsword".to_string(),
+                "Set 2: Staff".to_string()
+            ]
+        );
         assert_eq!(chosen.relic, "Relic of Durability");
     }
 
