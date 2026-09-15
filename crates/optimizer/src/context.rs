@@ -31,6 +31,7 @@ pub fn build_gemini_context(config: &ContextConfig) -> String {
         section_profession_skills(config),
         section_upgrade_graph(config),
         section_gear_prefixes(config),
+        crate::context_combo::section_combo_reference(config.profession_name, None),
     ];
 
     if let Some(summary) = config.current_build_summary {
