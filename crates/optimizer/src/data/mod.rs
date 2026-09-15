@@ -20,6 +20,7 @@ pub mod rotation_profiles;
 pub mod shroud;
 pub mod slot_budgets;
 pub mod universal_formulas;
+pub mod weapon_hands;
 
 pub use balance_overrides::{known_mode_splits, BalanceOverrides, KnownModeSplit, OverrideResult};
 pub use boon_condition_formulas::{boons, conditions, BoonFormulas, ConditionFormulas};

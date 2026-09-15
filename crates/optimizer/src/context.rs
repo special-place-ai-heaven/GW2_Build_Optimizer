@@ -6,6 +6,7 @@ use gw2_api::models::facts::Fact;
 use gw2_api::models::{Skill, Specialization, Trait as GW2Trait};
 
 use crate::balance::BalanceContext;
+use crate::data::weapon_hands::{access, choya_label, land_weapons, Hand};
 use crate::gamedb::GameDb;
 use crate::scoring::OptimizationWeights;
 use crate::upgrade_graph::UpgradeGraph;
@@ -40,36 +41,28 @@ pub fn build_gemini_context(config: &ContextConfig) -> String {
     sections.join("\n\n")
 }
 
-/// Profession info: name, available weapons with hand flags and elite spec gates.
+/// Profession info: land weapons with per-hand wiki gates (not the API dump).
 fn section_profession_info(config: &ContextConfig) -> String {
     let mut out = format!("=== PROFESSION: {} ===\n", config.profession_name);
 
-    if let Some(prof) = config.db.profession(config.profession_name) {
-        out.push_str("Available Weapons:\n");
-        let mut weapons: Vec<_> = prof.weapons.iter().collect();
-        weapons.sort_by_key(|(name, _)| (*name).clone());
+    if config.db.profession(config.profession_name).is_none() {
+        return out;
+    }
 
-        for (weapon_name, info) in weapons {
-            if !info.land_usable(weapon_name) {
-                continue;
+    out.push_str("Land weapons (wiki hands; elite gate is that spec OR Weaponmaster Training):\n");
+    for weapon in land_weapons(config.profession_name) {
+        let mut parts = Vec::new();
+        for (hand, name) in [
+            (Hand::Main, "main-hand"),
+            (Hand::Off, "off-hand"),
+            (Hand::TwoHand, "two-handed"),
+        ] {
+            if let Some(extra) = choya_label(access(config.profession_name, weapon, hand)) {
+                parts.push(format!("{name}{extra}"));
             }
-            let flags = info
-                .flags
-                .iter()
-                .filter(|f| !f.eq_ignore_ascii_case("Aquatic"))
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ");
-            let gate = if let Some(spec_id) = info.specialization {
-                config
-                    .db
-                    .spec(spec_id)
-                    .map(|s| format!(" (requires {})", s.name))
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-            out.push_str(&format!("  {} [{}]{}\n", weapon_name, flags, gate));
+        }
+        if !parts.is_empty() {
+            out.push_str(&format!("  {weapon}: {}\n", parts.join("; ")));
         }
     }
 
@@ -687,5 +680,103 @@ mod tests {
             format_fact_text(&fact),
             Some("- Chance on Critical Hit: 33%".into())
         );
+    }
+
+    fn stub_profession(name: &str) -> gw2_api::models::Profession {
+        use std::collections::HashMap;
+        // API lie: Sword looks like free dual-wield with no spec.
+        let mut weapons = HashMap::new();
+        weapons.insert(
+            "Sword".into(),
+            gw2_api::models::WeaponInfo {
+                specialization: None,
+                flags: vec!["Mainhand".into(), "Offhand".into()],
+                skills: vec![],
+            },
+        );
+        gw2_api::models::Profession {
+            id: name.into(),
+            name: name.into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        }
+    }
+
+    fn profession_section(name: &str) -> String {
+        let mut db = GameDb::empty_for_tests();
+        db.professions.insert(name.into(), stub_profession(name));
+        let weights = OptimizationWeights::default();
+        section_profession_info(&ContextConfig {
+            db: &db,
+            profession_name: name,
+            weights: &weights,
+            game_mode: "wvw",
+            gear_prefixes: vec![],
+            current_build_summary: None,
+            determined_prefix: None,
+        })
+    }
+
+    fn weapon_line<'a>(section: &'a str, weapon: &str) -> &'a str {
+        let needle = format!("{weapon}:");
+        section
+            .lines()
+            .find(|line| line.contains(&needle))
+            .unwrap_or_else(|| panic!("missing {weapon} line in:\n{section}"))
+    }
+
+    #[test]
+    fn section_guardian_sword_off_needs_willbender() {
+        let text = profession_section("Guardian");
+        let sword = weapon_line(&text, "Sword");
+        assert!(
+            sword.contains("off-hand (requires Willbender"),
+            "Willbender must gate off-hand: {sword}"
+        );
+        assert!(
+            sword.contains("main-hand;"),
+            "main-hand stays ungated: {sword}"
+        );
+        assert!(
+            !sword.contains("Sword ["),
+            "API flag dump must be gone: {text}"
+        );
+    }
+
+    #[test]
+    fn section_revenant_sword_both_hands_ungated() {
+        let text = profession_section("Revenant");
+        let sword = weapon_line(&text, "Sword");
+        assert!(sword.contains("main-hand"), "{sword}");
+        assert!(sword.contains("off-hand"), "{sword}");
+        assert!(
+            !sword.contains("requires"),
+            "Herald dual swords is core: {sword}"
+        );
+    }
+
+    #[test]
+    fn section_ranger_dagger_soulbeast_main_only() {
+        let text = profession_section("Ranger");
+        let dagger = weapon_line(&text, "Dagger");
+        let (main, off) = dagger
+            .split_once("; ")
+            .unwrap_or_else(|| panic!("expected two hands: {dagger}"));
+        assert!(main.contains("Soulbeast"), "Soulbeast gates main: {dagger}");
+        assert!(off.contains("off-hand"), "{dagger}");
+        assert!(!off.contains("Soulbeast"), "off-hand is core: {dagger}");
+        assert!(!off.contains("requires"), "off-hand is core: {dagger}");
+    }
+
+    #[test]
+    fn section_guardian_pistol_mentions_expanded() {
+        let text = profession_section("Guardian");
+        let pistol = weapon_line(&text, "Pistol");
+        assert!(pistol.contains("Expanded Weapon Proficiency"), "{pistol}");
     }
 }
