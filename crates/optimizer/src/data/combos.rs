@@ -68,11 +68,28 @@ pub struct ComboRuleF64 {
     pub value: f64,
 }
 
+/// Core vs gated field/finisher types for one profession (wiki Combo page).
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+pub struct ProfessionComboKit {
+    #[serde(default)]
+    pub core_finishers: Vec<String>,
+    #[serde(default)]
+    pub core_fields: Vec<String>,
+    #[serde(default)]
+    pub gated_finishers: HashMap<String, String>,
+    #[serde(default)]
+    pub gated_fields: HashMap<String, String>,
+    #[serde(default)]
+    pub notes: Vec<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ComboTableFile {
     #[serde(rename = "_rules")]
     pub rules: ComboRules,
     pub fields: HashMap<String, FieldFinishers>,
+    #[serde(default)]
+    pub profession_combos: HashMap<String, ProfessionComboKit>,
 }
 
 /// Parsed combo table + rules.
@@ -80,6 +97,7 @@ pub struct ComboTableFile {
 pub struct ComboTable {
     pub rules: ComboRules,
     pub fields: HashMap<String, FieldFinishers>,
+    pub profession_combos: HashMap<String, ProfessionComboKit>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -124,6 +142,7 @@ pub fn load_combo_table(json: &str) -> Result<ComboTable, ComboLoadError> {
     Ok(ComboTable {
         rules: file.rules,
         fields: file.fields,
+        profession_combos: file.profession_combos,
     })
 }
 
@@ -228,5 +247,26 @@ mod tests {
     #[test]
     fn malformed_json_errors() {
         assert!(load_combo_table("not json").is_err());
+    }
+
+    #[test]
+    fn profession_combos_loaded() {
+        let t = combos();
+        assert!(t.profession_combos.contains_key("Necromancer"));
+        assert!(t.profession_combos.contains_key("Guardian"));
+        let necro = &t.profession_combos["Necromancer"];
+        assert!(necro
+            .gated_finishers
+            .keys()
+            .any(|k| k.eq_ignore_ascii_case("leap")));
+    }
+
+    #[test]
+    fn profession_combos_optional_old_shape() {
+        let mut v: serde_json::Value = serde_json::from_str(COMBOS_JSON).unwrap();
+        v.as_object_mut().unwrap().remove("profession_combos");
+        let t = load_combo_table(&v.to_string()).expect("old shape still loads");
+        assert!(t.profession_combos.is_empty());
+        assert_eq!(t.fields.len(), 9);
     }
 }
