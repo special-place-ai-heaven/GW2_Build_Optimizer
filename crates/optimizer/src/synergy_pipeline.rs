@@ -15,6 +15,7 @@ use std::collections::HashMap;
 
 use crate::balance::BalanceContext;
 use crate::combat;
+use crate::data::weapon_hands::{is_legal, Hand};
 use crate::engine::{self, OptimizeProgress, SynergyResult};
 use crate::gamedb::GameDb;
 use crate::scenario::ScenarioSpec;
@@ -658,24 +659,28 @@ fn select_weapons(
             })
             .copied()
             .collect();
+        let elite = elite_spec_ids.iter().find_map(|id| {
+            db.specializations
+                .get(id)
+                .filter(|s| s.elite)
+                .map(|s| s.name.as_str())
+        });
+        let prof_name = profession.id.as_str();
 
-        // Filter weapons by elite spec gate
         let available: Vec<(&str, bool)> = profession
             .weapons
             .iter()
             .filter(|(name, info)| {
-                if !info.land_usable(name) {
-                    return false;
-                }
-                if let Some(req_spec) = info.specialization {
-                    elite_spec_ids.contains(&req_spec)
-                } else {
-                    true
-                }
+                info.land_usable(name)
+                    && (is_legal(prof_name, name, Hand::TwoHand, elite)
+                        || is_legal(prof_name, name, Hand::Main, elite)
+                        || is_legal(prof_name, name, Hand::Off, elite))
             })
-            .map(|(name, info)| {
-                let is_two_hand = info.flags.iter().any(|f| f == "TwoHand");
-                (name.as_str(), is_two_hand)
+            .map(|(name, _)| {
+                (
+                    name.as_str(),
+                    is_legal(prof_name, name, Hand::TwoHand, elite),
+                )
             })
             .collect();
 
@@ -697,8 +702,7 @@ fn select_weapons(
         let mut best_set1_score = f64::NEG_INFINITY;
 
         for &(weapon, is_2h) in &available {
-            let info = &profession.weapons[weapon];
-            let is_main = info.flags.iter().any(|f| f == "Mainhand" || f == "TwoHand");
+            let is_main = is_legal(prof_name, weapon, Hand::Main, elite);
             if is_2h {
                 // Two-handed weapon as set 1
                 let score = weapon_scores[weapon];
@@ -707,14 +711,9 @@ fn select_weapons(
                     best_set1 = (Some(weapon.to_string()), None);
                 }
             } else if is_main {
-                // Main-hand + each valid off-hand
+                // Main-hand + each wiki-legal off-hand (including same-type dual wield)
                 for &(off_weapon, off_2h) in &available {
-                    if off_2h {
-                        continue;
-                    }
-                    let off_info = &profession.weapons[off_weapon];
-                    let off_is_off = off_info.flags.iter().any(|f| f == "Offhand");
-                    if !off_is_off {
+                    if off_2h || !is_legal(prof_name, off_weapon, Hand::Off, elite) {
                         continue;
                     }
 
@@ -744,8 +743,7 @@ fn select_weapons(
                 continue; // Don't reuse set 1's primary weapon in set 2
             }
 
-            let info = &profession.weapons[weapon];
-            let is_main = info.flags.iter().any(|f| f == "Mainhand" || f == "TwoHand");
+            let is_main = is_legal(prof_name, weapon, Hand::Main, elite);
 
             if is_2h {
                 let score = weapon_scores[weapon];
@@ -755,11 +753,7 @@ fn select_weapons(
                 }
             } else if is_main {
                 for &(off_weapon, off_2h) in &available {
-                    if off_2h {
-                        continue;
-                    }
-                    let off_info = &profession.weapons[off_weapon];
-                    if !off_info.flags.iter().any(|f| f == "Offhand") {
+                    if off_2h || !is_legal(prof_name, off_weapon, Hand::Off, elite) {
                         continue;
                     }
 
@@ -2664,6 +2658,79 @@ mod land_weapon_tests {
         for w in [s1m, s1o, s2m, s2o].into_iter().flatten() {
             assert_ne!(w.as_str(), "Trident");
         }
+    }
+
+    fn elite_spec(id: u32, name: &str, profession: &str) -> gw2_api::models::Specialization {
+        gw2_api::models::Specialization {
+            id,
+            name: name.into(),
+            profession: profession.into(),
+            elite: true,
+            minor_traits: Vec::new(),
+            major_traits: vec![1, 2, 3, 4, 5, 6, 7, 8, 9],
+            weapon_trait: None,
+            icon: None,
+            background: None,
+            profession_icon: None,
+            profession_icon_big: None,
+        }
+    }
+
+    fn db_with_elite(id: u32, name: &str, profession: &str) -> GameDb {
+        let mut db = GameDb::empty_for_tests();
+        db.specializations
+            .insert(id, elite_spec(id, name, profession));
+        db
+    }
+
+    #[test]
+    fn select_weapons_firebrand_does_not_dual_wield_swords() {
+        let mut weapons = std::collections::HashMap::new();
+        weapons.insert("Sword".into(), weapon(&["Mainhand", "Offhand"]));
+        let prof = Profession {
+            id: "Guardian".into(),
+            name: "Guardian".into(),
+            code: None,
+            specializations: vec![62],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let db = db_with_elite(62, "Firebrand", "Guardian");
+        let mut candidate = empty_candidate();
+        candidate.spec_ids = vec![62];
+        let mut candidates = [candidate];
+        select_weapons(&mut candidates, &prof, &db, &OptimizationWeights::default());
+        let (s1m, s1o, _, _) = &candidates[0].weapons;
+        assert_eq!(s1m.as_deref(), Some("Sword"));
+        assert_ne!(s1o.as_deref(), Some("Sword"));
+    }
+
+    #[test]
+    fn select_weapons_herald_may_dual_wield_swords() {
+        let mut weapons = std::collections::HashMap::new();
+        weapons.insert("Sword".into(), weapon(&["Mainhand", "Offhand"]));
+        let prof = Profession {
+            id: "Revenant".into(),
+            name: "Revenant".into(),
+            code: None,
+            specializations: vec![3],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let db = db_with_elite(3, "Herald", "Revenant");
+        let mut candidate = empty_candidate();
+        candidate.spec_ids = vec![3];
+        let mut candidates = [candidate];
+        select_weapons(&mut candidates, &prof, &db, &OptimizationWeights::default());
+        let (s1m, s1o, _, _) = &candidates[0].weapons;
+        assert_eq!(s1m.as_deref(), Some("Sword"));
+        assert_eq!(s1o.as_deref(), Some("Sword"));
     }
 
     fn upgrade_sigil(id: u32, name: &str) -> gw2_api::models::Item {

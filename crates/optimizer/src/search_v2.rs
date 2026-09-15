@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::balance::BalanceContext;
+use crate::data::weapon_hands::{is_legal, Hand};
 use crate::engine::OptimizeProgress;
 use crate::gamedb::GameDb;
 use crate::referee::{self, RefereeReport, ViabilityGate};
@@ -1823,8 +1824,9 @@ fn retarget_after_elite_swap(
     build.skills.profession =
         crate::rotation::builder::profession_skills_for_build(db, &profession.name, &equipped);
 
-    let combos = land_weapon_combos(profession, &elite_ids);
-    if !weapon_set_ok(&build.weapons.set1, profession, &elite_ids) {
+    let elite = equipped_elite_name(db, &elite_ids);
+    let combos = land_weapon_combos(profession, elite);
+    if !weapon_set_ok(&build.weapons.set1, profession, elite) {
         build.weapons.set1 = combos
             .first()
             .map(|(mh, oh)| ValidatedWeaponSet {
@@ -1833,7 +1835,7 @@ fn retarget_after_elite_swap(
             })
             .unwrap_or_default();
     }
-    if !weapon_set_ok(&build.weapons.set2, profession, &elite_ids) {
+    if !weapon_set_ok(&build.weapons.set2, profession, elite) {
         build.weapons.set2 = combos
             .get(1)
             .or(combos.first())
@@ -1951,30 +1953,52 @@ fn refill_bar(
     }
 }
 
-fn weapon_set_ok(set: &ValidatedWeaponSet, profession: &Profession, elite_ids: &[u32]) -> bool {
-    [&set.main_hand, &set.off_hand]
-        .into_iter()
-        .flatten()
-        .all(|name| weapon_ok(name, profession, elite_ids))
+fn equipped_elite_name<'a>(db: &'a GameDb, elite_ids: &[u32]) -> Option<&'a str> {
+    elite_ids.iter().find_map(|&id| {
+        db.specializations
+            .get(&id)
+            .filter(|s| s.elite)
+            .map(|s| s.name.as_str())
+    })
 }
 
-fn weapon_ok(name: &str, profession: &Profession, elite_ids: &[u32]) -> bool {
-    let Some(info) = profession.weapons.get(name) else {
-        return false;
-    };
-    if !info.land_usable(name) {
-        return false;
-    }
-    match info.specialization {
-        Some(req) => elite_ids.contains(&req),
-        None => true,
+fn weapon_land_ok(profession: &Profession, name: &str) -> bool {
+    profession
+        .weapons
+        .get(name)
+        .is_some_and(|info| info.land_usable(name))
+}
+
+fn weapon_set_ok(
+    set: &ValidatedWeaponSet,
+    profession: &Profession,
+    equipped_elite: Option<&str>,
+) -> bool {
+    let prof = profession.id.as_str();
+    match (&set.main_hand, &set.off_hand) {
+        (None, None) => true,
+        (Some(mh), None) => {
+            weapon_land_ok(profession, mh)
+                && (is_legal(prof, mh, Hand::TwoHand, equipped_elite)
+                    || is_legal(prof, mh, Hand::Main, equipped_elite))
+        }
+        (Some(mh), Some(oh)) => {
+            weapon_land_ok(profession, mh)
+                && weapon_land_ok(profession, oh)
+                && is_legal(prof, mh, Hand::Main, equipped_elite)
+                && is_legal(prof, oh, Hand::Off, equipped_elite)
+        }
+        (None, Some(oh)) => {
+            weapon_land_ok(profession, oh) && is_legal(prof, oh, Hand::Off, equipped_elite)
+        }
     }
 }
 
 fn land_weapon_combos(
     profession: &Profession,
-    elite_ids: &[u32],
+    equipped_elite: Option<&str>,
 ) -> Vec<(Option<String>, Option<String>)> {
+    let prof = profession.id.as_str();
     let mut two_hand = Vec::new();
     let mut main = Vec::new();
     let mut off = Vec::new();
@@ -1982,17 +2006,13 @@ fn land_weapon_combos(
         if !info.land_usable(name) {
             continue;
         }
-        if let Some(req) = info.specialization {
-            if !elite_ids.contains(&req) {
-                continue;
-            }
-        }
-        if info.flags.iter().any(|f| f == "TwoHand") {
+        if is_legal(prof, name, Hand::TwoHand, equipped_elite) {
             two_hand.push(name.clone());
-        } else if info.flags.iter().any(|f| f == "Mainhand") {
+        }
+        if is_legal(prof, name, Hand::Main, equipped_elite) {
             main.push(name.clone());
         }
-        if info.flags.iter().any(|f| f == "Offhand") {
+        if is_legal(prof, name, Hand::Off, equipped_elite) {
             off.push(name.clone());
         }
     }
@@ -2006,9 +2026,7 @@ fn land_weapon_combos(
     for m in &main {
         combos.push((Some(m.clone()), None));
         for o in &off {
-            if o != m {
-                combos.push((Some(m.clone()), Some(o.clone())));
-            }
+            combos.push((Some(m.clone()), Some(o.clone())));
         }
     }
     combos
@@ -2029,7 +2047,8 @@ fn swap_weapons(
         .filter(|s| s.elite)
         .map(|s| s.spec_id)
         .collect();
-    let combos = land_weapon_combos(profession, &elite_ids);
+    let elite = equipped_elite_name(db, &elite_ids);
+    let combos = land_weapon_combos(profession, elite);
     let set1 = (
         candidate.validated.weapons.set1.main_hand.clone(),
         candidate.validated.weapons.set1.off_hand.clone(),
@@ -3260,13 +3279,137 @@ mod tests {
             icon: None,
             icon_big: None,
         };
-        let mains: Vec<_> = land_weapon_combos(&prof, &[])
+        let mains: Vec<_> = land_weapon_combos(&prof, None)
             .into_iter()
             .filter_map(|(m, _)| m)
             .collect();
         assert!(mains.iter().any(|w| w == "Spear"));
         assert!(mains.iter().any(|w| w == "Staff"));
         assert!(!mains.iter().any(|w| w == "Trident"));
+    }
+
+    fn api_weapon(spec: Option<u32>, flags: &[&str]) -> gw2_api::models::WeaponInfo {
+        gw2_api::models::WeaponInfo {
+            specialization: spec,
+            flags: flags.iter().map(|s| (*s).to_string()).collect(),
+            skills: Vec::new(),
+        }
+    }
+
+    fn profession_with(
+        id: &str,
+        weapons: HashMap<String, gw2_api::models::WeaponInfo>,
+    ) -> gw2_api::models::Profession {
+        gw2_api::models::Profession {
+            id: id.into(),
+            name: id.into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        }
+    }
+
+    fn elite_spec(id: u32, name: &str, profession: &str) -> gw2_api::models::Specialization {
+        gw2_api::models::Specialization {
+            id,
+            name: name.into(),
+            profession: profession.into(),
+            elite: true,
+            minor_traits: Vec::new(),
+            major_traits: vec![1, 2, 3, 4, 5, 6, 7, 8, 9],
+            weapon_trait: None,
+            icon: None,
+            background: None,
+            profession_icon: None,
+            profession_icon_big: None,
+        }
+    }
+
+    fn pair(mh: &str, oh: Option<&str>) -> (Option<String>, Option<String>) {
+        (Some(mh.into()), oh.map(str::to_string))
+    }
+
+    fn revenant_weapons() -> gw2_api::models::Profession {
+        let mut weapons = HashMap::new();
+        weapons.insert("Sword".into(), api_weapon(None, &["Mainhand", "Offhand"]));
+        weapons.insert("Axe".into(), api_weapon(None, &["Offhand"]));
+        weapons.insert("Staff".into(), api_weapon(None, &["TwoHand"]));
+        weapons.insert("Shortbow".into(), api_weapon(Some(12), &["TwoHand"]));
+        weapons.insert("Shield".into(), api_weapon(Some(3), &["Offhand"]));
+        profession_with("Revenant", weapons)
+    }
+
+    fn guardian_sword_kit() -> gw2_api::models::Profession {
+        let mut weapons = HashMap::new();
+        weapons.insert("Sword".into(), api_weapon(None, &["Mainhand", "Offhand"]));
+        weapons.insert("Focus".into(), api_weapon(None, &["Offhand"]));
+        weapons.insert("Staff".into(), api_weapon(None, &["TwoHand"]));
+        profession_with("Guardian", weapons)
+    }
+
+    fn ranger_lying_api() -> gw2_api::models::Profession {
+        let mut weapons = HashMap::new();
+        weapons.insert("Axe".into(), api_weapon(None, &["Mainhand", "Offhand"]));
+        weapons.insert("Sword".into(), api_weapon(None, &["Mainhand"]));
+        weapons.insert(
+            "Dagger".into(),
+            api_weapon(Some(55), &["Mainhand", "Offhand"]),
+        );
+        profession_with("Ranger", weapons)
+    }
+
+    #[test]
+    fn land_weapon_combos_herald_dual_swords_not_renegade_shortbow() {
+        let prof = revenant_weapons();
+        let mut db = empty_db();
+        db.specializations
+            .insert(3, elite_spec(3, "Herald", "Revenant"));
+        let elite = equipped_elite_name(&db, &[3]);
+        assert_eq!(elite, Some("Herald"));
+        let combos = land_weapon_combos(&prof, elite);
+        assert!(combos.contains(&pair("Sword", Some("Sword"))));
+        assert!(combos.contains(&pair("Sword", Some("Axe"))));
+        assert!(combos.contains(&pair("Staff", None)));
+        assert!(combos.contains(&pair("Sword", Some("Shield"))));
+        assert!(!combos.contains(&pair("Shortbow", None)));
+        assert!(!combos.iter().any(|(m, _)| m.as_deref() == Some("Shortbow")));
+    }
+
+    #[test]
+    fn land_weapon_combos_core_revenant_has_no_shield_or_shortbow() {
+        let combos = land_weapon_combos(&revenant_weapons(), None);
+        assert!(combos.contains(&pair("Sword", Some("Sword"))));
+        assert!(!combos.contains(&pair("Shortbow", None)));
+        assert!(!combos.iter().any(|(_, o)| o.as_deref() == Some("Shield")));
+    }
+
+    #[test]
+    fn land_weapon_combos_firebrand_no_dual_swords() {
+        let combos = land_weapon_combos(&guardian_sword_kit(), Some("Firebrand"));
+        assert!(combos.contains(&pair("Sword", None)));
+        assert!(combos.contains(&pair("Sword", Some("Focus"))));
+        assert!(!combos.contains(&pair("Sword", Some("Sword"))));
+    }
+
+    #[test]
+    fn land_weapon_combos_willbender_may_dual_swords() {
+        let combos = land_weapon_combos(&guardian_sword_kit(), Some("Willbender"));
+        assert!(combos.contains(&pair("Sword", Some("Sword"))));
+    }
+
+    #[test]
+    fn land_weapon_combos_ranger_core_offhand_dagger_not_main() {
+        let combos = land_weapon_combos(&ranger_lying_api(), None);
+        assert!(
+            combos.contains(&pair("Axe", Some("Dagger")))
+                || combos.contains(&pair("Sword", Some("Dagger")))
+        );
+        assert!(!combos.iter().any(|(m, _)| m.as_deref() == Some("Dagger")));
+        assert!(!combos.iter().any(|(_, o)| o.as_deref() == Some("Sword")));
     }
 
     fn spec_line(id: u32, name: &str, elite: bool) -> gw2_api::models::Specialization {
