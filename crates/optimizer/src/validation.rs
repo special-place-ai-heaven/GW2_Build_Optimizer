@@ -778,6 +778,84 @@ fn validate_weapons(
 
     result.weapons.set1 = validate_weapon_set(&set1, prof, db, result, "Set 1");
     result.weapons.set2 = validate_weapon_set(&set2, prof, db, result, "Set 2");
+    // A single land set pastes as one kit. The game stores unique types, so
+    // Sword+Axe alone cannot become Sword/Axe + anything. Fill a legal second
+    // set when the plate omitted it (Choya often writes Set 1 only).
+    if result.weapons.set2.main_hand.is_none() {
+        let elite_ids: Vec<u32> = result
+            .specializations
+            .iter()
+            .filter(|s| s.elite)
+            .map(|s| s.spec_id)
+            .collect();
+        if let Some(set2) = complementary_weapon_set(&result.weapons.set1, prof, &elite_ids) {
+            result.weapons.set2 = set2;
+        }
+    }
+}
+
+/// A different land combo than set 1, preferring a two-hander the elite can use.
+fn complementary_weapon_set(
+    set1: &ValidatedWeaponSet,
+    prof: Option<&gw2_api::models::Profession>,
+    elite_ids: &[u32],
+) -> Option<ValidatedWeaponSet> {
+    let prof = prof?;
+    let set1_main = set1.main_hand.as_deref()?;
+    let usable = |name: &str, info: &gw2_api::models::WeaponInfo| {
+        if !info.land_usable(name) {
+            return false;
+        }
+        match info.specialization {
+            Some(req) => elite_ids.contains(&req),
+            None => true,
+        }
+    };
+    let mut two_hand: Vec<&str> = Vec::new();
+    let mut mains: Vec<&str> = Vec::new();
+    let mut offs: Vec<&str> = Vec::new();
+    for (name, info) in &prof.weapons {
+        if !usable(name, info) {
+            continue;
+        }
+        if info.flags.iter().any(|f| f == "TwoHand") {
+            two_hand.push(name.as_str());
+        } else if info.flags.iter().any(|f| f == "Mainhand") {
+            mains.push(name.as_str());
+        }
+        if info.flags.iter().any(|f| f == "Offhand")
+            && !info.flags.iter().any(|f| f == "TwoHand")
+        {
+            offs.push(name.as_str());
+        }
+    }
+    two_hand.sort_unstable();
+    for &w in &two_hand {
+        if !w.eq_ignore_ascii_case(set1_main) {
+            return Some(ValidatedWeaponSet {
+                main_hand: Some(w.to_string()),
+                off_hand: None,
+            });
+        }
+    }
+    mains.sort_unstable();
+    offs.sort_unstable();
+    for &m in &mains {
+        if m.eq_ignore_ascii_case(set1_main) {
+            continue;
+        }
+        for &o in &offs {
+            return Some(ValidatedWeaponSet {
+                main_hand: Some(m.to_string()),
+                off_hand: Some(o.to_string()),
+            });
+        }
+        return Some(ValidatedWeaponSet {
+            main_hand: Some(m.to_string()),
+            off_hand: None,
+        });
+    }
+    None
 }
 
 fn weapon_is_two_hand(prof: &gw2_api::models::Profession, weapon: &str) -> bool {
@@ -2181,6 +2259,47 @@ mod tests {
         assert_eq!(set1.1.as_deref(), Some("Axe"));
         assert_eq!(set2.0.as_deref(), Some("Greatsword"));
         assert_eq!(set2.1, None);
+    }
+
+    #[test]
+    fn one_land_set_gets_a_second_twohander() {
+        use gw2_api::models::{Profession, WeaponInfo};
+        let mut weapons = HashMap::new();
+        let info = |spec: Option<u32>, flags: &[&str]| WeaponInfo {
+            specialization: spec,
+            flags: flags.iter().map(|s| (*s).to_string()).collect(),
+            skills: vec![],
+        };
+        weapons.insert(
+            "Sword".into(),
+            info(None, &["Mainhand", "Offhand"]),
+        );
+        weapons.insert("Axe".into(), info(None, &["Offhand"]));
+        weapons.insert("Hammer".into(), info(None, &["TwoHand"]));
+        weapons.insert("Greatsword".into(), info(Some(69), &["TwoHand"]));
+        let prof = Profession {
+            id: "Revenant".into(),
+            name: "Revenant".into(),
+            code: Some(9),
+            specializations: vec![52],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let set1 = ValidatedWeaponSet {
+            main_hand: Some("Sword".into()),
+            off_hand: Some("Axe".into()),
+        };
+        let set2 = complementary_weapon_set(&set1, Some(&prof), &[]).expect("second set");
+        assert_eq!(set2.main_hand.as_deref(), Some("Hammer"));
+        assert_eq!(set2.off_hand, None);
+        assert!(
+            complementary_weapon_set(&set1, Some(&prof), &[52])
+                .is_some_and(|s| s.main_hand.as_deref() == Some("Hammer")),
+            "Herald must not be given Vindicator Greatsword"
+        );
     }
 
     #[test]

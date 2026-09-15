@@ -1,5 +1,3 @@
-use base64::Engine as _;
-
 use super::resolution::resolve_selected_build_inner;
 use crate::state::AddonState;
 
@@ -384,51 +382,35 @@ pub(in crate::ui::main_view) fn generate_build_chat_code(
     }
     let profession_code = code as u8;
 
-    let mut buf: Vec<u8> = Vec::with_capacity(44);
-    buf.push(0x0D); // chat code type: build template
-    buf.push(profession_code);
-
-    // 3 specialization slots: spec_id(1 byte) + trait_choices(1 byte)
-    for i in 0..3 {
-        if let Some(sel) = build.specializations.get(i) {
-            if let Some(spec_id) = sel.id {
-                if spec_id > 255 {
-                    return None;
+    let mut specs = [gw2_optimizer::build_template::TemplateSpec::default(); 3];
+    for (i, spec) in specs.iter_mut().enumerate() {
+        let Some(sel) = build.specializations.get(i) else {
+            continue;
+        };
+        let Some(spec_id) = sel.id else {
+            continue;
+        };
+        if spec_id > 255 {
+            return None;
+        }
+        spec.id = spec_id;
+        // Bits: 00CCBBAA where AA = col0, BB = col1, CC = col2
+        if let Some(spec_data) = db.spec(spec_id) {
+            for (col, trait_id) in sel.traits.iter().enumerate().take(3) {
+                let Some(tid) = trait_id else {
+                    continue;
+                };
+                let col_start = col * 3;
+                if let Some(pos) = spec_data
+                    .major_traits
+                    .iter()
+                    .skip(col_start)
+                    .take(3)
+                    .position(|&mt| mt == *tid)
+                {
+                    spec.choices[col] = (pos as u8 + 1) & 0x03;
                 }
-                buf.push(spec_id as u8);
-
-                // Encode trait choices as 2-bit positions packed into 1 byte
-                // Bits: 00CCBBAA where AA = col0, BB = col1, CC = col2
-                let spec = db.spec(spec_id);
-                let mut trait_byte: u8 = 0;
-                for (col, trait_id) in sel.traits.iter().enumerate() {
-                    if col >= 3 {
-                        break;
-                    }
-                    if let Some(tid) = trait_id {
-                        // Find position of this trait in the column (0=top, 1=mid, 2=bot)
-                        if let Some(spec_data) = spec {
-                            let col_start = col * 3;
-                            let position = spec_data
-                                .major_traits
-                                .iter()
-                                .skip(col_start)
-                                .take(3)
-                                .position(|&mt| mt == *tid);
-                            if let Some(pos) = position {
-                                trait_byte |= ((pos as u8 + 1) & 0x03) << (col * 2);
-                            }
-                        }
-                    }
-                }
-                buf.push(trait_byte);
-            } else {
-                buf.push(0); // no spec
-                buf.push(0);
             }
-        } else {
-            buf.push(0);
-            buf.push(0);
         }
     }
 
@@ -466,48 +448,57 @@ pub(in crate::ui::main_view) fn generate_build_chat_code(
         })
         .unwrap_or_else(|| vec![0; 5]);
 
-    // Interleave: terr_heal, aqua_heal, terr_util1, aqua_util1, ..., terr_elite, aqua_elite
+    let mut skills = [0u32; 5];
+    let mut aquatic = [0u32; 5];
     for i in 0..5 {
         let t_skill = terrestrial_skills.get(i).copied().unwrap_or(0);
-        let t_palette = db.skill_palette_id(t_skill);
-        buf.extend_from_slice(&(t_palette as u16).to_le_bytes());
-
+        skills[i] = db.skill_palette_id(t_skill);
         let a_skill = aquatic_skills.get(i).copied().unwrap_or(0);
-        let a_palette = db.skill_palette_id(a_skill);
-        buf.extend_from_slice(&(a_palette as u16).to_le_bytes());
+        // Revenant legend palettes are valid on land and water. Live Herald
+        // codes copy the land bar; leaving water empty is legal (zeros are
+        // empty slots, not a skill) but does not match what the game copies.
+        aquatic[i] = if a_skill == 0 && profession_name.eq_ignore_ascii_case("Revenant") {
+            skills[i]
+        } else {
+            db.skill_palette_id(a_skill)
+        };
     }
 
-    // 16 bytes profession-specific data
+    let mut profession_bytes = [0u8; 16];
     match profession_name {
         "Ranger" => {
-            let mut pet_bytes = [0u8; 4];
             if let Some(ref pets) = build.pets {
                 for (i, pet) in pets.terrestrial.iter().take(2).enumerate() {
-                    pet_bytes[i] = pet.unwrap_or(0) as u8;
+                    profession_bytes[i] = pet.unwrap_or(0) as u8;
                 }
                 for (i, pet) in pets.aquatic.iter().take(2).enumerate() {
-                    pet_bytes[2 + i] = pet.unwrap_or(0) as u8;
+                    profession_bytes[2 + i] = pet.unwrap_or(0) as u8;
                 }
             }
-            buf.extend_from_slice(&pet_bytes);
-            buf.extend_from_slice(&[0u8; 12]);
         }
         "Revenant" => {
-            encode_revenant_profession_bytes(&mut buf, build, db);
+            encode_revenant_profession_bytes(&mut profession_bytes, build, db);
         }
-        _ => {
-            buf.extend_from_slice(&[0u8; 16]);
-        }
+        _ => {}
     }
 
-    append_soto_weapons(&mut buf, weapons);
-
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&buf);
-    Some(format!("[&{}]", encoded))
+    let template = gw2_optimizer::build_template::BuildTemplate {
+        profession: u32::from(profession_code),
+        specs,
+        skills,
+        aquatic,
+        profession_bytes,
+        weapons: soto_weapon_ids(weapons),
+        skill_overrides: vec![],
+    };
+    if template.same_realm_duplicate() {
+        return None;
+    }
+    Some(gw2_optimizer::build_template::encode(&template))
 }
 
 fn encode_revenant_profession_bytes(
-    buf: &mut Vec<u8>,
+    buf: &mut [u8; 16],
     build: &gw2_api::models::Build,
     db: &gw2_optimizer::gamedb::GameDb,
 ) {
@@ -535,14 +526,15 @@ fn encode_revenant_profession_bytes(
 
     let legend_byte =
         |id: Option<&String>| -> u8 { id.map(|s| db.legend_template_code(s)).unwrap_or(0) };
-    buf.push(legend_byte(legends.first()));
-    buf.push(legend_byte(legends.get(1)));
-    buf.push(legend_byte(aquatic.first()));
-    buf.push(legend_byte(aquatic.get(1)));
+    buf[0] = legend_byte(legends.first());
+    buf[1] = legend_byte(legends.get(1));
+    buf[2] = legend_byte(aquatic.first());
+    buf[3] = legend_byte(aquatic.get(1));
 
     // Inactive legend's 3 terrestrial + 3 aquatic utility palettes (u16 LE).
     let inactive_land = legends.get(1).or(legends.first());
     let inactive_water = aquatic.get(1).or(aquatic.first());
+    let mut at = 4;
     for legend_id in [inactive_land, inactive_water] {
         let utils: Vec<u32> = legend_id
             .and_then(|id| db.legends.get(id))
@@ -554,7 +546,8 @@ fn encode_revenant_profession_bytes(
                 .copied()
                 .map(|sid| db.skill_palette_id(sid) as u16)
                 .unwrap_or(0);
-            buf.extend_from_slice(&pal.to_le_bytes());
+            buf[at..at + 2].copy_from_slice(&pal.to_le_bytes());
+            at += 2;
         }
     }
 }
@@ -591,7 +584,7 @@ fn infer_revenant_legends(
     ids
 }
 
-fn append_soto_weapons(buf: &mut Vec<u8>, weapons: &[String]) {
+fn soto_weapon_ids(weapons: &[String]) -> Vec<u16> {
     let mut ids: Vec<u16> = Vec::new();
     for name in weapons {
         let Some(id) = weapon_type_id(name) else {
@@ -602,14 +595,7 @@ fn append_soto_weapons(buf: &mut Vec<u8>, weapons: &[String]) {
         }
     }
     ids.truncate(8);
-    if ids.is_empty() {
-        return;
-    }
-    buf.push(ids.len() as u8);
-    for id in ids {
-        buf.extend_from_slice(&id.to_le_bytes());
-    }
-    buf.push(0); // no weapon-skill overrides
+    ids
 }
 
 fn weapon_type_id(name: &str) -> Option<u16> {
@@ -641,6 +627,7 @@ fn weapon_type_id(name: &str) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine as _;
     use gw2_api::models::{Build, PetSelection, Profession, SkillSelection};
     use gw2_optimizer::gamedb::GameDb;
     use std::collections::HashMap;
@@ -761,10 +748,15 @@ mod tests {
         assert_eq!(buf[1], 9);
         // Land heal / util / elite palettes (even indices in the 10×u16 block).
         assert_eq!(u16_at(&buf, 8), 4572, "Legend1 heal shares Conduit palette");
+        assert_eq!(u16_at(&buf, 10), 4572, "Revenant water copies land");
         assert_eq!(u16_at(&buf, 12), 4614);
+        assert_eq!(u16_at(&buf, 14), 4614);
         assert_eq!(u16_at(&buf, 16), 4651);
+        assert_eq!(u16_at(&buf, 18), 4651);
         assert_eq!(u16_at(&buf, 20), 4564);
+        assert_eq!(u16_at(&buf, 22), 4564);
         assert_eq!(u16_at(&buf, 24), 4554);
+        assert_eq!(u16_at(&buf, 26), 4554);
         assert_eq!(
             &buf[28..32],
             &[1, 2, 1, 2],

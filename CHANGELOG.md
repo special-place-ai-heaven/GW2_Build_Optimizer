@@ -2,6 +2,27 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.35 - 2026-09-15
+
+Choya plates always include both weapon sets. SCHEMA CHANGE = N.
+
+- Prompt and kitchen brief: if weapons stay the same, still write set1 and set2 from Character.
+- `fill_holes_from_loadout` copies a missing set from the equipped loadout instead of leaving Set 2 empty.
+
+## 1.14.34 - 2026-09-15
+
+Chat-code plates with only Set 1 now get a second land set. SCHEMA CHANGE = N.
+
+- Validator fills a legal two-hander the elite can use (Herald Sword/Axe → Hammer, not Vindicator Greatsword).
+- SotO trailer then has both kits; the game cannot reconstruct two sets from Sword+Axe alone.
+
+## 1.14.33 - 2026-09-15
+
+Build-template chat codes: one encoder/decoder, wiki layout. SCHEMA CHANGE = N.
+
+- Palette ids in the `u16` slots (3875 ≠ skill 21750). `encode`/`decode` are inverses of the same bytes.
+- Revenant copies land palettes into empty aquatic slots. Same non-zero palette twice in one realm is refused.
+
 ## 1.14.32 - 2026-09-15
 
 API status chip shows the live `/v2/build` id. SCHEMA CHANGE = N.
