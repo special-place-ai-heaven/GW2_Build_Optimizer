@@ -215,6 +215,52 @@ pub fn choya_label(access: &WeaponAccess) -> String {
     }
 }
 
+impl WeaponAccess {
+    /// Tool JSON: `"core"` | elite name | `"expanded_soto"` | `"spear_jw"`.
+    pub fn json_token(&self) -> Option<&str> {
+        match self {
+            Self::None => None,
+            Self::Core => Some("core"),
+            Self::Elite(name) => Some(name.as_str()),
+            Self::ExpandedSoto => Some("expanded_soto"),
+            Self::SpearJw => Some("spear_jw"),
+        }
+    }
+}
+
+const LAND_WEAPON_NAMES: &[&str] = &[
+    "Axe",
+    "Dagger",
+    "Focus",
+    "Greatsword",
+    "Hammer",
+    "Longbow",
+    "Mace",
+    "Pistol",
+    "Rifle",
+    "Scepter",
+    "Shield",
+    "Shortbow",
+    "Spear",
+    "Staff",
+    "Sword",
+    "Torch",
+    "Warhorn",
+];
+
+/// Sorted land weapons with at least one legal hand for `profession`.
+pub fn land_weapons(profession: &str) -> Vec<&'static str> {
+    LAND_WEAPON_NAMES
+        .iter()
+        .copied()
+        .filter(|weapon| {
+            [Hand::Main, Hand::Off, Hand::TwoHand]
+                .into_iter()
+                .any(|hand| !matches!(access(profession, weapon, hand), WeaponAccess::None))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
