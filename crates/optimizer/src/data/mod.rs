@@ -20,6 +20,7 @@ pub mod rotation_profiles;
 pub mod shroud;
 pub mod slot_budgets;
 pub mod universal_formulas;
+pub mod weapon_hands;
 
 pub use balance_overrides::{known_mode_splits, BalanceOverrides, KnownModeSplit, OverrideResult};
 pub use boon_condition_formulas::{boons, conditions, BoonFormulas, ConditionFormulas};
@@ -188,6 +189,9 @@ pub fn initialize() -> DataState {
         errors.extend(errs);
     }
     if let Err(errs) = combos::try_load_combos() {
+        errors.extend(errs);
+    }
+    if let Err(errs) = weapon_hands::try_load_weapon_hands() {
         errors.extend(errs);
     }
 
