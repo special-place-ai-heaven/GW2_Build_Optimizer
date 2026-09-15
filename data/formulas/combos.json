@@ -106,5 +106,86 @@
       "projectile": { "effect": "Regeneration", "target": "ally_near_target", "duration_s": 2 },
       "whirl": { "effect": "Regeneration", "target": "bolts", "duration_s": 2 }
     }
+  },
+  "profession_combos": {
+    "Guardian": {
+      "core_finishers": ["blast", "leap", "whirl"],
+      "core_fields": ["Fire", "Light"],
+      "gated_finishers": {
+        "projectile": "Longbow via Dragonhunter/Weaponmaster Training, or Pistol via SotO Expanded Weapon Proficiency"
+      },
+      "gated_fields": {
+        "Water": "Firebrand"
+      }
+    },
+    "Revenant": {
+      "core_finishers": ["blast", "leap", "projectile", "whirl"],
+      "core_fields": ["Dark", "Fire", "Light", "Lightning"],
+      "gated_fields": {
+        "Ethereal": "Trident (underwater)",
+        "Water": "Trident (underwater)"
+      },
+      "notes": ["Herald does not add a finisher type"]
+    },
+    "Warrior": {
+      "core_finishers": ["blast", "leap", "projectile", "whirl"],
+      "core_fields": ["Fire", "Light"],
+      "gated_fields": {
+        "Lightning": "Spellbreaker"
+      }
+    },
+    "Engineer": {
+      "core_finishers": ["blast", "leap", "projectile"],
+      "core_fields": ["Ethereal", "Fire", "Ice", "Light", "Poison", "Smoke", "Water"],
+      "gated_finishers": {
+        "whirl": "Scrapper or Hammer via Weaponmaster Training"
+      },
+      "gated_fields": {
+        "Dark": "Short bow via SotO Expanded Weapon Proficiency",
+        "Lightning": "Scrapper or Mechanist"
+      }
+    },
+    "Ranger": {
+      "core_finishers": ["blast", "leap", "projectile", "whirl"],
+      "core_fields": ["Ethereal", "Fire", "Ice", "Lightning", "Poison", "Smoke", "Water"],
+      "gated_fields": {
+        "Light": "Druid"
+      }
+    },
+    "Thief": {
+      "core_finishers": ["blast", "leap", "projectile", "whirl"],
+      "core_fields": ["Dark", "Ethereal", "Poison", "Smoke", "Water"],
+      "gated_fields": {
+        "Fire": "Antiquary",
+        "Light": "Antiquary"
+      }
+    },
+    "Elementalist": {
+      "core_finishers": ["blast", "leap", "projectile", "whirl"],
+      "core_fields": ["Fire", "Ice", "Lightning", "Water"],
+      "gated_fields": {
+        "Dark": "Spear via JW Expanded Weapon Proficiency",
+        "Poison": "Catalyst",
+        "Smoke": "Trident (underwater)"
+      }
+    },
+    "Mesmer": {
+      "core_finishers": ["blast", "leap", "projectile", "whirl"],
+      "core_fields": ["Ethereal", "Light"],
+      "gated_fields": {
+        "Dark": "Chronomancer"
+      }
+    },
+    "Necromancer": {
+      "core_finishers": ["blast", "projectile"],
+      "core_fields": ["Dark", "Ethereal", "Light", "Poison"],
+      "gated_finishers": {
+        "leap": "Reaper or Sword via SotO Expanded Weapon Proficiency",
+        "whirl": "Reaper or Greatsword via Weaponmaster Training"
+      },
+      "gated_fields": {
+        "Ice": "Reaper"
+      }
+    }
   }
 }
