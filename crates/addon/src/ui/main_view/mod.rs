@@ -223,14 +223,14 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
             .build();
     }
 
-    // API health indicator
-    let (label, color) = match state.main.api_status {
-        crate::state::ApiStatus::Unknown => {
-            (t("status.checking_api"), crate::ui::theme::pal().muted)
-        }
-        crate::state::ApiStatus::Online => (t("status.api_ready"), crate::ui::theme::OPTIMIZED),
-        crate::state::ApiStatus::Degraded => (t("status.api_slow"), crate::ui::theme::pal().gold),
-        crate::state::ApiStatus::Offline => (t("status.api_offline"), crate::ui::theme::ERR),
+    // API health indicator — live `/v2/build` sits on the chip so a refresh
+    // that caught up is not mistaken for a failed update.
+    let label = stats::api_status_label(&state.main.api_status, state.main.live_build_number);
+    let color = match state.main.api_status {
+        crate::state::ApiStatus::Unknown => crate::ui::theme::pal().muted,
+        crate::state::ApiStatus::Online => crate::ui::theme::OPTIMIZED,
+        crate::state::ApiStatus::Degraded => crate::ui::theme::pal().gold,
+        crate::state::ApiStatus::Offline => crate::ui::theme::ERR,
     };
     {
         let p = ui.cursor_screen_pos();

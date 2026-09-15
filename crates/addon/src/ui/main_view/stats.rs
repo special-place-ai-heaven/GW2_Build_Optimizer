@@ -2,7 +2,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use super::resolution::resolve_selected_build_inner;
-use crate::state::AddonState;
+use crate::state::{AddonState, ApiStatus};
+use gw2_core::i18n::t;
 
 /// How long a name pack that could not be loaded is left alone before the next
 /// try. [`ensure_localized_names`] runs on every frame, and a pack that is
@@ -475,7 +476,22 @@ pub(super) fn check_api_health(state: &mut AddonState) {
     }
 }
 
-/// Status-bar chip when the live `/v2/build` is not the verified manifest build.
+/// Status-bar chip: API readiness plus the live `/v2/build` id when we have it.
+pub(super) fn api_status_label(status: &ApiStatus, live_build: Option<u32>) -> String {
+    let base = match status {
+        ApiStatus::Unknown => t("status.checking_api"),
+        ApiStatus::Online => t("status.api_ready"),
+        ApiStatus::Degraded => t("status.api_slow"),
+        ApiStatus::Offline => t("status.api_offline"),
+    };
+    match (status, live_build) {
+        (ApiStatus::Online | ApiStatus::Degraded, Some(n)) => format!("{base} · {n}"),
+        _ => base,
+    }
+}
+
+/// Status-bar chip when catalog load is blocked. Combat-snapshot vs live build
+/// stays off this bar — after a refresh it looks like the API update failed.
 pub(super) fn render_manifest_staleness(ui: &nexus::imgui::Ui, state: &crate::state::AddonState) {
     if let Some(reason) = state
         .main
@@ -488,14 +504,6 @@ pub(super) fn render_manifest_staleness(ui: &nexus::imgui::Ui, state: &crate::st
         if ui.is_item_hovered() {
             ui.tooltip_text(reason);
         }
-    }
-    let Some(msg) = state.main.manifest_staleness.as_deref() else {
-        return;
-    };
-    ui.same_line();
-    ui.text_colored(crate::ui::theme::WARN, "| Data snapshot stale");
-    if ui.is_item_hovered() {
-        ui.tooltip_text(msg);
     }
 }
 
@@ -624,6 +632,27 @@ pub(super) fn compute_3tier_combat(
 mod tests {
     use super::{locale_attempt_allowed, LOCALE_RETRY_INTERVAL};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn api_status_label_puts_live_build_on_ready_and_slow() {
+        use crate::state::ApiStatus;
+        assert_eq!(
+            super::api_status_label(&ApiStatus::Online, Some(207032)),
+            format!("{} · 207032", gw2_core::i18n::t("status.api_ready"))
+        );
+        assert_eq!(
+            super::api_status_label(&ApiStatus::Degraded, Some(207032)),
+            format!("{} · 207032", gw2_core::i18n::t("status.api_slow"))
+        );
+        assert_eq!(
+            super::api_status_label(&ApiStatus::Online, None),
+            gw2_core::i18n::t("status.api_ready")
+        );
+        assert_eq!(
+            super::api_status_label(&ApiStatus::Offline, Some(207032)),
+            gw2_core::i18n::t("status.api_offline")
+        );
+    }
 
     #[test]
     fn live_build_mismatch_is_what_the_health_check_stores() {
