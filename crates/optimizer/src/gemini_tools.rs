@@ -10,6 +10,7 @@ use gw2_api::models::{Fact, ItemStat, Trait as GW2Trait};
 
 use crate::balance::BalanceContext;
 use crate::combat::{self, CombatPerformance, DamageModifiers};
+use crate::data::weapon_hands::{access, land_weapons, Hand};
 use crate::engine::BuildCandidate;
 use crate::gamedb::GameDb;
 use crate::gemini::{FunctionDeclaration, Tool};
@@ -734,7 +735,6 @@ fn exec_get_profession_info(args: &Value, ctx: &ToolContext) -> Value {
         return json!({ "error": format!("Profession '{}' not found", prof_name) });
     };
 
-    // Gather specializations
     let specs: Vec<Value> = prof
         .specializations
         .iter()
@@ -749,34 +749,23 @@ fn exec_get_profession_info(args: &Value, ctx: &ToolContext) -> Value {
         })
         .collect();
 
-    // Gather weapons with hand info
-    let weapons: Vec<Value> = prof
-        .weapons
-        .iter()
-        .filter(|(name, info)| info.land_usable(name))
-        .map(|(name, info)| {
-            let flags: Vec<&String> = info
-                .flags
-                .iter()
-                .filter(|f| !f.eq_ignore_ascii_case("Aquatic"))
-                .collect();
-            let mut w = json!({
+    let weapons: Vec<Value> = land_weapons(prof_name)
+        .into_iter()
+        .map(|name| {
+            json!({
                 "name": name,
-                "flags": flags
-            });
-            if let Some(spec_id) = info.specialization {
-                if let Some(spec) = ctx.db.spec(spec_id) {
-                    w["requires_elite"] = json!(&spec.name);
-                }
-            }
-            w
+                "main": access(prof_name, name, Hand::Main).json_token(),
+                "off": access(prof_name, name, Hand::Off).json_token(),
+                "two_hand": access(prof_name, name, Hand::TwoHand).json_token()
+            })
         })
         .collect();
 
     json!({
         "profession": &prof.name,
         "specializations": specs,
-        "weapons": weapons
+        "weapons": weapons,
+        "note": "Elite names require that spec or Weaponmaster Training; expanded_soto / spear_jw are account unlocks."
     })
 }
 
@@ -3477,5 +3466,57 @@ mod tests {
         assert!(v["scope"]
             .as_str()
             .is_some_and(|s| s.contains("prefix only")));
+    }
+
+    fn stub_profession(name: &str) -> gw2_api::models::Profession {
+        gw2_api::models::Profession {
+            id: name.into(),
+            name: name.into(),
+            code: None,
+            specializations: vec![],
+            weapons: HashMap::new(),
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        }
+    }
+
+    fn profession_info_for(name: &str) -> Value {
+        let mut db = GameDb::empty_for_tests();
+        db.professions.insert(name.into(), stub_profession(name));
+        let bal = BalanceContext::pve();
+        let ctx = ToolContext {
+            db: &db,
+            profession_name: name,
+            candidates: &[],
+            current_build_summary: None,
+            weights: OptimizationWeights::default(),
+            balance_ctx: &bal,
+            scenario: crate::scenario::ScenarioSpec::from_balance_context(&bal),
+        };
+        execute_tool("get_profession_info", &json!({ "profession": name }), &ctx)
+    }
+
+    #[test]
+    fn get_profession_info_guardian_sword_per_hand() {
+        let v = profession_info_for("Guardian");
+        let sword = v["weapons"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|w| w["name"] == "Sword")
+            .expect("Sword row");
+        assert_eq!(sword["main"], "core", "{sword}");
+        assert_eq!(sword["off"], "Willbender", "{sword}");
+        assert!(sword["two_hand"].is_null(), "{sword}");
+        assert!(sword.get("flags").is_none(), "{sword}");
+        assert!(sword.get("requires_elite").is_none(), "{sword}");
+        assert!(
+            v["note"]
+                .as_str()
+                .is_some_and(|n| n.contains("Weaponmaster Training")),
+            "{v}"
+        );
     }
 }
