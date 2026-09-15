@@ -2,6 +2,13 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.32 - 2026-09-15
+
+API status chip shows the live `/v2/build` id. SCHEMA CHANGE = N.
+
+- Header reads `API ready · {build}` from the API instead of "Balance data verified for …".
+- Combat-snapshot vs live build no longer paints a yellow header after a successful refresh.
+
 ## 1.14.31 - 2026-09-15
 
 Wiki per-hand weapon legality and combo matrix. SCHEMA CHANGE = N.
