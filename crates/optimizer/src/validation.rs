@@ -10,6 +10,7 @@ use gw2_api::models::{Item, Skill, Specialization, Trait as GW2Trait};
 
 use gw2_core::types::{GearSlot, GearSlots, PrefixRef};
 
+use crate::data::weapon_hands::{self, Hand, WeaponAccess};
 use crate::gamedb::GameDb;
 use crate::prompts::GeminiBuildResponse;
 use crate::sigil_slots::{SigilSlot, SigilSlots, SIGIL_SLOT_COUNT};
@@ -779,6 +780,76 @@ fn validate_weapons(
     result.weapons.set2 = validate_weapon_set(&set2, prof, db, result, "Set 2");
 }
 
+fn weapon_is_two_hand(prof: &gw2_api::models::Profession, weapon: &str) -> bool {
+    crate::weapon_budget::is_two_handed(weapon, Some(prof))
+        || !matches!(
+            weapon_hands::access(&prof.name, weapon, Hand::TwoHand),
+            WeaponAccess::None
+        )
+}
+
+fn wiki_main_hand(prof: &gw2_api::models::Profession, weapon: &str) -> Hand {
+    if weapon_is_two_hand(prof, weapon) {
+        Hand::TwoHand
+    } else {
+        Hand::Main
+    }
+}
+
+fn push_weapon_not_available(
+    result: &mut ValidatedBuild,
+    label: &str,
+    weapon: &str,
+    profession: &str,
+) {
+    result.errors.push(ValidationReject {
+        code: RejectCode::WeaponNotAvailable {
+            slot: label.to_string(),
+            weapon: weapon.to_string(),
+            profession: profession.to_string(),
+        },
+        detail: format!(
+            "{}: weapon '{}' not available for {}",
+            label, weapon, profession
+        ),
+    });
+}
+
+/// Wiki table wins for known rows. `true` = keep the slot.
+fn wiki_hand_allowed(
+    prof: &gw2_api::models::Profession,
+    weapon: &str,
+    hand: Hand,
+    result: &mut ValidatedBuild,
+    label: &str,
+) -> bool {
+    if !weapon_hands::known_weapon(&prof.name, weapon) {
+        return true;
+    }
+    if matches!(
+        weapon_hands::access(&prof.name, weapon, hand),
+        WeaponAccess::None
+    ) {
+        push_weapon_not_available(result, label, weapon, &prof.name);
+        return false;
+    }
+    true
+}
+
+fn push_weapon_gated(result: &mut ValidatedBuild, label: &str, weapon: &str, required_spec: &str) {
+    result.errors.push(ValidationReject {
+        code: RejectCode::WeaponGatedBySpec {
+            slot: label.to_string(),
+            weapon: weapon.to_string(),
+            required_spec: required_spec.to_string(),
+        },
+        detail: format!(
+            "{}: '{}' requires {} (not equipped) — weapon cannot be used",
+            label, weapon, required_spec
+        ),
+    });
+}
+
 fn validate_weapon_set(
     weapons: &(Option<String>, Option<String>),
     prof: Option<&gw2_api::models::Profession>,
@@ -806,20 +877,19 @@ fn validate_weapon_set(
                         label, canonical
                     ),
                 });
-            } else {
+            } else if wiki_hand_allowed(
+                prof,
+                canonical,
+                wiki_main_hand(prof, canonical),
+                result,
+                label,
+            ) {
                 // Store canonical name so later `prof.weapons.get(...)` (case-sensitive)
                 // hits — preserving the LLM's casing would bypass the elite spec gate.
                 set.main_hand = Some(canonical.clone());
             }
         } else {
-            result.errors.push(ValidationReject {
-                code: RejectCode::WeaponNotAvailable {
-                    slot: label.to_string(),
-                    weapon: mh.clone(),
-                    profession: prof.name.clone(),
-                },
-                detail: format!("{}: weapon '{}' not available for {}", label, mh, prof.name),
-            });
+            push_weapon_not_available(result, label, mh, &prof.name);
         }
     }
 
@@ -837,22 +907,21 @@ fn validate_weapon_set(
                         label, canonical
                     ),
                 });
-            } else {
+            } else if weapon_is_two_hand(prof, canonical) {
+                push_weapon_not_available(result, label, canonical, &prof.name);
+            } else if wiki_hand_allowed(prof, canonical, Hand::Off, result, label) {
                 set.off_hand = Some(canonical.clone());
             }
         } else {
-            result.errors.push(ValidationReject {
-                code: RejectCode::WeaponNotAvailable {
-                    slot: label.to_string(),
-                    weapon: oh.clone(),
-                    profession: prof.name.clone(),
-                },
-                detail: format!("{}: weapon '{}' not available for {}", label, oh, prof.name),
-            });
+            push_weapon_not_available(result, label, oh, &prof.name);
         }
     }
 
-    // Check elite spec weapon gates
+    let equipped_elite = result
+        .specializations
+        .iter()
+        .find(|s| s.elite)
+        .map(|s| s.name.clone());
     let elite_spec_ids: Vec<u32> = result
         .specializations
         .iter()
@@ -860,41 +929,66 @@ fn validate_weapon_set(
         .map(|s| s.spec_id)
         .collect();
 
-    // Elite spec weapon gate: collect weapons that need a spec not in the build.
-    // These are HARD errors — the player cannot equip them without the required spec.
-    let mut gated_weapons: Vec<String> = Vec::new();
-    for weapon_name in [&set.main_hand, &set.off_hand].into_iter().flatten() {
-        if let Some(info) = prof.weapons.get(weapon_name.as_str()) {
+    // Per-hand strip: dual Sword must not drop a legal main when only OH is gated.
+    let mut strip_mh = false;
+    let mut strip_oh = false;
+
+    if let Some(ref weapon_name) = set.main_hand {
+        let hand = wiki_main_hand(prof, weapon_name);
+        if weapon_hands::known_weapon(&prof.name, weapon_name) {
+            if let WeaponAccess::Elite(req) = weapon_hands::access(&prof.name, weapon_name, hand) {
+                if !weapon_hands::is_legal(&prof.name, weapon_name, hand, equipped_elite.as_deref())
+                {
+                    push_weapon_gated(result, label, weapon_name, &req);
+                    strip_mh = true;
+                }
+            }
+        } else if let Some(info) = prof.weapons.get(weapon_name.as_str()) {
             if let Some(required_spec) = info.specialization {
                 if !elite_spec_ids.contains(&required_spec) {
                     let spec_name = db
                         .spec(required_spec)
                         .map(|s| s.name.as_str())
                         .unwrap_or("unknown");
-                    result.errors.push(ValidationReject {
-                        code: RejectCode::WeaponGatedBySpec {
-                            slot: label.to_string(),
-                            weapon: weapon_name.clone(),
-                            required_spec: spec_name.to_string(),
-                        },
-                        detail: format!(
-                            "{}: '{}' requires {} (not equipped) — weapon cannot be used",
-                            label, weapon_name, spec_name
-                        ),
-                    });
-                    gated_weapons.push(weapon_name.clone());
+                    push_weapon_gated(result, label, weapon_name, spec_name);
+                    strip_mh = true;
                 }
             }
         }
     }
-    // Remove gated weapons from the validated set so downstream code can't apply them.
-    for w in &gated_weapons {
-        if set.main_hand.as_deref() == Some(w.as_str()) {
-            set.main_hand = None;
+    if let Some(ref weapon_name) = set.off_hand {
+        if weapon_hands::known_weapon(&prof.name, weapon_name) {
+            if let WeaponAccess::Elite(req) =
+                weapon_hands::access(&prof.name, weapon_name, Hand::Off)
+            {
+                if !weapon_hands::is_legal(
+                    &prof.name,
+                    weapon_name,
+                    Hand::Off,
+                    equipped_elite.as_deref(),
+                ) {
+                    push_weapon_gated(result, label, weapon_name, &req);
+                    strip_oh = true;
+                }
+            }
+        } else if let Some(info) = prof.weapons.get(weapon_name.as_str()) {
+            if let Some(required_spec) = info.specialization {
+                if !elite_spec_ids.contains(&required_spec) {
+                    let spec_name = db
+                        .spec(required_spec)
+                        .map(|s| s.name.as_str())
+                        .unwrap_or("unknown");
+                    push_weapon_gated(result, label, weapon_name, spec_name);
+                    strip_oh = true;
+                }
+            }
         }
-        if set.off_hand.as_deref() == Some(w.as_str()) {
-            set.off_hand = None;
-        }
+    }
+    if strip_mh {
+        set.main_hand = None;
+    }
+    if strip_oh {
+        set.off_hand = None;
     }
 
     set
@@ -3242,6 +3336,161 @@ mod tests {
         );
         assert_eq!(set.main_hand.as_deref(), Some("Spear"));
         assert!(result.errors.is_empty(), "{:?}", result.errors);
+    }
+
+    fn elite_spec(id: u32, name: &str) -> ValidatedSpec {
+        ValidatedSpec {
+            spec_id: id,
+            name: name.into(),
+            elite: true,
+            trait_ids: vec![],
+            trait_names: vec![],
+            all_trait_ids: vec![],
+        }
+    }
+
+    fn prof_with_weapons(
+        name: &str,
+        weapons: &[(&str, Option<u32>)],
+    ) -> gw2_api::models::Profession {
+        let mut map = std::collections::HashMap::new();
+        for (ty, spec) in weapons {
+            let two = crate::weapon_budget::is_two_handed(ty, None);
+            map.insert(
+                (*ty).to_string(),
+                gw2_api::models::WeaponInfo {
+                    specialization: *spec,
+                    flags: if two {
+                        vec!["TwoHand".into()]
+                    } else {
+                        vec!["Mainhand".into(), "Offhand".into()]
+                    },
+                    skills: vec![],
+                },
+            );
+        }
+        gw2_api::models::Profession {
+            id: name.into(),
+            name: name.into(),
+            code: None,
+            specializations: vec![],
+            weapons: map,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        }
+    }
+
+    #[test]
+    fn firebrand_dual_swords_strips_offhand() {
+        // API lie: Sword spec=None for both hands. Wiki: OH is Willbender.
+        let prof = prof_with_weapons("Guardian", &[("Sword", None)]);
+        let db = empty_db_with_itemstats(vec![]);
+        let mut result = ValidatedBuild::default();
+        result.specializations = vec![elite_spec(62, "Firebrand")];
+        let set = validate_weapon_set(
+            &(Some("Sword".into()), Some("Sword".into())),
+            Some(&prof),
+            &db,
+            &mut result,
+            "Set 1",
+        );
+        assert_eq!(set.main_hand.as_deref(), Some("Sword"));
+        assert!(
+            set.off_hand.is_none(),
+            "Firebrand off-hand sword must be stripped; got {:?}",
+            set.off_hand
+        );
+        assert!(
+            result.errors.iter().any(|e| matches!(
+                &e.code,
+                RejectCode::WeaponGatedBySpec { weapon, required_spec, .. }
+                    if weapon == "Sword" && required_spec == "Willbender"
+            )),
+            "expected WeaponGatedBySpec Willbender; got {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn herald_dual_swords_ok() {
+        let prof = prof_with_weapons("Revenant", &[("Sword", None)]);
+        let db = empty_db_with_itemstats(vec![]);
+        let mut result = ValidatedBuild::default();
+        result.specializations = vec![elite_spec(52, "Herald")];
+        let set = validate_weapon_set(
+            &(Some("Sword".into()), Some("Sword".into())),
+            Some(&prof),
+            &db,
+            &mut result,
+            "Set 1",
+        );
+        assert_eq!(set.main_hand.as_deref(), Some("Sword"));
+        assert_eq!(set.off_hand.as_deref(), Some("Sword"));
+        assert!(
+            result.errors.is_empty(),
+            "Herald dual swords are core; got {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn ranger_dagger_dagger_without_soulbeast_keeps_offhand() {
+        // API lie: whole Dagger spec=55. Wiki: MH=Soulbeast, OH=core.
+        let prof = prof_with_weapons("Ranger", &[("Dagger", Some(55))]);
+        let db = empty_db_with_itemstats(vec![]);
+        let mut result = ValidatedBuild::default();
+        let set = validate_weapon_set(
+            &(Some("Dagger".into()), Some("Dagger".into())),
+            Some(&prof),
+            &db,
+            &mut result,
+            "Set 1",
+        );
+        assert!(
+            set.main_hand.is_none(),
+            "main-hand dagger needs Soulbeast; got {:?}",
+            set.main_hand
+        );
+        assert_eq!(set.off_hand.as_deref(), Some("Dagger"));
+        assert!(
+            result.errors.iter().any(|e| matches!(
+                &e.code,
+                RejectCode::WeaponGatedBySpec { weapon, required_spec, .. }
+                    if weapon == "Dagger" && required_spec == "Soulbeast"
+            )),
+            "expected WeaponGatedBySpec Soulbeast; got {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn ranger_sword_offhand_not_available() {
+        let prof = prof_with_weapons("Ranger", &[("Sword", None)]);
+        let db = empty_db_with_itemstats(vec![]);
+        let mut result = ValidatedBuild::default();
+        let set = validate_weapon_set(
+            &(Some("Sword".into()), Some("Sword".into())),
+            Some(&prof),
+            &db,
+            &mut result,
+            "Set 1",
+        );
+        assert_eq!(set.main_hand.as_deref(), Some("Sword"));
+        assert!(
+            set.off_hand.is_none(),
+            "ranger off-hand sword must be rejected; got {:?}",
+            set.off_hand
+        );
+        assert!(
+            result.errors.iter().any(|e| matches!(
+                &e.code,
+                RejectCode::WeaponNotAvailable { weapon, .. } if weapon == "Sword"
+            )),
+            "expected WeaponNotAvailable for Ranger sword OH; got {:?}",
+            result.errors
+        );
     }
 
     #[test]
