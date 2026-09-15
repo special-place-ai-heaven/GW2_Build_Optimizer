@@ -2,6 +2,15 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.31 - 2026-09-15
+
+Wiki per-hand weapon legality and combo matrix. SCHEMA CHANGE = N.
+
+- Per-hand wiki table (`data/weapon_hands.json`) replaces API one-spec-per-weapon-type for validation, search, and Choya.
+- Validator checks Mainhand vs Offhand (Guardian Sword off = Willbender; Ranger Dagger main = Soulbeast / off = core). Herald dual swords stays legal.
+- Beam and synergy generate wiki-legal same-type dual wield (Sword/Sword).
+- Choya profession dump is per-hand with elite / SotO / JW labels; combo field×finisher matrix and profession finisher gates go in the prompt.
+
 ## 1.14.30 - 2026-09-14
 
 NeedsMechanic Engine E4: Mesmer IllusionState (clones) + TriggerBus OnCloneCreated. SCHEMA CHANGE = N.
