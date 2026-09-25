@@ -567,19 +567,24 @@ impl AddonState {
         self.radio.merge_paint(&base.radio, &paint.radio);
     }
 
-    /// Register `handle` on the live addon when this state is a paint snapshot,
-    /// and publish the snapshot first so the worker observes flags set above
-    /// the spawn. Callers that already hold `STATE` register here: the mutex
-    /// is not re-entrant.
+    /// Register `handle` on the live addon when this state is a paint snapshot.
+    ///
+    /// Callers that already hold `STATE` register on `self`: the mutex is not
+    /// re-entrant. A paint spawn must not clone or merge `AddonState` under
+    /// the lock. That copy ran once per worker on the first open, held `STATE`
+    /// long enough for siblings to publish, then the next spawn's merge treated
+    /// a not-yet-stored busy flag as a finished worker and the following frame
+    /// spawned again (open → worker storm → freeze).
+    ///
+    /// While the publish epoch still matches the snapshot, store busy flags
+    /// this frame raised (bools only). Commit still folds the rest of the frame.
     fn track_worker(&self, name: &'static str, handle: JoinHandle<()>) {
         if render_thread_active() && baseline_is_set() && !state_lock_held() {
             let _ = with_state(|live| {
                 if live.epoch == self.epoch {
-                    live.overwrite_from_snapshot(self.clone_for_paint());
-                } else {
                     with_baseline(|base| {
                         if let Some(base) = base {
-                            live.merge_paint(base, self);
+                            publish_raised_busy(live, base, self);
                         }
                     });
                 }
@@ -1802,6 +1807,114 @@ impl PaintFrame {
     }
 }
 
+/// Busy flags the window raised this frame (`paint && !base`), stored on live
+/// state while the epoch still matches.
+///
+/// Not a snapshot merge: no `Vec` / `String` clone. A new `merge_busy` flag
+/// belongs here too.
+///
+/// ponytail: stored only when `live.epoch == snapshot.epoch`. A sibling publish
+/// before this spawn still leaves a new raise for [`merge_busy`] to drop.
+/// Upgrade: a per-flag raised bit if that respawn shows up.
+fn publish_raised_busy(live: &mut AddonState, base: &AddonState, paint: &AddonState) {
+    fn up(live: &mut bool, base: bool, paint: bool) {
+        if paint && !base {
+            *live = true;
+        }
+    }
+    up(
+        &mut live.main.characters_loading,
+        base.main.characters_loading,
+        paint.main.characters_loading,
+    );
+    up(
+        &mut live.main.build_loading,
+        base.main.build_loading,
+        paint.main.build_loading,
+    );
+    up(
+        &mut live.main.game_db_loading,
+        base.main.game_db_loading,
+        paint.main.game_db_loading,
+    );
+    up(
+        &mut live.main.names_loading,
+        base.main.names_loading,
+        paint.main.names_loading,
+    );
+    up(
+        &mut live.main.optimizing,
+        base.main.optimizing,
+        paint.main.optimizing,
+    );
+    up(
+        &mut live.main.benchmark_running,
+        base.main.benchmark_running,
+        paint.main.benchmark_running,
+    );
+    up(
+        &mut live.main.settings_key_validating,
+        base.main.settings_key_validating,
+        paint.main.settings_key_validating,
+    );
+    up(
+        &mut live.main.picks_matching,
+        base.main.picks_matching,
+        paint.main.picks_matching,
+    );
+    up(
+        &mut live.main.models_loading,
+        base.main.models_loading,
+        paint.main.models_loading,
+    );
+    up(
+        &mut live.main.api_health_checking,
+        base.main.api_health_checking,
+        paint.main.api_health_checking,
+    );
+    up(
+        &mut live.main.chat.waiting,
+        base.main.chat.waiting,
+        paint.main.chat.waiting,
+    );
+    up(
+        &mut live.main.comparison.loading,
+        base.main.comparison.loading,
+        paint.main.comparison.loading,
+    );
+    up(
+        &mut live.main.feedback.taxonomy_fetching,
+        base.main.feedback.taxonomy_fetching,
+        paint.main.feedback.taxonomy_fetching,
+    );
+    up(
+        &mut live.main.feedback.refreshing,
+        base.main.feedback.refreshing,
+        paint.main.feedback.refreshing,
+    );
+    up(
+        &mut live.main.feedback.account_looking_up,
+        base.main.feedback.account_looking_up,
+        paint.main.feedback.account_looking_up,
+    );
+    up(
+        &mut live.main.feedback.refresh_requested,
+        base.main.feedback.refresh_requested,
+        paint.main.feedback.refresh_requested,
+    );
+    up(&mut live.news.loading, base.news.loading, paint.news.loading);
+    up(
+        &mut live.news.art_loading,
+        base.news.art_loading,
+        paint.news.art_loading,
+    );
+    up(
+        &mut live.radio.searching,
+        base.radio.searching,
+        paint.radio.searching,
+    );
+}
+
 pub(crate) fn take_ui<T: Clone + PartialEq>(live: &mut T, base: &T, paint: &T) {
     if paint != base {
         *live = paint.clone();
@@ -1815,8 +1928,9 @@ pub(crate) fn keep_worker<T: Clone + PartialEq>(live: &mut T, base: &T, paint: &
 }
 
 /// UI set a flag, or a worker cleared it. A finished worker (`live` already
-/// false while `paint` is still busy) keeps that clear — spawn published the
-/// busy flag, so `live == base` is not "untouched". UI clearing (Stop) wins.
+/// false while `paint` is still busy) keeps that clear — spawn stored the
+/// raise while the epoch still matched, so `live == base` is not "untouched"
+/// after that. UI clearing (Stop) wins.
 pub(crate) fn merge_busy(live: &mut bool, base: bool, paint: bool) {
     if paint == base {
         return;
@@ -2473,6 +2587,108 @@ mod tests {
             !optimizing,
             "a finished worker must not be restarted by commit"
         );
+        let _ = join_workers(Duration::from_secs(2));
+        reset_state();
+    }
+
+    /// Spawn during layout registers the worker and stores the busy flag.
+    /// It must not copy the paint snapshot over live state: that clone under
+    /// `STATE` is the first-open worker storm.
+    #[test]
+    fn spawn_during_paint_does_not_replace_live_state() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        reset_state();
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_state_test_{}_paint_noreplace",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+
+        let captured = with_state(|s| PaintCapture::take(s)).expect("state");
+        let mut frame = captured.materialize();
+        let _pin = frame.pin_baseline();
+        with_state(|s| s.main.error = Some("live-only".into())).expect("state");
+        frame.state.main.active_tab = MainTab::Settings;
+        frame.state.main.optimizing = true;
+        frame.state.main.api_health_checking = true;
+
+        assert!(frame.state.spawn_worker("noreplace", |_token| {}));
+
+        let (err, tab, optimizing, checking, n) = with_state(|s| {
+            (
+                s.main.error.clone(),
+                s.main.active_tab.clone(),
+                s.main.optimizing,
+                s.main.api_health_checking,
+                s.worker_count(),
+            )
+        })
+        .unwrap();
+        assert_eq!(err.as_deref(), Some("live-only"));
+        assert_eq!(tab, MainTab::NewBuild, "spawn must not copy the paint tab");
+        assert!(optimizing, "spawn stores the raised busy flag");
+        assert!(checking, "spawn stores every raised busy flag");
+        assert_eq!(n, 1, "the worker is registered on live state");
+
+        drop(_pin);
+        let _ = join_workers(Duration::from_secs(2));
+        reset_state();
+    }
+
+    /// A worker that published during layout moved the epoch. Spawn still only
+    /// registers: it must not merge the paint snapshot over that publish.
+    #[test]
+    fn spawn_after_publish_does_not_merge_the_snapshot() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        reset_state();
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_state_test_{}_paint_nomerge",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+
+        let captured = with_state(|s| PaintCapture::take(s)).expect("state");
+        let mut frame = captured.materialize();
+        let _pin = frame.pin_baseline();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let wrote = with_state(|s| {
+                s.main.error = Some("from-worker".into());
+            });
+            tx.send(wrote).unwrap();
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(2)).expect("worker blocked"),
+            Some(())
+        );
+
+        frame.state.main.active_tab = MainTab::Settings;
+        frame.state.main.optimizing = true;
+        assert!(frame.state.spawn_worker("nomerge", |_token| {}));
+
+        let (err, tab, optimizing, n) = with_state(|s| {
+            (
+                s.main.error.clone(),
+                s.main.active_tab.clone(),
+                s.main.optimizing,
+                s.worker_count(),
+            )
+        })
+        .unwrap();
+        assert_eq!(err.as_deref(), Some("from-worker"));
+        assert_eq!(tab, MainTab::NewBuild, "spawn must not merge the paint tab");
+        assert!(
+            !optimizing,
+            "a sibling publish owns the epoch; this spawn must not store busy flags over it"
+        );
+        assert_eq!(n, 1);
+
+        drop(_pin);
         let _ = join_workers(Duration::from_secs(2));
         reset_state();
     }
