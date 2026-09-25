@@ -13,6 +13,31 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: commit identity selftest
+        shell: bash
+        run: SELFTEST=1 bash .github/scripts/check-commit-identity.sh
+      - name: commit identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          zero=0000000000000000000000000000000000000000
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            range="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+          else
+            before="${{ github.event.before }}"
+            after="${{ github.event.after }}"
+            if [ -z "$after" ] || [ "$after" = "$zero" ]; then
+              after=HEAD
+            fi
+            if [ -z "$before" ] || [ "$before" = "$zero" ]; then
+              range="$after"
+            else
+              range="${before}...${after}"
+            fi
+          fi
+          bash .github/scripts/check-commit-identity.sh "$range"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
