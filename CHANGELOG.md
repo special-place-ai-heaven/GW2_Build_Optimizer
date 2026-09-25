@@ -4,6 +4,10 @@ All notable changes to GW2 Build Optimizer are documented here.
 
 ## Unreleased
 
+Nothing yet.
+
+## 1.14.49
+
 - E22b: WvW Reaper's Onslaught (`trait:2021:1`) Interval sim ceiling moves from 15 s to 20 s. 15 s was calibrated to pre-E18 under-shroud; with E18 stay-in-form dwell that ceiling lands gated Quickness at 0.633, outside the log band. At 20 s the Lucian-shaped 60 s row measures 0.583 (band 0.2-0.6), still above skills-only 0.433. Page numbers stay 3 s every 3 s. SelfBoonAbsent Quickness stays. PvE Onslaught stays ungated. Shroud fraction stays in 0.60-0.75 (measured 0.638).
 - E28: effect coverage no longer counts a record Executable from schema shape alone. Rushing Justice's flames (PvE `ProcEffect` `skill:62668`, `skill:62603`, `skill:62648`) abstain because the flow sim and the timeline have no impacts/interval consumer for that field. The abstain reason names the missing consumer. A coefficient `ProcEffect` that names an inner `StrikeDamagePct` (Sigil of Fire) still counts Executable. Pin `rushing_justice_flames_abstain_without_impacts_interval_consumer`.
 - E22: WvW Reaper's Onslaught (`trait:2021:1`) no longer duration-stacks a 3 s Quickness pulse onto Quickness the player already has, and the WvW pulse is floored at 15 s. The page numbers stay 3 s every 3 s. On a 60 s WvW shroud row shaped like the Lucian Lord over-production (Chilled to the Bone 10 s / 30 s, Grasping Darkness 3 s / 25 s), self Quickness goes from 0.988 to 0.583 (log band 0.2-0.6). PvE Onslaught is unchanged. The 15 s gate was a sim ceiling calibrated to pre-E18 under-shroud (recalibrated in E22b).
