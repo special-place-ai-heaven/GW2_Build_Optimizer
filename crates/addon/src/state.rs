@@ -1902,7 +1902,11 @@ fn publish_raised_busy(live: &mut AddonState, base: &AddonState, paint: &AddonSt
         base.main.feedback.refresh_requested,
         paint.main.feedback.refresh_requested,
     );
-    up(&mut live.news.loading, base.news.loading, paint.news.loading);
+    up(
+        &mut live.news.loading,
+        base.news.loading,
+        paint.news.loading,
+    );
     up(
         &mut live.news.art_loading,
         base.news.art_loading,
@@ -2663,7 +2667,8 @@ mod tests {
             tx.send(wrote).unwrap();
         });
         assert_eq!(
-            rx.recv_timeout(Duration::from_secs(2)).expect("worker blocked"),
+            rx.recv_timeout(Duration::from_secs(2))
+                .expect("worker blocked"),
             Some(())
         );
 
