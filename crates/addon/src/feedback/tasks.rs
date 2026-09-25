@@ -110,6 +110,9 @@ pub fn ensure_client_id(state: &mut AddonState) -> String {
             format!("could not save client_id to config: {e}"),
         );
     }
+    // The line above wrote the frame's copy, which can be behind a worker's
+    // config save. In paint this queues commit's merged save over it.
+    crate::state::defer_paint_config_save();
     id
 }
 

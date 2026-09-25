@@ -205,6 +205,11 @@ static CONFIG_WRITES: SerialWriter = SerialWriter::new("config-save");
 /// per-save file rather than one shared `config.tmp`, so two detached writes
 /// can overlap: the rename is the only step they share, and it is atomic.
 pub(crate) fn save_config_detached(state: &AddonState) {
+    // A frame snapshot's config can be behind a worker's save; commit saves
+    // the merged live config instead.
+    if state::defer_paint_config_save() {
+        return;
+    }
     let config = state.config.clone();
     let path = state.config_path.clone();
     CONFIG_WRITES.submit(state, move || {
@@ -272,7 +277,9 @@ fn paint_main_window(ui: &Ui) {
     let _baseline = frame.pin_baseline();
     paint_main_screen(ui, &mut frame.state);
     drop(_baseline);
-    state::with_state(|s| frame.commit(s));
+    if state::with_state(|s| frame.commit(s)).is_none() {
+        state::drop_paint_config_save();
+    }
 }
 
 /// ImGui for setup/main. Must not call `with_state` — the caller holds no
@@ -294,14 +301,16 @@ fn paint_main_screen(ui: &Ui, state: &mut AddonState) {
 }
 
 fn paint_mini_window(ui: &Ui, fade: f32, leaving: bool) {
-    let Some(captured) = state::with_state(|s| state::PaintCapture::take(s)) else {
+    let Some(captured) = state::with_state(|s| state::PaintCapture::take_mini(s)) else {
         return;
     };
     let mut frame = captured.materialize();
     let _baseline = frame.pin_baseline();
     paint_mini_screen(ui, &mut frame.state, fade, leaving);
     drop(_baseline);
-    state::with_state(|s| frame.commit(s));
+    if state::with_state(|s| frame.commit(s)).is_none() {
+        state::drop_paint_config_save();
+    }
 }
 
 fn paint_mini_screen(ui: &Ui, state: &mut AddonState, fade: f32, leaving: bool) {

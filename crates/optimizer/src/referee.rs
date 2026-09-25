@@ -1594,49 +1594,13 @@ fn evaluate_inner(
         }));
     }
 
-    let honesty = rotation.as_ref().map(|result| {
-        crate::data::quality::mode_honesty_reasons(
-            profession_name,
-            &ctx.game_mode,
-            result
-                .wvw
-                .as_ref()
-                .map(|fight| fight.unmodeled_sources.as_slice()),
-            &result.honesty.unhosted,
-            result.honesty.inventory_skipped,
-            &result.honesty.heuristic,
-        )
-    });
-    if let Some(reasons) = honesty {
-        if !reasons.is_empty() {
-            quality = quality.merge(&DataQuality::Provisional);
-            quality_reasons.extend(reasons);
-        }
+    let honesty =
+        engine::rotation_quality_reasons(rotation.as_ref(), profession_name, &ctx.game_mode);
+    if !honesty.is_empty() {
+        quality = quality.merge(&DataQuality::Provisional);
+        quality_reasons.extend(honesty);
     }
     if let Some(fight) = rotation.as_ref().and_then(|result| result.wvw.as_ref()) {
-        if !fight.resource_model_complete {
-            quality = quality.merge(&DataQuality::Provisional);
-            quality_reasons.push(DataQualityReason {
-                field: "wvw_timeline.resources".into(),
-                entity: profession_name.into(),
-                modes: vec![ctx.game_mode.label().to_string()],
-                explanation: if fight.resource_simulated {
-                    format!(
-                        "resource model incomplete for {profession_name}: {} not modelled",
-                        fight.resource_model_gaps.join(", ")
-                    )
-                } else {
-                    format!(
-                        "resource not simulated for {profession_name}: {} not modelled",
-                        if fight.resource_model_gaps.is_empty() {
-                            "the profession mechanic".to_string()
-                        } else {
-                            fight.resource_model_gaps.join(", ")
-                        }
-                    )
-                },
-            });
-        }
         // A refused shroud entry is a rotation fact the player can act on,
         // not a data-quality downgrade.
         for refusal in &fight.shroud_refusals {

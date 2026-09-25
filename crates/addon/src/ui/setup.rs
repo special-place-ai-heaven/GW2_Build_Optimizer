@@ -140,14 +140,14 @@ fn render_language_step(ui: &Ui, state: &mut AddonState) {
         {
             state.config.ui_language = "auto".into();
             gw2_core::i18n::set_language("auto");
-            let _ = state.config.save(&state.config_path);
+            crate::ui::save_config_detached(state);
         }
         for lang in gw2_core::i18n::LANGUAGES {
             let sel = state.config.ui_language == lang.code;
             if Selectable::new(lang.native_name).selected(sel).build(ui) && !sel {
                 state.config.ui_language = lang.code.into();
                 gw2_core::i18n::set_language(lang.code);
-                let _ = state.config.save(&state.config_path);
+                crate::ui::save_config_detached(state);
             }
         }
     }

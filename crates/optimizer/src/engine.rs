@@ -1497,8 +1497,15 @@ pub fn prepare_validated_rotation(
         &mods.trait_standing,
     );
     let inventory_due = coverage_inventory_due(validated, &rotation_skills, &mode);
-    let heuristic_coverage =
+    let mut heuristic_coverage =
         rotation::builder::heuristic_coverage_stamps(&rotation_skills, db, &equipped_traits);
+    heuristic_coverage.extend(interval_ceiling_stamps(validated, &mode));
+    heuristic_coverage.extend(rotation::builder::heuristic_override_stamps(
+        &rotation_skills,
+        &sim_ctx,
+    ));
+    heuristic_coverage.sort();
+    heuristic_coverage.dedup();
     let params = rotation::simulator::SimParams {
         power,
         condition_damage,
@@ -2913,6 +2920,30 @@ impl FlowRecord {
     }
 }
 
+/// Equipped trait records whose `Interval` gate (no `while` state) fires
+/// slower than the page's internal cooldown: that floor is a calibrated
+/// ceiling, not a page fact, so both simulators play a heuristic uptime
+/// (WvW Reaper's Onslaught at 20 s against the page's 3 s, FCR-011).
+fn interval_ceiling_stamps(validated: &ValidatedBuild, mode: &GameMode) -> Vec<String> {
+    use crate::data::normalized_effects::Gate;
+    use crate::data::quality::FactualValue;
+    equipped_trait_records(validated, mode)
+        .filter(|effect| {
+            let page_ms = match &effect.internal_cooldown {
+                Some(FactualValue::Resolved(seconds)) => (seconds * 1_000.0).round() as u32,
+                _ => 0,
+            };
+            effect.gates.iter().any(|gate| {
+                matches!(gate, Gate::Interval { every_ms, while_state: None } if *every_ms > page_ms)
+            })
+        })
+        .map(|effect| {
+            crate::data::quality::heuristic_entry(&effect.source_name, "interval ceiling")
+                .rendered()
+        })
+        .collect()
+}
+
 fn place_flow_record(
     effect: &crate::data::normalized_effects::NormalizedEffect,
     has_form: bool,
@@ -3345,6 +3376,55 @@ fn add_weapon_skill_ids(
     }
 }
 
+/// The rotation's honesty lines: PvE/PvP inventory skip, unhosted and
+/// heuristic stamps, the WvW coverage line, and an incomplete WvW resource
+/// model. Tier 1, tier 2 and the referee merge this one list, so a build
+/// reads the same label whichever tier produced it (FCR-014). Any line makes
+/// the build Provisional.
+pub(crate) fn rotation_quality_reasons(
+    rotation: Option<&rotation::SimulationResult>,
+    profession_name: &str,
+    mode: &GameMode,
+) -> Vec<data::DataQualityReason> {
+    let Some(result) = rotation else {
+        return Vec::new();
+    };
+    let mut out = data::quality::mode_honesty_reasons(
+        profession_name,
+        mode,
+        result
+            .wvw
+            .as_ref()
+            .map(|fight| fight.unmodeled_sources.as_slice()),
+        &result.honesty.unhosted,
+        result.honesty.inventory_skipped,
+        &result.honesty.heuristic,
+    );
+    if let Some(fight) = result.wvw.as_ref().filter(|f| !f.resource_model_complete) {
+        out.push(data::DataQualityReason {
+            field: "wvw_timeline.resources".into(),
+            entity: profession_name.into(),
+            modes: vec![mode.label().to_string()],
+            explanation: if fight.resource_simulated {
+                format!(
+                    "resource model incomplete for {profession_name}: {} not modelled",
+                    fight.resource_model_gaps.join(", ")
+                )
+            } else {
+                format!(
+                    "resource not simulated for {profession_name}: {} not modelled",
+                    if fight.resource_model_gaps.is_empty() {
+                        "the profession mechanic".to_string()
+                    } else {
+                        fight.resource_model_gaps.join(", ")
+                    }
+                )
+            },
+        });
+    }
+    out
+}
+
 /// Convert a `ValidatedBuild` into a `SynergyResult` by computing stats, combat
 /// metrics, and rotation simulation.  This is used by `optimize_v2()` to package
 /// the beam-search winner as the standard output type.
@@ -3374,49 +3454,10 @@ pub fn synergy_result_from_validated(
         data_quality = data_quality.merge(&data::DataQuality::Provisional);
         quality_reasons.extend(gear_reasons);
     }
-    let honesty = rotation.as_ref().map(|result| {
-        data::quality::mode_honesty_reasons(
-            profession_name,
-            &ctx.game_mode,
-            result
-                .wvw
-                .as_ref()
-                .map(|fight| fight.unmodeled_sources.as_slice()),
-            &result.honesty.unhosted,
-            result.honesty.inventory_skipped,
-            &result.honesty.heuristic,
-        )
-    });
-    if let Some(reasons) = honesty {
-        if !reasons.is_empty() {
-            data_quality = data_quality.merge(&data::DataQuality::Provisional);
-            quality_reasons.extend(reasons);
-        }
-    }
-    if let Some(fight) = rotation.as_ref().and_then(|result| result.wvw.as_ref()) {
-        if !fight.resource_model_complete {
-            data_quality = data_quality.merge(&data::DataQuality::Provisional);
-            quality_reasons.push(data::DataQualityReason {
-                field: "wvw_timeline.resources".into(),
-                entity: profession_name.into(),
-                modes: vec![ctx.game_mode.label().to_string()],
-                explanation: if fight.resource_simulated {
-                    format!(
-                        "resource model incomplete for {profession_name}: {} not modelled",
-                        fight.resource_model_gaps.join(", ")
-                    )
-                } else {
-                    format!(
-                        "resource not simulated for {profession_name}: {} not modelled",
-                        if fight.resource_model_gaps.is_empty() {
-                            "the profession mechanic".to_string()
-                        } else {
-                            fight.resource_model_gaps.join(", ")
-                        }
-                    )
-                },
-            });
-        }
+    let honesty = rotation_quality_reasons(rotation.as_ref(), profession_name, &ctx.game_mode);
+    if !honesty.is_empty() {
+        data_quality = data_quality.merge(&data::DataQuality::Provisional);
+        quality_reasons.extend(honesty);
     }
     apply_build_fact_parse_drops(
         &mut data_quality,
@@ -4114,8 +4155,13 @@ mod tests {
     /// E18. Pre-change fixture `skill_share` TVD against the golem log was
     /// 0.648, with Dusk Strike at 0.168 of damage (log share 0) and Life
     /// Rend at 0.019. Leaving shroud while its auto was still the cast
-    /// filled the recharge with greatsword autos.
-    const E18_SKILL_SHARE_TVD_BOUND: f64 = 0.648;
+    /// filled the recharge with greatsword autos. Post-fix it measures
+    /// 0.588749 (re-measured 2026-09-25 with the FCR-025 life-force scope).
+    /// The bound is that plus [`E18_TVD_SLACK`], so a drift back toward
+    /// 0.648 fails; a gain larger than the slack fails too, to ratchet down.
+    const E18_SKILL_SHARE_TVD_MEASURED: f64 = 0.588749;
+    const E18_TVD_SLACK: f64 = 0.005;
+    const E18_SKILL_SHARE_TVD_BOUND: f64 = E18_SKILL_SHARE_TVD_MEASURED + E18_TVD_SLACK;
 
     #[test]
     fn weapon1_auto_is_filler_so_it_does_not_block_shroud_or_the_other_set() {
@@ -4195,6 +4241,10 @@ mod tests {
             distance <= E18_SKILL_SHARE_TVD_BOUND,
             "skill_share TVD {distance:.6} regressed past {}",
             E18_SKILL_SHARE_TVD_BOUND
+        );
+        assert!(
+            distance >= E18_SKILL_SHARE_TVD_MEASURED - E18_TVD_SLACK,
+            "skill_share TVD {distance:.6} improved past the pin {E18_SKILL_SHARE_TVD_MEASURED}; ratchet it down"
         );
     }
 

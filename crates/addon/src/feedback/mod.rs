@@ -356,15 +356,19 @@ pub struct FeedbackState {
 
 impl FeedbackState {
     /// Fold one frame of About-tab edits. Messages and taxonomy stay with
-    /// `self` when a worker published them; the open draft is the player's.
+    /// `self` when a worker published them. The send worker also writes the
+    /// draft step and the view, so a field moves only when the frame changed
+    /// it, and `dirty` is never cleared here: a save this frame did not see
+    /// the worker's row, so the next frame saves again.
     pub(crate) fn merge_paint(&mut self, base: &Self, paint: &Self) {
-        self.draft = paint.draft.clone();
-        self.view = paint.view;
-        self.view_chosen = paint.view_chosen;
-        self.expanded = paint.expanded.clone();
-        self.dirty = paint.dirty;
-        self.was_open = paint.was_open;
-        self.snapshot = paint.snapshot.clone();
+        use crate::state::take_ui;
+        take_ui(&mut self.draft, &base.draft, &paint.draft);
+        take_ui(&mut self.view, &base.view, &paint.view);
+        take_ui(&mut self.view_chosen, &base.view_chosen, &paint.view_chosen);
+        take_ui(&mut self.expanded, &base.expanded, &paint.expanded);
+        self.dirty |= paint.dirty && !base.dirty;
+        take_ui(&mut self.was_open, &base.was_open, &paint.was_open);
+        take_ui(&mut self.snapshot, &base.snapshot, &paint.snapshot);
         crate::state::merge_busy(
             &mut self.taxonomy_fetching,
             base.taxonomy_fetching,
@@ -526,6 +530,100 @@ mod tests {
             failed_payload: None,
             context_summary: String::new(),
         }
+    }
+
+    /// FCR-007: the send worker's result lands during a frame; commit keeps
+    /// the Sent step, the Messages view and the dirty flag.
+    #[test]
+    fn send_result_survives_a_mismatch_frame() {
+        use crate::feedback::client::SendResult;
+        use crate::state::{init, state_test_guard, with_state, PaintCapture, RenderThreadGuard};
+
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_feedback_mod_{}_paint_send",
+            std::process::id()
+        ));
+        init(dir);
+        let id = with_state(|s| {
+            let mut draft = bug_draft();
+            draft.step = WizardStep::Sending;
+            let mut row = message(MessageStatus::Sending);
+            row.report_id = draft.report_id.clone();
+            let f = &mut s.main.feedback;
+            f.messages = vec![row];
+            f.sending = Some(draft.report_id.clone());
+            f.draft = Some(draft);
+            f.dirty = false;
+            f.draft.as_ref().unwrap().report_id.clone()
+        })
+        .unwrap();
+
+        let mut frame = with_state(|s| PaintCapture::take(s))
+            .expect("state")
+            .materialize();
+        let worker_id = id.clone();
+        std::thread::spawn(move || {
+            with_state(|s| {
+                crate::feedback::tasks::apply_send_result(
+                    s,
+                    &worker_id,
+                    SendResult::Created {
+                        short_id: "A3F9K2QD".into(),
+                        status: MessageStatus::Received,
+                    },
+                    false,
+                )
+            })
+            .expect("state");
+        })
+        .join()
+        .unwrap();
+        // The player hovers a row while the send lands.
+        frame.state.main.feedback.expanded = Some("other".into());
+        with_state(|s| frame.commit(s)).expect("commit");
+
+        let f = with_state(|s| s.main.feedback.clone()).unwrap();
+        assert_eq!(
+            f.draft.map(|d| d.step),
+            Some(WizardStep::Sent {
+                short_id: "A3F9K2QD".into()
+            })
+        );
+        assert!(f.dirty, "the send result must still be saved");
+        assert_eq!(f.view, AboutView::Messages);
+        assert!(f.view_chosen);
+        assert_eq!(f.sending, None);
+        assert_eq!(
+            f.expanded.as_deref(),
+            Some("other"),
+            "the frame's edit lands"
+        );
+        assert_eq!(f.messages[0].short_id.as_deref(), Some("A3F9K2QD"));
+        crate::state::clear();
+    }
+
+    /// A save this frame (dirty cleared in paint) must not clear a dirty
+    /// flag a worker raised after the capture.
+    #[test]
+    fn merge_never_clears_dirty() {
+        let base = FeedbackState {
+            dirty: true,
+            ..FeedbackState::default()
+        };
+        let mut paint = base.clone();
+        paint.dirty = false;
+        let mut live = base.clone();
+        live.merge_paint(&base, &paint);
+        assert!(live.dirty);
+
+        let base = FeedbackState::default();
+        let mut paint = base.clone();
+        paint.dirty = true;
+        let mut live = base.clone();
+        live.merge_paint(&base, &paint);
+        assert!(live.dirty, "a UI edit that marks dirty lands");
     }
 
     fn bug_draft() -> Draft {

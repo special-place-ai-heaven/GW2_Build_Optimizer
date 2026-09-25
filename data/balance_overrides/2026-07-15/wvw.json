@@ -160,7 +160,7 @@
       "source_id": 9081,
       "name": "Whirling Wrath",
       "overrides": {
-        "hit_count": { "value": 2, "evidence_level": "Heuristic", "source": "https://wiki.guildwars2.com/wiki/Whirling_Wrath (projectiles fly in random directions; Number of Impacts 7 is the area total, not hits on one foe). Single-target expectation is about 1.75 projectile hits per cast (player golem log, sprint E23, changelog 1.14.43). Strike hit_count is a whole number, so 1.75 lands as 2 in PvE, WvW, and PvP (the spread is not a mode split). Not data/formulas/hit_timing.json Whirling Wrath hits:14 (7 spin hits plus 7 projectiles if every projectile connects)." }
+        "hit_count": { "value": 2, "evidence_level": "Heuristic", "source": "https://wiki.guildwars2.com/wiki/Whirling_Wrath (projectiles fly in random directions; Number of Impacts 7 is the area total, not hits on one foe). Single-target expectation is about 1.75 projectile hits per cast (player golem log, sprint E23, changelog 1.14.43). Strike hit_count is a whole number, so 1.75 lands as 2 in PvE, WvW, and PvP (the spread is not a mode split). Not data/formulas/hit_timing.json Whirling Wrath hits:14 (7 spin hits plus 7 projectiles if every projectile connects). Authoritative for this field: the golem log mean, a measured single-target count. hit_timing.json is gw2combat's hand-entered per-hit timing table: its hits count every projectile connecting and it only places hit timing, so it does not source a single-target hit_count. Heuristic because 2 rounds the logged 1.75 up; the build reads Provisional by name (FCR-013)." }
       }
     }
   ]

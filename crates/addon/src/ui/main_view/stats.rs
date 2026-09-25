@@ -261,6 +261,23 @@ pub(super) fn should_auto_refresh(
     enabled && setup_complete && stale && !busy && !already_ran
 }
 
+/// After a GameDb load, start the session's one automatic refresh? Yes when
+/// the load failed on a missing catalog (a cache older than that catalog,
+/// FCR-012), or it loaded skills/traits older than their cache format
+/// (FCR-023), unless an automatic refresh already ran. A load only starts
+/// when nothing is loading or refreshing, so this never doubles a refresh.
+pub(super) fn load_wants_refresh(
+    load_err: Option<&str>,
+    format_outdated: bool,
+    already_ran: bool,
+) -> bool {
+    !already_ran
+        && match load_err {
+            Some(e) => gw2_optimizer::gamedb::is_missing_catalog(e),
+            None => format_outdated,
+        }
+}
+
 /// Re-download game data from the GW2 API, then reload GameDb.
 pub(super) fn start_game_data_refresh(state: &mut AddonState) {
     state.main.game_db_loading = true;
@@ -535,17 +552,19 @@ pub(super) fn load_game_db(state: &mut AddonState) {
             } else {
                 let cache = gw2_api::cache::DataCache::new(&cache_dir);
                 let r = gw2_optimizer::gamedb::GameDb::load(&cache);
+                // Read here, not under the state lock: it parses file headers.
+                let outdated = r.is_ok() && cache.format_outdated();
                 if token.is_cancelled() {
                     None
                 } else {
-                    Some(r)
+                    Some((r, outdated))
                 }
             };
 
             crate::state::with_state(|s| {
                 s.main.game_db_loading = false;
                 match result {
-                    Some(Ok(db)) => {
+                    Some((Ok(db), outdated)) => {
                         nexus::log::log(
                             nexus::log::LogLevel::Info,
                             "GW2 Build Optimizer",
@@ -559,9 +578,26 @@ pub(super) fn load_game_db(state: &mut AddonState) {
                         {
                             resolve_selected_build_inner(s);
                         }
+                        // Usable now; the refresh swaps in re-fetched skills/traits.
+                        if load_wants_refresh(None, outdated, s.main.auto_refresh_done) {
+                            s.main.auto_refresh_done = true;
+                            start_game_data_refresh(s);
+                        }
                     }
-                    Some(Err(e)) => {
-                        s.main.error = Some(format!("Failed to load game data: {}", e));
+                    Some((Err(e), _)) => {
+                        if load_wants_refresh(Some(&e), false, s.main.auto_refresh_done) {
+                            // The error names Settings > Refresh game data; do it
+                            // for the player once. A failure there shows its own bar.
+                            nexus::log::log(
+                                nexus::log::LogLevel::Info,
+                                "GW2 Build Optimizer",
+                                format!("Refreshing game data: {}", e),
+                            );
+                            s.main.auto_refresh_done = true;
+                            start_game_data_refresh(s);
+                        } else {
+                            s.main.error = Some(format!("Failed to load game data: {}", e));
+                        }
                     }
                     None => { /* cancelled — flag reset above */ }
                 }
@@ -682,6 +718,37 @@ mod tests {
             !go(true, true, true, false, true),
             "already ran this session"
         );
+    }
+
+    /// FCR-012 / FCR-023: a cache missing a catalog, or holding skills/traits
+    /// older than their cache format, refreshes itself once instead of
+    /// leaving the player on a red bar or a silently Verified build.
+    #[test]
+    fn load_refreshes_once_on_missing_catalog_or_outdated_format() {
+        use super::load_wants_refresh as go;
+        // The real error text, so a wording change cannot unhook the predicate.
+        let (dir, cache) = {
+            let d = std::env::temp_dir().join(format!("gw2bo_fcr012_{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            (d.clone(), gw2_api::cache::DataCache::new(d))
+        };
+        let missing = match gw2_optimizer::gamedb::GameDb::load(&cache) {
+            Ok(_) => panic!("an empty cache must fail closed"),
+            Err(e) => e,
+        };
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            go(Some(&missing), false, false),
+            "missing catalog: {missing}"
+        );
+        assert!(!go(Some(&missing), false, true), "already ran this session");
+        assert!(
+            !go(Some("expected value at line 1 column 1"), true, false),
+            "a corrupt file is not repaired by a same-build refresh"
+        );
+        assert!(go(None, true, false), "outdated skills/traits format");
+        assert!(!go(None, false, false), "current cache");
+        assert!(!go(None, true, true), "already ran this session");
     }
 
     #[test]

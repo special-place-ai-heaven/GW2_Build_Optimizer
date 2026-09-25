@@ -1085,7 +1085,12 @@ impl SimState {
         let (_, form_best, form_non_auto) = self.bar_best(super::SHROUD_SET, power);
         let weapon_non_auto = self.reachable_weapon_non_auto(power);
         if self.form_entered_ms.is_some() {
-            if !form_non_auto && form_best <= 0.0 && weapon_non_auto > 0.0 {
+            // E18 (Reaper golem log: autos in shroud, no greatsword autos): a
+            // life-force shroud stays while its auto can cast. No log backs
+            // that for other forms (Celestial Avatar keeps 50 % on an early
+            // exit), so they leave once a weapon skill outranks their auto.
+            let stays = form.life_force && form_best > 0.0;
+            if !form_non_auto && !stays && weapon_non_auto > form_best {
                 self.exit_form(true);
             }
             return;
@@ -4994,9 +4999,10 @@ mod tests {
         assert!(casts(&filled, 2) > 0);
     }
 
-    #[test]
-    fn the_exit_skill_leaves_early_and_keeps_its_share_of_the_pool() {
-        let skills = vec![
+    /// Weapon auto, weapon burst, form auto, form burst: the bar a real
+    /// form has (FCR-025 restores the form auto E18 dropped).
+    fn exit_bar() -> Vec<RotationSkill> {
+        vec![
             bar_skill(
                 1,
                 "Weapon Auto",
@@ -5016,6 +5022,15 @@ mod tests {
                 strike(1, 6.0),
             ),
             bar_skill(
+                2,
+                "Form Auto",
+                SkillSlot::Weapon1,
+                crate::rotation::SHROUD_SET,
+                500,
+                0,
+                strike(1, 0.5),
+            ),
+            bar_skill(
                 5,
                 "Form Burst",
                 SkillSlot::Weapon2,
@@ -5024,13 +5039,17 @@ mod tests {
                 20_000,
                 strike(1, 9.0),
             ),
-        ];
+        ]
+    }
+
+    #[test]
+    fn the_exit_skill_leaves_early_and_keeps_its_share_of_the_pool() {
         let mut form = test_form(100.0);
         form.exit_keep = 0.5;
-        let sim = run_form_sim(&skills, 2_000, form);
-        // In at 0 (full), Form Burst, then the form has nothing left to
-        // cast, so Weapon Burst exits and 50 % of the pool is kept. A form
-        // auto would stay (E18); this bar has none.
+        let sim = run_form_sim(&exit_bar(), 2_000, form);
+        // In at 0 (full), Form Burst, then the form has only its auto and
+        // Weapon Burst outranks it: the exit skill, 50 % of the pool kept.
+        // Not a life-force shroud, so the E18 stay does not apply.
         assert_eq!(casts(&sim, FORM_ENTRY), 1);
         assert_eq!(casts(&sim, 5), 1);
         assert_eq!(casts(&sim, 3), 1);
@@ -5041,6 +5060,21 @@ mod tests {
             "half of ~93 kept: {}",
             sim.form_pool
         );
+    }
+
+    /// E18 scoped to life force (Reaper golem log): the same bar stays in
+    /// the shroud on its auto and never casts Weapon Burst.
+    #[test]
+    fn a_life_force_shroud_stays_on_its_auto() {
+        let mut form = test_form(100.0);
+        form.exit_keep = 0.5;
+        form.life_force = true;
+        let sim = run_form_sim(&exit_bar(), 2_000, form);
+        assert_eq!(casts(&sim, FORM_ENTRY), 1);
+        assert_eq!(casts(&sim, 5), 1);
+        assert!(casts(&sim, 2) >= 2, "form auto x{}", casts(&sim, 2));
+        assert_eq!(casts(&sim, 3), 0);
+        assert!(sim.form_entered_ms.is_some());
     }
 
     #[test]

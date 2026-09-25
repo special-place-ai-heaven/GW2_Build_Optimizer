@@ -66,6 +66,7 @@ pub(super) fn resolve_selected_build_inner(state: &mut AddonState) {
                 &build.profession,
                 &gw2_optimizer::balance::BalanceContext::new(game_mode.clone()),
             );
+            state.main.resolve_rev = state.main.resolve_rev.wrapping_add(1);
             state.main.current_build = Some(build);
             match calculate_current_stats_from_db(&bt.build, &et, db, &game_mode, &modifiers) {
                 Ok((stats, combat_solo, combat_party, combat_squad)) => {

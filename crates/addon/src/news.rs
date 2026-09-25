@@ -74,10 +74,26 @@ impl NewsState {
         crate::state::merge_busy(&mut self.art_loading, base.art_loading, paint.art_loading);
         if news_feeds_same(&self.feeds, &base.feeds) {
             self.feeds = paint.feeds.clone();
-            self.fetched_at = paint.fetched_at;
-            self.failed_at = paint.failed_at;
-            self.official_lang = paint.official_lang.clone();
         }
+        // Per source: a failure-only or same-items publish leaves `feeds`
+        // alone but moves these, and must keep its backoff and TTL stamps.
+        for i in 0..self.fetched_at.len() {
+            crate::state::keep_worker(
+                &mut self.fetched_at[i],
+                &base.fetched_at[i],
+                &paint.fetched_at[i],
+            );
+            crate::state::keep_worker(
+                &mut self.failed_at[i],
+                &base.failed_at[i],
+                &paint.failed_at[i],
+            );
+        }
+        crate::state::keep_worker(
+            &mut self.official_lang,
+            &base.official_lang,
+            &paint.official_lang,
+        );
     }
 
     pub fn items(&self, src: NewsSource) -> &[NewsItem] {
@@ -872,6 +888,41 @@ fn format_date(ts: i64, raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FCR-018: a failure-only publish during a frame keeps its backoff.
+    #[test]
+    fn merge_keeps_a_failure_stamp_published_mid_frame() {
+        let base = NewsState::default();
+        let mut paint = base.clone();
+        paint.search = "wvw".into();
+        let mut live = base.clone();
+        live.note_fetch_failure(NewsSource::Official);
+        assert!(!live.needs(NewsSource::Official, "en"));
+        live.merge_paint(&base, &paint);
+        assert!(
+            !live.needs(NewsSource::Official, "en"),
+            "FAIL_BACKOFF must hold after the merge"
+        );
+        assert_eq!(live.search, "wvw", "the frame's edit lands");
+    }
+
+    /// FCR-018: a TTL refresh that returned the same items keeps its stamp.
+    #[test]
+    fn merge_keeps_a_same_items_refresh_stamp() {
+        let src = NewsSource::Official;
+        let mut base = NewsState::default();
+        base.set_feed(src, "en", Vec::new());
+        let expired = Instant::now()
+            .checked_sub(TTL + Duration::from_secs(1))
+            .expect("clock");
+        base.fetched_at[src.index()] = Some(expired);
+        assert!(base.needs(src, "en"));
+        let paint = base.clone();
+        let mut live = base.clone();
+        live.set_feed(src, "en", Vec::new());
+        live.merge_paint(&base, &paint);
+        assert!(!live.needs(src, "en"), "the fresh TTL stamp must hold");
+    }
 
     const RSS: &str = r#"<?xml version="1.0"?>
 <rss><channel>

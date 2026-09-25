@@ -9,7 +9,7 @@ exclude = ["server/feedback"]
 resolver = "2"
 
 [workspace.package]
-version = "1.14.50"
+version = "1.14.51"
 edition = "2021"
 license = "MIT"
 
@@ -24,13 +24,22 @@ serde_json = "1"
 # "error sending request for url (...)" wrapper. rustls carries its own crypto
 # and its own Mozilla root set (webpki-roots), so the addon no longer depends on
 # the host OS TLS stack at all. `charset`/`http2` are re-added explicitly
-# because `default-features = false` also drops them.
+# because `default-features = false` also drops them. `system-proxy` and
+# `rustls-tls-native-roots` are two more defaults re-added on purpose:
+# `system-proxy` reads the Windows system proxy config (env-var proxies work
+# either way), and `rustls-tls-native-roots` merges the OS certificate store
+# into the same rustls root store as the bundled webpki roots, so enterprise/
+# antivirus TLS-inspection roots are trusted too -- this does NOT reintroduce
+# schannel or its revocation-check bug above. Every other default feature is
+# still intentionally dropped.
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
     "json",
     "charset",
     "http2",
     "rustls-tls",
+    "system-proxy",
+    "rustls-tls-native-roots",
 ] }
 thiserror = "2"
 urlencoding = "2"

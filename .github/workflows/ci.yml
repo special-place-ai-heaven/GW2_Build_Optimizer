@@ -5,8 +5,10 @@ on:
   pull_request:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # one group per push so a fast second push cannot cancel the first push's
+  # identity check; PRs still coalesce on their ref
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verify:
@@ -15,9 +17,39 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: commit actor
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          PR_OPENER: ${{ github.event.pull_request.user.login }}
+        run: |
+          admin=special-place-administrator
+          if [ "$ACTOR" != "$admin" ]; then
+            echo "run actor '$ACTOR' is not $admin" >&2
+            exit 1
+          fi
+          if [ "$EVENT" = "pull_request" ] && [ "$PR_OPENER" != "$admin" ]; then
+            echo "pull request opener '$PR_OPENER' is not $admin" >&2
+            exit 1
+          fi
+      - name: identity gate script
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          script=.github/scripts/check-commit-identity.sh
+          if [ "$EVENT" = "pull_request" ]; then
+            # run the base revision's copy: a PR must not grade itself
+            git show "$BASE_SHA:$script" > "$RUNNER_TEMP/check-commit-identity.sh"
+            script="$RUNNER_TEMP/check-commit-identity.sh"
+          fi
+          echo "IDENTITY_SCRIPT=$script" >> "$GITHUB_ENV"
       - name: commit identity selftest
         shell: bash
-        run: SELFTEST=1 bash .github/scripts/check-commit-identity.sh
+        run: SELFTEST=1 bash "$IDENTITY_SCRIPT"
       - name: commit identity
         shell: bash
         run: |
@@ -33,11 +65,15 @@ jobs:
             fi
             if [ -z "$before" ] || [ "$before" = "$zero" ]; then
               range="$after"
+            elif ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+              # force-push: before is an orphan the checkout does not have
+              echo "before $before not in history; checking $after only" >&2
+              range="$after"
             else
               range="${before}...${after}"
             fi
           fi
-          bash .github/scripts/check-commit-identity.sh "$range"
+          bash "$IDENTITY_SCRIPT" "$range"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

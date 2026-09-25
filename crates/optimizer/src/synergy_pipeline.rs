@@ -1556,6 +1556,14 @@ fn build_synergy_result(
         data_quality = data_quality.merge(&crate::data::DataQuality::Provisional);
         quality_reasons.extend(gear_reasons);
     }
+    // FCR-014: tier 2 used to skip these and showed Verified where tier 1
+    // and the referee show Provisional for the same plate.
+    let honesty =
+        engine::rotation_quality_reasons(rotation_result.as_ref(), profession_name, &ctx.game_mode);
+    if !honesty.is_empty() {
+        data_quality = data_quality.merge(&crate::data::DataQuality::Provisional);
+        quality_reasons.extend(honesty);
+    }
     engine::apply_build_fact_parse_drops(
         &mut data_quality,
         &mut quality_reasons,
@@ -2902,6 +2910,250 @@ mod leftover_wrapper_tests {
         assert!(
             !chunk.contains("calculate_trait_stats(&"),
             "PvE wrapper still used in compute_candidate_stats: {chunk}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tier_honesty_tests {
+    use super::*;
+    use crate::data::quality::{HEURISTIC_FIELD, INVENTORY_FIELD};
+    use crate::data::DataQuality;
+    use crate::rotation::reaper_fixture as fx;
+
+    /// The fixture build as the synergy pipeline's candidate.
+    fn candidate(build: &ValidatedBuild) -> SynergyCandidate {
+        SynergyCandidate {
+            spec_ids: build.specializations.iter().map(|s| s.spec_id).collect(),
+            elite_spec: Some(fx::SPEC_REAPER),
+            selected_major_traits: build
+                .specializations
+                .iter()
+                .flat_map(|s| s.trait_ids.iter().copied())
+                .collect(),
+            all_trait_ids: build
+                .specializations
+                .iter()
+                .flat_map(|s| s.all_trait_ids.iter().copied())
+                .collect(),
+            accumulated: Vec::new(),
+            score: 0.0,
+            rune: build.rune.as_ref().map(|r| (r.id, r.name.clone())),
+            sigils: build
+                .sigils
+                .iter()
+                .map(|s| (s.id, s.name.clone()))
+                .collect(),
+            relic: build.relic.as_ref().map(|r| (r.id, r.name.clone())),
+            weapons: (
+                build.weapons.set1.main_hand.clone(),
+                build.weapons.set1.off_hand.clone(),
+                build.weapons.set2.main_hand.clone(),
+                build.weapons.set2.off_hand.clone(),
+            ),
+            heal: build.skills.heal.clone(),
+            utilities: build.skills.utilities.iter().flatten().cloned().collect(),
+            elite_skill: build.skills.elite.clone(),
+            legends: Vec::new(),
+            aquatic_legends: Vec::new(),
+            synergy_links: Vec::new(),
+        }
+    }
+
+    /// FCR-014: mirrors `referee::reaper_pvp_comparison_marks_skipped_inventory`
+    /// on tier 2. Before the fix tier 2 merged no honesty line, so the same
+    /// plate read Verified here and Provisional on tier 1 and the referee.
+    #[test]
+    fn tier_two_pvp_marks_skipped_inventory_like_tier_one() {
+        let db = fx::db();
+        let ctx = BalanceContext::new(GameMode::PvP);
+        let scenario = ScenarioSpec::from_balance_context(&ctx);
+        let mut progress = |_p: OptimizeProgress| {};
+        let tier_two = build_synergy_result(
+            candidate(&fx::build()),
+            &db,
+            "Necromancer",
+            "Marauder",
+            &OptimizationWeights::default(),
+            &ctx,
+            Some(&scenario),
+            &mut progress,
+        )
+        .expect("tier 2 packages the fixture");
+        assert!(
+            tier_two.rotation.as_ref().is_some_and(|r| r.wvw.is_none()),
+            "PvP never runs the timeline"
+        );
+        assert_eq!(tier_two.data_quality, DataQuality::Provisional);
+        assert!(
+            tier_two
+                .quality_reasons
+                .iter()
+                .any(|r| r.field == INVENTORY_FIELD
+                    && r.explanation.contains("coverage inventory not run for PvP")),
+            "{:?}",
+            tier_two.quality_reasons
+        );
+        // Same honesty lines as tier 1 on the build tier 2 produced.
+        let tier_one = engine::synergy_result_from_validated(
+            tier_two.validated.clone(),
+            &db,
+            "Necromancer",
+            &ctx,
+            Some(&scenario),
+        );
+        let honesty = |reasons: &[crate::data::DataQualityReason]| {
+            let mut lines: Vec<String> = reasons
+                .iter()
+                .filter(|r| r.field.starts_with("coverage") || r.field == "wvw_timeline.resources")
+                .map(|r| format!("{}: {}", r.field, r.explanation))
+                .collect();
+            lines.sort();
+            lines
+        };
+        assert_eq!(
+            honesty(&tier_two.quality_reasons),
+            honesty(&tier_one.quality_reasons)
+        );
+    }
+
+    /// FCR-011: WvW Reaper's Onslaught plays its Quickness at a calibrated
+    /// 20 s ceiling, not the page's 3 s, so the build reads Provisional and
+    /// names it. PvE plays the page numbers and stays unstamped.
+    #[test]
+    fn wvw_onslaught_ceiling_reads_provisional_by_name() {
+        const ONSLAUGHT: u32 = 2021;
+        let line = "Reaper's Onslaught (heuristic interval ceiling)";
+        let db = fx::db();
+        let named = |mode: GameMode, with_onslaught: bool| {
+            let mut build = fx::build();
+            if with_onslaught {
+                build.specializations[2].all_trait_ids.push(ONSLAUGHT);
+            }
+            let ctx = BalanceContext::new(mode);
+            let scenario = ScenarioSpec::from_balance_context(&ctx);
+            let result = engine::synergy_result_from_validated(
+                build,
+                &db,
+                "Necromancer",
+                &ctx,
+                Some(&scenario),
+            );
+            let hit = result
+                .quality_reasons
+                .iter()
+                .any(|r| r.field == HEURISTIC_FIELD && r.explanation.contains(line));
+            (result.data_quality, hit)
+        };
+        assert_eq!(named(GameMode::WvW, true), (DataQuality::Provisional, true));
+        assert!(!named(GameMode::WvW, false).1, "no Onslaught, no line");
+        assert!(
+            !named(GameMode::PvE, true).1,
+            "PvE Onslaught is page numbers"
+        );
+    }
+    /// FCR-013 end to end (from verify-E's probe): a Heuristic override on
+    /// the bar reaches the label through `prepare_validated_rotation`, on
+    /// tier 1 and tier 2 in every mode, and WvW Onslaught's ceiling reaches
+    /// tier 2. The builder pin calls the stamp helper directly; this one
+    /// fails if prepare stops wiring it.
+    #[test]
+    fn heuristic_stamps_reach_the_label_through_both_tiers() {
+        const WHIRLING_WRATH: u32 = 9081;
+        const ONSLAUGHT: u32 = 2021;
+        let mut db = fx::db();
+        let mut skill = db.skills[&fx::WELL_OF_DARKNESS].clone();
+        skill.id = WHIRLING_WRATH;
+        skill.name = "Whirling Wrath".into();
+        db.skills.insert(WHIRLING_WRATH, skill);
+        let heuristic = |r: &SynergyResult| -> Vec<String> {
+            r.quality_reasons
+                .iter()
+                .filter(|q| q.field == HEURISTIC_FIELD)
+                .map(|q| q.explanation.clone())
+                .collect()
+        };
+        let names = |r: &SynergyResult, line: &str| heuristic(r).iter().any(|l| l.contains(line));
+        let ww_line = "Whirling Wrath (heuristic hit_count)";
+        for mode in [GameMode::PvE, GameMode::PvP, GameMode::WvW] {
+            let mut build = fx::build();
+            build.skills.utilities[1] = Some((WHIRLING_WRATH, "Whirling Wrath".into()));
+            let ctx = BalanceContext::new(mode.clone());
+            let scenario = ScenarioSpec::from_balance_context(&ctx);
+            let tier_one = engine::synergy_result_from_validated(
+                build.clone(),
+                &db,
+                "Necromancer",
+                &ctx,
+                Some(&scenario),
+            );
+            assert_eq!(tier_one.data_quality, DataQuality::Provisional, "{mode:?}");
+            assert!(
+                names(&tier_one, ww_line),
+                "{mode:?} tier 1: {:?}",
+                heuristic(&tier_one)
+            );
+            let mut progress = |_p: OptimizeProgress| {};
+            let tier_two = build_synergy_result(
+                candidate(&build),
+                &db,
+                "Necromancer",
+                "Marauder",
+                &OptimizationWeights::default(),
+                &ctx,
+                Some(&scenario),
+                &mut progress,
+            )
+            .expect("tier 2");
+            assert_eq!(tier_two.data_quality, DataQuality::Provisional, "{mode:?}");
+            assert!(
+                names(&tier_two, ww_line),
+                "{mode:?} tier 2: {:?}",
+                heuristic(&tier_two)
+            );
+            let control = engine::synergy_result_from_validated(
+                fx::build(),
+                &db,
+                "Necromancer",
+                &ctx,
+                Some(&scenario),
+            );
+            assert!(
+                !names(&control, ww_line),
+                "{mode:?}: no Whirling Wrath, no line"
+            );
+        }
+        // Tier 2 rebuilds specs from the db, so Onslaught needs a Reaper trait.
+        let mut onslaught = db
+            .traits
+            .values()
+            .find(|t| t.specialization == fx::SPEC_REAPER)
+            .expect("a Reaper trait")
+            .clone();
+        onslaught.id = ONSLAUGHT;
+        onslaught.name = "Reaper's Onslaught".into();
+        db.traits.insert(ONSLAUGHT, onslaught);
+        let mut build = fx::build();
+        build.specializations[2].all_trait_ids.push(ONSLAUGHT);
+        build.specializations[2].trait_ids.push(ONSLAUGHT);
+        let ctx = BalanceContext::new(GameMode::WvW);
+        let scenario = ScenarioSpec::from_balance_context(&ctx);
+        let mut progress = |_p: OptimizeProgress| {};
+        let tier_two = build_synergy_result(
+            candidate(&build),
+            &db,
+            "Necromancer",
+            "Marauder",
+            &OptimizationWeights::default(),
+            &ctx,
+            Some(&scenario),
+            &mut progress,
+        )
+        .expect("tier 2 WvW");
+        assert!(
+            names(&tier_two, "Reaper's Onslaught (heuristic interval ceiling)"),
+            "{:?}",
+            heuristic(&tier_two)
         );
     }
 }

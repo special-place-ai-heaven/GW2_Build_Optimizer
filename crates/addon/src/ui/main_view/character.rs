@@ -156,6 +156,7 @@ fn apply_character_tabs(
     let keep = keep_selection;
     let bt_idx = build_tabs.iter().position(|t| t.is_active).unwrap_or(0);
     let et_idx = equipment_tabs.iter().position(|t| t.is_active).unwrap_or(0);
+    state.main.resolve_rev = state.main.resolve_rev.wrapping_add(1);
     state.main.build_tabs = build_tabs;
     state.main.equipment_tabs = equipment_tabs;
     state.main.selected_build_tab = keep(

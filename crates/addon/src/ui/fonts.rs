@@ -10,7 +10,7 @@
 //! font can draw them and offering one was a trap (a Japanese face picked
 //! for an English UI drew the model's em dash as '?', 2026-09-07).
 
-use nexus::font::{add_font_from_file, add_font_from_memory};
+use nexus::font::{add_font_from_file, add_font_from_memory, release_font};
 use nexus::imgui::sys::{
     self, ImFont, ImFontAtlas_GetGlyphRangesChineseSimplifiedCommon,
     ImFontAtlas_GetGlyphRangesJapanese, ImFontAtlas_GetGlyphRangesKorean, ImFontConfig,
@@ -102,6 +102,39 @@ static SLOTS: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
 /// Identifiers we already asked Nexus for, so a face whose file is broken is
 /// not re-requested every frame.
 static REQUESTED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// Faces this load added. Released by [`release_all`], not by a per-font
+/// `revert_on_unload`: that locks the nexus-rs unload-action list from the
+/// render thread, and nexus-rs `deinit` holds the list while it waits for
+/// that very frame to end (the 1.14.51 unload freeze).
+static ADDED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+fn track(id: &str) {
+    if let Ok(mut added) = ADDED.lock() {
+        added.push(id.to_string());
+    }
+}
+
+/// Release every face this load added. `on_load` registers it once, after the
+/// render hooks, so it runs when no frame can add another.
+pub fn release_all() {
+    let ids = ADDED
+        .lock()
+        .map(|mut added| std::mem::take(&mut *added))
+        .unwrap_or_default();
+    for id in ids {
+        release_font(&id, RECEIVE);
+    }
+    // A reload into a still-pinned image keeps these statics: forget the
+    // released faces so it neither pushes one nor skips asking for it.
+    TICKER.store(std::ptr::null_mut(), Ordering::Release);
+    if let Ok(mut slots) = SLOTS.lock() {
+        *slots = None;
+    }
+    if let Ok(mut requested) = REQUESTED.lock() {
+        *requested = None;
+    }
+}
 static TICKER: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
 
 const RECEIVE: nexus::font::RawFontReceive = nexus::font_receive!(|id, font| {
@@ -269,7 +302,8 @@ fn init_id(id: &str) {
                 return;
             };
             let cfg = make_cfg(LATIN_RANGES.as_ptr(), 2);
-            add_font_from_memory(id, bytes, SIZE_PX, Some(&cfg), RECEIVE).revert_on_unload();
+            add_font_from_memory(id, bytes, SIZE_PX, Some(&cfg), RECEIVE).leak();
+            track(id);
             log(
                 LogLevel::Info,
                 "GW2 Build Optimizer",
@@ -346,7 +380,8 @@ fn try_add(id: &str, path: Option<PathBuf>, config: Option<&ImFontConfig>, size_
         );
         return;
     };
-    add_font_from_file(id, &path, size_px, config, RECEIVE).revert_on_unload();
+    add_font_from_file(id, &path, size_px, config, RECEIVE).leak();
+    track(id);
     log(
         LogLevel::Info,
         "GW2 Build Optimizer",
@@ -684,6 +719,26 @@ pub(crate) fn first_existing(dir: &Path, names: &[&str]) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::fs;
+
+    /// A reload into a still-pinned image keeps these statics. Left set, the
+    /// next load would push a face Nexus already released and never ask for
+    /// it again. (`ADDED` is empty here, so no Nexus call is made.)
+    #[test]
+    fn release_all_forgets_every_face() {
+        let mut face = std::mem::MaybeUninit::<ImFont>::uninit();
+        store_ptr(ID_TICKER, face.as_mut_ptr());
+        store_ptr(ID_ZH, face.as_mut_ptr());
+        first_request(ID_ZH);
+
+        release_all();
+
+        assert!(TICKER.load(Ordering::Acquire).is_null());
+        assert!(slot_ptr(ID_ZH).is_null());
+        assert!(
+            first_request(ID_ZH),
+            "a new load must request the face again"
+        );
+    }
 
     #[test]
     fn latin_ranges_are_zero_terminated_pairs() {

@@ -1316,9 +1316,9 @@ fn open_stream(
         .map_err(|_| SessionEnd::Failed("invalid stream URL".to_string()))?;
 
     // The station URL is community-submitted directory data: refuse to dial
-    // into the local network. Hostnames are resolved once here; DNS rebinding
-    // after the check is accepted residual risk (the attacker controls
-    // timing, not this addon).
+    // into the local network. Literal IPs are refused here; hostnames are
+    // screened by the client's resolver, which is the lookup the connect
+    // actually uses, so a rebinding second answer never gets dialed.
     if stream_host_reserved(&parsed) {
         return Err(SessionEnd::Failed(
             "station points at a private address".to_string(),
@@ -1341,6 +1341,7 @@ fn open_stream(
         // hops (reqwest's default) is a tunnel, three is a stream. Each hop
         // is re-screened so a CDN 302 cannot bounce us into the LAN (SEC-RADIO).
         .redirect(stream_redirect_policy())
+        .dns_resolver(Arc::new(crate::news_art::ScreenedResolver))
         .build()
         .map_err(|e| SessionEnd::Failed(short_msg("http client", &e.to_string())))?;
 
@@ -1348,14 +1349,16 @@ fn open_stream(
     // that accepts the connection then withholds headers would hang forever,
     // so the header-wait is capped. The select keeps stop() prompt even
     // mid-handshake — dropping the future cancels the connect.
-    let stream = block_on_cancellable(
-        handle,
-        stop,
-        tokio::time::timeout(HEADER_TIMEOUT, HttpStream::new(client, parsed)),
-    )
-    .ok_or(SessionEnd::Cancelled)?
-    .map_err(|_| SessionEnd::Failed("timed out waiting for stream headers".to_string()))?
-    .map_err(|e| SessionEnd::Failed(short_msg("connect failed", &e.to_string())))?;
+    // Build the connect future first: the timer binds at construction, which
+    // the off-runtime regression test must still exercise.
+    let connect = tokio::time::timeout(HEADER_TIMEOUT, HttpStream::new(client, parsed.clone()));
+    // Behind a proxy the resolver never sees the station host, so screen it
+    // once here, fail-closed, on this thread before the select (FCR-020 W-1).
+    crate::news_art::initial_host_resolves_public(&parsed).map_err(SessionEnd::Failed)?;
+    let stream = block_on_cancellable(handle, stop, connect)
+        .ok_or(SessionEnd::Cancelled)?
+        .map_err(|_| SessionEnd::Failed("timed out waiting for stream headers".to_string()))?
+        .map_err(|e| SessionEnd::Failed(short_msg("connect failed", &e.to_string())))?;
 
     let icy_headers = IcyHeaders::parse_from_headers(stream.headers());
     let content_type = stream
@@ -1414,11 +1417,10 @@ fn open_stream(
     })
 }
 
-/// True when the stream URL's host is (or resolves to) an address inside the
-/// local network - loopback, RFC1918, link-local, ULA, unspecified. Literal
-/// IPs are checked directly; hostnames get one blocking resolve (the OS
-/// caches it for the connect that follows). An unresolvable host returns
-/// false: the connect will fail with its own honest error.
+/// True when the stream URL has no host, is "localhost", or is a literal IP
+/// inside the local network - loopback, RFC1918, link-local, ULA,
+/// unspecified. No DNS here: hostnames are screened at connect time by
+/// `news_art::ScreenedResolver`, which fails closed.
 fn stream_host_reserved(url: &reqwest::Url) -> bool {
     crate::news_art::url_host_is_reserved(url)
 }

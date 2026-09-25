@@ -18,7 +18,6 @@
 //! separated from fetching so tests run on JSON fixtures with zero sockets.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use super::RbStation;
@@ -100,7 +99,7 @@ pub fn click(stationuuid: &str) {
     // ONE bounded attempt at the pool name, no mirror walk: a usage-policy
     // ping does not deserve ~24s of retries, and the caller may be a tracked
     // worker racing addon unload.
-    let Ok(client) = shared_client() else {
+    let Ok(client) = new_client() else {
         return;
     };
     let _ = fetch(
@@ -223,7 +222,7 @@ fn is_hls_url(url: &str) -> bool {
 /// rotating order. The last error wins when every host fails.
 fn get_from_any_mirror(path: &str) -> Result<String, String> {
     static MIRROR_CURSOR: AtomicUsize = AtomicUsize::new(0);
-    let client = shared_client()?;
+    let client = new_client()?;
     let start = MIRROR_CURSOR.fetch_add(1, Ordering::Relaxed);
     let mut last_err = String::from("no mirrors configured");
     for attempt in 0..=FALLBACK_MIRRORS.len() {
@@ -263,20 +262,20 @@ fn fetch(client: &reqwest::blocking::Client, url: &str) -> Result<String, String
     String::from_utf8(bytes).map_err(|_| format!("UTF-8 error reading {url}"))
 }
 
-/// Process-wide directory HTTP client (TLS state + connection pool built
-/// once, cheaply cloned per call). A builder failure is cached and reported
-/// as an error instead of panicking inside the game process.
-fn shared_client() -> Result<reqwest::blocking::Client, String> {
-    static CLIENT: OnceLock<Result<reqwest::blocking::Client, String>> = OnceLock::new();
-    CLIENT
-        .get_or_init(|| {
-            reqwest::blocking::Client::builder()
-                .user_agent(USER_AGENT)
-                .timeout(TIMEOUT)
-                .build()
-                .map_err(|e| format!("radio directory HTTP client init failed: {e}"))
-        })
-        .clone()
+/// Directory HTTP client, built per call and never stored. Not a static on
+/// purpose: reqwest's blocking client only joins its internal runtime (and
+/// that runtime's DNS threads) when the client is dropped, and a process-
+/// lifetime static is never dropped, so those threads outlived the unloaded
+/// DLL and crashed the game ~10 s after an unload or auto-update (FCR-001).
+/// Every caller runs in a module-pinned `spawn_worker`, so the drop at the
+/// end of the call joins those threads before the pin is released. A builder
+/// failure is reported as an error instead of panicking inside the game.
+fn new_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(TIMEOUT)
+        .build()
+        .map_err(|e| format!("radio directory HTTP client init failed: {e}"))
 }
 
 /// Minimal percent-encoding for query values and path segments (the codebase

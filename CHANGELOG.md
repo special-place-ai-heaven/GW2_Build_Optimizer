@@ -2,9 +2,18 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
-## Unreleased
+## 1.14.51
 
-Nothing yet.
+- Lost-update conflicts between the overlay frame and background workers fixed across the board: Stop no longer leaves the next run born cancelled, the feedback wizard no longer sticks on "Sending", the busy spinner no longer drops mid-run, switching build/equipment tabs or game mode no longer shows a stale build, news retries no longer skip their backoff, a config edit no longer reverts a worker's write, and an in-place saved-build overwrite no longer shows the old plate. The mini radio strip also no longer reads an unnecessarily wide state snapshot.
+- Fixed a crash roughly 10 seconds after the addon unloads or a Nexus auto-update swaps in a new version, caused by the radio directory search's shared network client outliving the old DLL image.
+- Radio and news image/stream downloads resolve DNS through a screened resolver, and Stop no longer waits on a slow DNS lookup before it takes effect.
+- Windows system proxy settings and the OS/enterprise certificate store are honoured again for all network requests (GW2 API, LLM providers, news, radio, feedback).
+- Internal: CI now checks that commits pushed to `main` come from the project's allowlisted identity. No player-visible change.
+- WvW Reaper's Onslaught (tuned 20 s interval ceiling), Guardian's Whirling Wrath (heuristic hit count) and other sources that lean on a tuned or calibrated number now read Provisional with a stated reason instead of Verified, in both the primary and fallback scoring paths.
+- Fixed a bug where Celestial Avatar and other forms with a positive-priority auto attack could not voluntarily exit form.
+- Re-measured and tightened the E18 fidelity regression bound so a future scheduler change that erodes the fix is caught.
+- A missing or empty game-data catalog (skills, traits, legends, pets, PvP amulets) now triggers one automatic refresh instead of leaving Optimize disabled with only a manual Settings > Refresh game data recovery.
+- Upgrading now forces one skills/traits re-fetch so fact-parse-drop reporting reflects the current cache instead of reading zero on an older cache file.
 
 ## 1.14.50
 
@@ -12,17 +21,23 @@ Nothing yet.
 
 ## 1.14.49
 
+- Network requests now use rustls instead of the OS TLS stack, fixing HTTPS failures under Proton/Wine; HTTP error messages also now show the underlying cause instead of a generic "error sending request" (#76, #82).
+- Game data no longer loads with an empty legends, pets, or PvP amulets catalog; a build that depends on missing data now fails closed instead of silently validating against nothing (#83).
+- A skill or trait fact the game-data parser cannot recognize is now counted and reported, and the build score is marked Provisional instead of quietly staying Verified (#88).
+- PvE and PvP builds that skip the WvW-only resource inventory, and any build with a description-fallback Barrier or Healing estimate, are now marked Provisional instead of Verified (#80).
+- Fixed automatic gear fill writing to weapon set 2 outside the stat-bearing slots it should not touch (#87).
+- Radio and news downloads now screen redirect hops against loopback/private/link-local addresses to close an SSRF gap (#79).
 - E22b: WvW Reaper's Onslaught (`trait:2021:1`) Interval sim ceiling moves from 15 s to 20 s. 15 s was calibrated to pre-E18 under-shroud; with E18 stay-in-form dwell that ceiling lands gated Quickness at 0.633, outside the log band. At 20 s the Lucian-shaped 60 s row measures 0.583 (band 0.2-0.6), still above skills-only 0.433. Page numbers stay 3 s every 3 s. SelfBoonAbsent Quickness stays. PvE Onslaught stays ungated. Shroud fraction stays in 0.60-0.75 (measured 0.638).
 - E28: effect coverage no longer counts a record Executable from schema shape alone. Rushing Justice's flames (PvE `ProcEffect` `skill:62668`, `skill:62603`, `skill:62648`) abstain because the flow sim and the timeline have no impacts/interval consumer for that field. The abstain reason names the missing consumer. A coefficient `ProcEffect` that names an inner `StrikeDamagePct` (Sigil of Fire) still counts Executable. Pin `rushing_justice_flames_abstain_without_impacts_interval_consumer`.
+- E23: Whirling Wrath remainder closed by pin `whirling_wrath_lands_sourced_projectile_hits_per_mode`: skill 9081 projectile hits source override `hit_count` 2 in PvE, WvW, and PvP (player golem log ~1.75 single-target projectiles per cast; strike counts are whole, so 1.75 lands as 2). Spin stays 7 x 0.35. Area "Number of Impacts" 7 and `hit_timing.json` hits 14 are not the single-target count. Skills with no `hit_count` override still keep the API one-hit row and the gap line. Override entity count 51 -> 54.
 - E22: WvW Reaper's Onslaught (`trait:2021:1`) no longer duration-stacks a 3 s Quickness pulse onto Quickness the player already has, and the WvW pulse is floored at 15 s. The page numbers stay 3 s every 3 s. On a 60 s WvW shroud row shaped like the Lucian Lord over-production (Chilled to the Bone 10 s / 30 s, Grasping Darkness 3 s / 25 s), self Quickness goes from 0.988 to 0.583 (log band 0.2-0.6). PvE Onslaught is unchanged. The 15 s gate was a sim ceiling calibrated to pre-E18 under-shroud (recalibrated in E22b).
+- E27: Sword of Justice closed: skill 9168 sources wiki 4 hits via override `hit_count` (PvE 0.8 / WvW 0.45 / PvP 0.72 per hit). `select_alternatives` still abstains on three-value Damage rows; the consume path reads `hit_count` before leftover facts and `unwrap_or(1)`, so a coefficient-only override cannot silently land one hit. Test `sword_of_justice_lands_wiki_hits_per_mode` (was `sword_of_justice_still_abstains_hit_count_not_expressible`). Override entity count 48 -> 51.
 - E18: a weapon auto no longer pulls the flow scheduler out of shroud or keeps it on greatsword. While the form still has a cast, including its auto, the scheduler stays; weapon skills run when the form is down, and the greatsword auto is only filler. Measured on the fixture Reaper against the golem log (`1f33-20260720-163045_golem`, greatsword auto share 0): Dusk Strike damage share 0.168 -> 0.065, Life Rend 0.019 -> 0.372, `skill_share` TVD 0.648 -> 0.589 (bound `E18_SKILL_SHARE_TVD_BOUND` 0.648, pin `weapon1_auto_is_filler_so_it_does_not_block_shroud_or_the_other_set`). The other set still casts (Ghastly Claws). `log_compare` against a live game cache was not re-run here. E11, E20b, E22, and E28 are unchanged.
 - E20a: automatic food and utility selection can now pick a consumable whose only effect is a stat conversion. Superior Sharpening Stone (item 9443) grants Power equal to 3% of Precision and 6% of Ferocity and has no flat bonus; the picker was skipping it. It is chosen when that conversion scores higher than a flat-only alternative. Equipping a stone that is already on the build is unchanged.
 - E20b: a consumable stat conversion and a trait stat conversion now read one shared sheet of flat bonuses, including flat food and utility stats. The Power from Superior Sharpening Stone no longer grows when a trait converts another stat into Ferocity, and that trait conversion does include the food's flat Power. Source: [Gain X Based on Y](https://wiki.guildwars2.com/wiki/Gain_X_Based_on_Y) (read 2026-09-25): conversions are applied before other conversions are taken into account, and flat food and utility bonuses are sources they are based on. Pin `conversion_reads_pre_trait_sheet_per_gain_x_based_on_y`. Infusion stats are still applied after that sheet.
 
 ## 1.14.48
 
-- Engine gap E23 Whirling Wrath remainder closed by pin `whirling_wrath_lands_sourced_projectile_hits_per_mode`: skill 9081 projectile hits source override `hit_count` 2 in PvE, WvW, and PvP (player golem log ~1.75 single-target projectiles per cast; strike counts are whole, so 1.75 lands as 2). Spin stays 7 x 0.35. Area "Number of Impacts" 7 and `hit_timing.json` hits 14 are not the single-target count. Skills with no `hit_count` override still keep the API one-hit row and the gap line. Override entity count 51 -> 54.
-- Engine gap E27 closed: Sword of Justice 9168 sources wiki 4 hits via override `hit_count` (PvE 0.8 / WvW 0.45 / PvP 0.72 per hit). `select_alternatives` still abstains on three-value Damage rows; the consume path reads `hit_count` before leftover facts and `unwrap_or(1)`, so a coefficient-only override cannot silently land one hit. Test `sword_of_justice_lands_wiki_hits_per_mode` (was `sword_of_justice_still_abstains_hit_count_not_expressible`). Override entity count 48 -> 51.
 - Internal: every raw `ui.get_window_draw_list()` call site under `crates/addon/src/ui` now goes through the counted `crate::ui::window_draw_list` guard, closing the gap that let the mini radio nesting panic happen in the first place. `mini_radio::draw_list_scan` now scans all 43 files under `crates/addon/src/ui` and `crates/addon/src/radio` (was 4) and gained a second check that fails the build on any raw call outside the guard's own definition. No player-visible change.
 
 ## 1.14.47

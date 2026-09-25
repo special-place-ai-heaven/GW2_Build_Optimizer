@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
-# Incoming commits must be special-place-administrator.
-# Author / person-committer / Co-authored-by emails:
+# Metadata hygiene gate: blocks agent-added Co-authored-by trailers, non-admin
+# identities and [skip ci] markers on incoming commits. It reads self-asserted
+# git fields, so it is NOT cryptographic proof of authorship. The owner-side
+# control is branch protection: require the `verify` check, PRs only into
+# main, optionally signed commits.
+# Author / person-committer / Co-authored-by must be special-place-administrator
+# with one of:
 #   197073597+special-place-administrator@users.noreply.github.com
+#   special-place-administrator@users.noreply.github.com (legacy no-ID form)
 #   administrator@special-place.online
 # Committer may also be GitHub|web-flow <noreply@github.com>.
-# Usage: check-commit-identity.sh <base...HEAD>
-# SELFTEST=1: clean admin passes, Cursor Co-authored-by fails (sha + field).
+# Usage: check-commit-identity.sh <base...HEAD> | <commit>
+# SELFTEST=1: clean admin passes; Cursor Co-authored-by and [skip ci] fail.
 set -euo pipefail
 
 ADMIN_NAME=special-place-administrator
 EMAIL_A='197073597+special-place-administrator@users.noreply.github.com'
 EMAIL_B='administrator@special-place.online'
+EMAIL_C='special-place-administrator@users.noreply.github.com'
 BOT_EMAIL='noreply@github.com'
 
 admin_email() {
   case "$1" in
-    "$EMAIL_A"|"$EMAIL_B") return 0 ;;
+    "$EMAIL_A"|"$EMAIL_B"|"$EMAIL_C") return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -27,7 +34,7 @@ fail() {
 }
 
 check_one() {
-  local sha="$1" an ae cn ce line val name email lines
+  local sha="$1" an ae cn ce line val name email lines msg
   an=$(git log -1 --format='%an' "$sha")
   ae=$(git log -1 --format='%ae' "$sha")
   cn=$(git log -1 --format='%cn' "$sha")
@@ -43,9 +50,15 @@ check_one() {
     admin_email "$ce" || fail "$sha" committer-email
   fi
 
+  # a skip marker suppresses the run that would check this commit
+  msg=$(git log -1 --format='%B' "$sha")
+  if grep -qiE '\[(skip ci|ci skip|no ci|skip actions|actions skip)\]|^skip-checks: ?true' <<< "$msg"; then
+    fail "$sha" skip-ci
+  fi
+
   # ponytail: any Co-authored-by line, not only the trailer block — GitHub
   # attributes the trailer, a mid-message line is the same claim.
-  lines=$(git log -1 --format='%B' "$sha" | grep -i -E '^[[:space:]]*co-authored-by:' || true)
+  lines=$(grep -i -E '^[[:space:]]*co-authored-by:' <<< "$msg" || true)
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     line=${line%$'\r'}
@@ -86,7 +99,12 @@ check_range() {
 run_selftest() {
   local script dir base good bot_gh bot_wf bad prev
   script=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+  # Git Bash with MSYS_NO_PATHCONV=1 hands git.exe /tmp/x as C:/tmp/x while
+  # cd uses the MSYS /tmp: the selftest would split across two dirs.
+  unset MSYS_NO_PATHCONV
   dir=$(mktemp -d)
+  # shellcheck disable=SC2064 # expand now: $dir is local, EXIT fires later
+  trap "rm -rf '$dir'" EXIT
   git init -q -b main "$dir"
   git -C "$dir" config commit.gpgsign false
 
@@ -129,6 +147,18 @@ run_selftest() {
   out=$(cd "$dir" && env -u SELFTEST bash "$script" "$prev...$bad" 2>&1) || rc=$?
   if [[ "$rc" -eq 0 || "$out" != "$bad co-authored-by" ]]; then
     echo "SELFTEST expected '$bad co-authored-by' (rc=$rc) got: $out" >&2
+    exit 1
+  fi
+
+  commit_as "$EMAIL_C" "$(printf 'legacy noreply\n\nCo-authored-by: %s <%s>\n' "$ADMIN_NAME" "$EMAIL_C")"
+  expect_ok "$(git -C "$dir" rev-parse HEAD)"
+
+  commit_as "$EMAIL_A" "quiet [Skip CI]"
+  bad=$(git -C "$dir" rev-parse HEAD)
+  rc=0
+  out=$(cd "$dir" && env -u SELFTEST bash "$script" "$bad" 2>&1) || rc=$?
+  if [[ "$rc" -eq 0 || "$out" != "$bad skip-ci" ]]; then
+    echo "SELFTEST expected '$bad skip-ci' (rc=$rc) got: $out" >&2
     exit 1
   fi
   echo "SELFTEST ok"

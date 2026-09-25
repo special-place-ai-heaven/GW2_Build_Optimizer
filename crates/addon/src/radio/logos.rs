@@ -92,11 +92,10 @@ fn url_ok(url: &str) -> bool {
     !crate::news_art::reserved_still_host(host)
 }
 
-/// DNS-level check on top of `url_ok`: with no host allowlist, a favicon
-/// hostname must not *resolve* into the local network either (same rule the
-/// stream connect enforces in `player`). Reserved literal IPs are also rejected;
-/// an unresolvable host passes — the GET then fails with its
-/// own honest error. Worker thread only: this can block on a resolve.
+/// Literal screen on top of `url_ok` (unparseable input fails closed). A
+/// hostname that *resolves* into the local network is refused at connect
+/// time by `news_art::ScreenedResolver`, the same rule the stream connect
+/// uses in `player`, so this never blocks on DNS.
 fn host_resolves_reserved(url: &str) -> bool {
     let Ok(u) = reqwest::Url::parse(url) else {
         return true;
@@ -104,8 +103,9 @@ fn host_resolves_reserved(url: &str) -> bool {
     crate::news_art::url_host_is_reserved(&u)
 }
 
-/// Full per-hop screen: syntax plus DNS. Used for the original URL and every
-/// redirect target, so a favicon cannot bounce the client into the LAN.
+/// Full per-hop screen: syntax plus literal IPs. Used for the original URL and
+/// every redirect target; with the resolver it keeps a favicon from bouncing
+/// the client into the LAN.
 /// Radio streams reuse this same predicate (SEC-RADIO).
 pub(crate) fn hop_ok(url: &str) -> bool {
     url_ok(url) && !host_resolves_reserved(url)
@@ -293,9 +293,11 @@ fn download(url: &str, dir: &Path, token: &CancellationToken, version: &str) -> 
     if let Some(path) = cached_file(dir, url) {
         return Some(path);
     }
+    crate::news_art::initial_host_resolves_public(&reqwest::Url::parse(url).ok()?).ok()?;
     let client = reqwest::blocking::Client::builder()
         .timeout(TIMEOUT)
         .redirect(crate::news_art::screened_redirect_policy(2, hop_ok))
+        .dns_resolver(std::sync::Arc::new(crate::news_art::ScreenedResolver))
         .build()
         .ok()?;
     let mut headers = HeaderMap::new();

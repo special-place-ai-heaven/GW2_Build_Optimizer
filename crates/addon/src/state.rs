@@ -36,6 +36,13 @@ impl CancellationToken {
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
     }
+
+    /// Paint renewed the token when its clone is no longer `base`'s.
+    fn take_renewed(&mut self, base: &Self, paint: &Self) {
+        if !Arc::ptr_eq(&paint.cancelled, &base.cancelled) {
+            *self = paint.clone();
+        }
+    }
 }
 
 // Background workers
@@ -107,6 +114,7 @@ extern "system" {
     fn GetModuleHandleW(name: *const u16) -> *mut core::ffi::c_void;
     fn FreeLibrary(module: *mut core::ffi::c_void) -> i32;
     fn FreeLibraryAndExitThread(module: *mut core::ffi::c_void, exit_code: u32);
+    fn WaitForSingleObject(handle: *mut core::ffi::c_void, millis: u32) -> u32;
 }
 
 /// Increment this DLL's load count so Nexus `FreeLibrary` cannot unmap `.text`
@@ -193,13 +201,39 @@ struct TrackedWorker {
 }
 
 impl TrackedWorker {
+    /// The OS thread has ended.
+    ///
+    /// A pinned worker leaves through `FreeLibraryAndExitThread` from inside the
+    /// std closure, so std never releases its result slot and
+    /// `JoinHandle::is_finished` stays false forever. The thread object's
+    /// signal is what says the thread is gone.
+    fn is_finished(&self) -> bool {
+        if self.handle.is_finished() {
+            return true;
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            // SAFETY: the handle is owned by `self.handle` and open; a zero
+            // timeout only polls. WAIT_OBJECT_0 (0) = the thread has exited.
+            unsafe { WaitForSingleObject(self.handle.as_raw_handle(), 0) == 0 }
+        }
+        #[cfg(not(windows))]
+        false
+    }
+
     /// Join a worker that has **already finished** and report whether it died panicking.
     ///
-    /// Callers check `JoinHandle::is_finished()` first, so this never blocks. In
+    /// Callers check [`Self::is_finished`] first, so this never blocks. In
     /// practice the `Err` arm is unreachable: `spawn_worker` catches the worker
     /// body's unwind itself, so only a panic in the logging path could get here.
     fn reap(self) -> bool {
         let name = self.name;
+        if !self.handle.is_finished() {
+            // Exited through ExitThread: std's result slot is still shared, so
+            // `join` would panic. The thread is gone; dropping closes the handle.
+            return false;
+        }
         match self.handle.join() {
             Ok(()) => false,
             Err(_payload) => {
@@ -242,7 +276,7 @@ impl WorkerRegistry {
         let mut live = self.lock();
         let mut kept = Vec::with_capacity(live.len() + 1);
         for worker in std::mem::take(&mut *live) {
-            if worker.handle.is_finished() {
+            if worker.is_finished() {
                 worker.reap();
             } else {
                 kept.push(worker);
@@ -306,7 +340,7 @@ fn join_bounded(mut pending: Vec<TrackedWorker>, budget: Duration) -> ShutdownRe
     loop {
         let mut still_running = Vec::with_capacity(pending.len());
         for worker in pending {
-            if worker.handle.is_finished() {
+            if worker.is_finished() {
                 report.joined += 1;
                 if worker.reap() {
                     report.panicked += 1;
@@ -425,37 +459,37 @@ impl AddonState {
         // Pin before spawn returns: `HMODULE` is Copy, so the child and the
         // spawn-fail undo both see the same increment.
         let pin = pin_addon_module();
-        let spawned = std::thread::Builder::new()
-            .name(format!("gw2bo-{}", name))
-            .spawn(move || {
-                // Bind this worker's token to the LLM transports before the body
-                // runs. They cannot take a token in their signature — `LlmClient`
-                // is a `&self` trait shared across threads — so they poll a
-                // thread-local predicate between SSE lines, between retry-backoff
-                // slices, and between tool-loop turns. Without this bind that
-                // predicate is always false and a worker parked in a blocking
-                // socket read ignores cancellation entirely, outliving
-                // UNLOAD_JOIN_BUDGET no matter how diligently the body polls its
-                // own token. Thread-local, so cancelling one worker cannot abort
-                // an unrelated request on another thread; dropped with the thread.
-                let transport_token = token.clone();
-                let _transport_cancel = gw2_optimizer::llm::cancel::CancelScope::new(move || {
-                    transport_token.is_cancelled()
-                });
-                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || work(token)))
-                    .is_err()
-                {
-                    worker_log(format!("background worker panicked: {}", name));
-                }
-                if let Some(handle) = pin {
-                    exit_pinned_worker(handle);
-                }
-            });
-        match spawned {
-            Ok(handle) => {
-                self.track_worker(name, handle);
-                true
-            }
+        let spawn = move || {
+            std::thread::Builder::new()
+                .name(format!("gw2bo-{}", name))
+                .spawn(move || {
+                    // Bind this worker's token to the LLM transports before the body
+                    // runs. They cannot take a token in their signature — `LlmClient`
+                    // is a `&self` trait shared across threads — so they poll a
+                    // thread-local predicate between SSE lines, between retry-backoff
+                    // slices, and between tool-loop turns. Without this bind that
+                    // predicate is always false and a worker parked in a blocking
+                    // socket read ignores cancellation entirely, outliving
+                    // UNLOAD_JOIN_BUDGET no matter how diligently the body polls its
+                    // own token. Thread-local, so cancelling one worker cannot abort
+                    // an unrelated request on another thread; dropped with the thread.
+                    let transport_token = token.clone();
+                    let _transport_cancel =
+                        gw2_optimizer::llm::cancel::CancelScope::new(move || {
+                            transport_token.is_cancelled()
+                        });
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || work(token)))
+                        .is_err()
+                    {
+                        worker_log(format!("background worker panicked: {}", name));
+                    }
+                    if let Some(handle) = pin {
+                        exit_pinned_worker(handle);
+                    }
+                })
+        };
+        match self.track_worker(name, spawn) {
+            Ok(()) => true,
             Err(err) => {
                 undo_module_pin(pin);
                 // `std::thread::spawn` panics on this path; a game overlay must not.
@@ -531,6 +565,33 @@ impl AddonState {
         }
     }
 
+    /// [`Self::clone_for_paint`] for the mini radio strip, which paints only
+    /// config, radio, the window flags and the Choya Tunes tab jump.
+    /// `setup`, `news` and the rest of `main` are defaults: the strip never
+    /// reads them and [`Self::merge_mini_paint`] never folds them back.
+    fn clone_for_mini(&self) -> Self {
+        Self {
+            window_visible: self.window_visible,
+            needs_character_reload: self.needs_character_reload,
+            config: self.config.clone(),
+            config_path: self.config_path.clone(),
+            addon_dir: self.addon_dir.clone(),
+            screen: self.screen.clone(),
+            setup: SetupState::default(),
+            main: MainState {
+                active_tab: self.main.active_tab.clone(),
+                ..MainState::default()
+            },
+            cancel_token: self.cancel_token.clone(),
+            pick_cancel_token: self.pick_cancel_token.clone(),
+            workers: WorkerRegistry::default(),
+            force_window_pos: self.force_window_pos,
+            news: crate::news::NewsState::default(),
+            radio: self.radio.clone(),
+            epoch: self.epoch,
+        }
+    }
+
     /// Replace UI state with `painted`, keeping this state's worker handles
     /// and publish epoch.
     fn overwrite_from_snapshot(&mut self, mut painted: AddonState) {
@@ -543,7 +604,7 @@ impl AddonState {
 
     /// Fold a frame's UI edits onto `self` without clobbering a publish that
     /// landed after the snapshot was taken.
-    fn merge_paint(&mut self, base: &AddonState, paint: &AddonState) {
+    fn merge_paint(&mut self, base: &AddonState, paint: &mut AddonState) {
         take_ui(
             &mut self.window_visible,
             &base.window_visible,
@@ -554,16 +615,43 @@ impl AddonState {
             &base.needs_character_reload,
             &paint.needs_character_reload,
         );
-        take_ui(&mut self.config, &base.config, &paint.config);
+        merge_config(&mut self.config, &base.config, &paint.config);
         take_ui(&mut self.screen, &base.screen, &paint.screen);
         take_ui(
             &mut self.force_window_pos,
             &base.force_window_pos,
             &paint.force_window_pos,
         );
+        // Stop and Reset renew in paint; live must not keep the cancelled one.
+        self.cancel_token
+            .take_renewed(&base.cancel_token, &paint.cancel_token);
+        self.pick_cancel_token
+            .take_renewed(&base.pick_cancel_token, &paint.pick_cancel_token);
         self.setup.merge_paint(&base.setup, &paint.setup);
-        self.main.merge_paint(&base.main, &paint.main);
+        self.main.merge_paint(&base.main, &mut paint.main);
         self.news.merge_paint(&base.news, &paint.news);
+        self.radio.merge_paint(&base.radio, &paint.radio);
+    }
+
+    /// [`Self::merge_paint`] for a [`PaintCapture::take_mini`] frame: only the
+    /// fields the mini radio strip writes. Its other state is a stub.
+    fn merge_mini_paint(&mut self, base: &AddonState, paint: &AddonState) {
+        take_ui(
+            &mut self.window_visible,
+            &base.window_visible,
+            &paint.window_visible,
+        );
+        take_ui(
+            &mut self.needs_character_reload,
+            &base.needs_character_reload,
+            &paint.needs_character_reload,
+        );
+        merge_config(&mut self.config, &base.config, &paint.config);
+        take_ui(
+            &mut self.main.active_tab,
+            &base.main.active_tab,
+            &paint.main.active_tab,
+        );
         self.radio.merge_paint(&base.radio, &paint.radio);
     }
 
@@ -576,22 +664,30 @@ impl AddonState {
     /// a not-yet-stored busy flag as a finished worker and the following frame
     /// spawned again (open → worker storm → freeze).
     ///
-    /// While the publish epoch still matches the snapshot, store busy flags
-    /// this frame raised (bools only). Commit still folds the rest of the frame.
-    fn track_worker(&self, name: &'static str, handle: JoinHandle<()>) {
+    /// A paint spawn runs under `STATE` and stores the busy markers this frame
+    /// raised before releasing it: the child's first publish waits for them,
+    /// so it cannot clear one that was never stored, and a sibling publish in
+    /// the same frame cannot make commit drop them. Commit folds the rest.
+    fn track_worker(
+        &self,
+        name: &'static str,
+        spawn: impl FnOnce() -> std::io::Result<JoinHandle<()>>,
+    ) -> std::io::Result<()> {
         if render_thread_active() && baseline_is_set() && !state_lock_held() {
-            let _ = with_state(|live| {
-                if live.epoch == self.epoch {
-                    with_baseline(|base| {
-                        if let Some(base) = base {
-                            publish_raised_busy(live, base, self);
-                        }
-                    });
-                }
+            with_state(|live| {
+                let handle = spawn()?;
+                with_baseline(|base| {
+                    if let Some(base) = base {
+                        publish_raised_busy(live, base, self);
+                    }
+                });
                 live.workers.register(name, handle);
-            });
+                Ok(())
+            })
+            .unwrap_or_else(|| Err(std::io::Error::other("addon state is gone")))
         } else {
-            self.workers.register(name, handle);
+            self.workers.register(name, spawn()?);
+            Ok(())
         }
     }
 }
@@ -710,6 +806,10 @@ pub struct MainState {
     pub selected_role: Option<gw2_optimizer::scenario::RoleObjective>,
     pub current_build: Option<ResolvedBuild>,
     pub current_stats: Option<StatBlock>,
+    /// Bumped on every write of the character view: `build_tabs`,
+    /// `equipment_tabs`, `current_build`, `current_stats` and the current
+    /// combat lines. The paint merge moves the view as one on a bump.
+    pub resolve_rev: u64,
     pub build_loading: bool,
     pub error: Option<String>,
     // Template selection
@@ -935,6 +1035,7 @@ impl MainState {
 
     /// Clear the currently resolved build view so the UI never shows stale data.
     pub fn clear_resolved_view(&mut self) {
+        self.resolve_rev = self.resolve_rev.wrapping_add(1);
         self.current_build = None;
         self.current_stats = None;
         self.comparison.current_combat_solo = None;
@@ -980,7 +1081,7 @@ impl MainState {
         self.benchmark_last_synced = Some(stamp);
     }
 
-    fn merge_paint(&mut self, base: &Self, paint: &Self) {
+    fn merge_paint(&mut self, base: &Self, paint: &mut Self) {
         // ponytail: a new field stays live on conflict until it is named here.
         // Epoch-match commit still moves the whole snapshot.
         keep_worker(&mut self.characters, &base.characters, &paint.characters);
@@ -1011,29 +1112,26 @@ impl MainState {
             &base.selected_role,
             &paint.selected_role,
         );
-        merge_build(
-            &mut self.current_build,
-            &base.current_build,
-            &paint.current_build,
-        );
-        // `current_stats` has no Eq. The epoch-match overwrite and the spawn
-        // publish carry UI clears; a worker publish keeps the live block.
+        // The frame rewrote the character view (switch, tab or mode, then a
+        // resolve). Its selection wins through `take_ui`, so its view goes
+        // with it; otherwise a worker's view stays.
+        if paint.resolve_rev != base.resolve_rev {
+            self.resolve_rev = paint.resolve_rev;
+            self.current_build = paint.current_build.take();
+            self.current_stats = paint.current_stats.take();
+            self.build_tabs = std::mem::take(&mut paint.build_tabs);
+            self.equipment_tabs = std::mem::take(&mut paint.equipment_tabs);
+            let (live, paint) = (&mut self.comparison, &paint.comparison);
+            live.current_combat_solo = paint.current_combat_solo.clone();
+            live.current_combat_party = paint.current_combat_party.clone();
+            live.current_combat_squad = paint.current_combat_squad.clone();
+        }
         merge_busy(
             &mut self.build_loading,
             base.build_loading,
             paint.build_loading,
         );
         merge_message(&mut self.error, &base.error, &paint.error);
-        keep_len(
-            &mut self.build_tabs,
-            base.build_tabs.len(),
-            &paint.build_tabs,
-        );
-        keep_len(
-            &mut self.equipment_tabs,
-            base.equipment_tabs.len(),
-            &paint.equipment_tabs,
-        );
         take_ui(
             &mut self.selected_build_tab,
             &base.selected_build_tab,
@@ -1089,11 +1187,10 @@ impl MainState {
             &base.radar_dragging,
             &paint.radar_dragging,
         );
-        keep_len(
-            &mut self.saved_builds,
-            base.saved_builds.len(),
-            &paint.saved_builds,
-        );
+        // Only the render thread writes the Ranch list, so paint's copy is
+        // never behind live's. Taking it whole keeps same-length edits
+        // (notes, overwrite in place) that a length check would drop.
+        self.saved_builds = std::mem::take(&mut paint.saved_builds);
         take_ui(
             &mut self.saved_builds_loaded,
             &base.saved_builds_loaded,
@@ -1675,6 +1772,33 @@ thread_local! {
     static RENDER_THREAD: Cell<bool> = const { Cell::new(false) };
     static PAINT_BASELINE: Cell<*const AddonState> = const { Cell::new(std::ptr::null()) };
     static STATE_DEPTH: Cell<u32> = const { Cell::new(0) };
+    /// Busy markers already stored on live this frame, one bit each in
+    /// [`publish_raised_busy`] order. A later spawn in the same frame must
+    /// not re-raise a flag whose fast worker already cleared it.
+    static PAINT_RAISED: Cell<u32> = const { Cell::new(0) };
+    /// The frame asked for a config save; [`PaintFrame::commit`] writes the
+    /// merged live config.
+    static PAINT_CONFIG_SAVE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The frame's commit did not run (state gone: unload). Its config save is
+/// dropped with its edits: the only copy left is the frame's, and writing it
+/// could replace a worker's newer save, which is the bug the deferral fixes.
+pub(crate) fn drop_paint_config_save() {
+    if PAINT_CONFIG_SAVE.with(|c| c.replace(false)) {
+        worker_log("a pending config save was dropped: the frame did not commit".into());
+    }
+}
+
+/// True when the caller is laying out a paint snapshot: the save is deferred
+/// to commit, which writes live config after the merge. Saving the snapshot's
+/// copy could replace a worker's newer save on disk (FCR-021).
+pub(crate) fn defer_paint_config_save() -> bool {
+    let paint = render_thread_active() && baseline_is_set() && !state_lock_held();
+    if paint {
+        PAINT_CONFIG_SAVE.with(|c| c.set(true));
+    }
+    paint
 }
 
 fn render_thread_active() -> bool {
@@ -1746,6 +1870,8 @@ pub(crate) struct BaselinePin;
 impl BaselinePin {
     fn install(baseline: &AddonState) -> Self {
         PAINT_BASELINE.with(|c| c.set(baseline as *const AddonState));
+        PAINT_RAISED.with(|c| c.set(0));
+        PAINT_CONFIG_SAVE.with(|c| c.set(false));
         Self
     }
 }
@@ -1753,6 +1879,7 @@ impl BaselinePin {
 impl Drop for BaselinePin {
     fn drop(&mut self) {
         PAINT_BASELINE.with(|c| c.set(std::ptr::null()));
+        PAINT_RAISED.with(|c| c.set(0));
     }
 }
 
@@ -1760,6 +1887,7 @@ impl Drop for BaselinePin {
 pub(crate) struct PaintCapture {
     epoch: u64,
     baseline: AddonState,
+    mini: bool,
 }
 
 impl PaintCapture {
@@ -1767,6 +1895,17 @@ impl PaintCapture {
         Self {
             epoch: live.epoch,
             baseline: live.clone_for_paint(),
+            mini: false,
+        }
+    }
+
+    /// The mini radio strip's capture: [`AddonState::clone_for_mini`], not
+    /// the whole state. Commit folds back only what the strip writes.
+    pub(crate) fn take_mini(live: &AddonState) -> Self {
+        Self {
+            epoch: live.epoch,
+            baseline: live.clone_for_mini(),
+            mini: true,
         }
     }
 
@@ -1777,6 +1916,7 @@ impl PaintCapture {
             epoch: self.epoch,
             baseline: self.baseline,
             state,
+            mini: self.mini,
         }
     }
 }
@@ -1786,6 +1926,7 @@ pub(crate) struct PaintFrame {
     epoch: u64,
     baseline: AddonState,
     pub(crate) state: AddonState,
+    mini: bool,
 }
 
 impl PaintFrame {
@@ -1797,31 +1938,35 @@ impl PaintFrame {
         let PaintFrame {
             epoch,
             baseline,
-            state,
+            mut state,
+            mini,
         } = self;
-        if live.epoch == epoch {
+        if mini {
+            live.merge_mini_paint(&baseline, &state);
+        } else if live.epoch == epoch {
             live.overwrite_from_snapshot(state);
         } else {
-            live.merge_paint(&baseline, &state);
+            live.merge_paint(&baseline, &mut state);
+        }
+        if PAINT_CONFIG_SAVE.with(|c| c.replace(false)) {
+            crate::ui::save_config_detached(live);
         }
     }
 }
 
-/// Busy flags the window raised this frame (`paint && !base`), stored on live
-/// state while the epoch still matches.
+/// Busy markers the window raised this frame (`paint && !base`), stored on
+/// live state under the spawn's lock, each at most once per frame.
 ///
-/// Not a snapshot merge: no `Vec` / `String` clone. A new `merge_busy` flag
-/// belongs here too.
-///
-/// ponytail: stored only when `live.epoch == snapshot.epoch`. A sibling publish
-/// before this spawn still leaves a new raise for [`merge_busy`] to drop.
-/// Upgrade: a per-flag raised bit if that respawn shows up.
+/// Not a snapshot merge: no `Vec` / `String` clone. A new `merge_busy` or
+/// `merge_busy_opt` marker belongs here too (bits 0..30 bools, 30.. options).
 fn publish_raised_busy(live: &mut AddonState, base: &AddonState, paint: &AddonState) {
-    fn up(live: &mut bool, base: bool, paint: bool) {
-        if paint && !base {
+    let mut bit = 0;
+    let mut up = |live: &mut bool, base: bool, paint: bool| {
+        if paint && !base && first_raise(bit) {
             *live = true;
         }
-    }
+        bit += 1;
+    };
     up(
         &mut live.main.characters_loading,
         base.main.characters_loading,
@@ -1917,6 +2062,122 @@ fn publish_raised_busy(live: &mut AddonState, base: &AddonState, paint: &AddonSt
         base.radio.searching,
         paint.radio.searching,
     );
+    // `Some` markers: the report in flight and the record being reopened.
+    up_opt(
+        30,
+        &mut live.main.feedback.sending,
+        &base.main.feedback.sending,
+        &paint.main.feedback.sending,
+    );
+    up_opt(
+        31,
+        &mut live.main.generations.opening,
+        &base.main.generations.opening,
+        &paint.main.generations.opening,
+    );
+}
+
+fn up_opt<T: Clone + PartialEq>(
+    bit: u32,
+    live: &mut Option<T>,
+    base: &Option<T>,
+    paint: &Option<T>,
+) {
+    if paint.is_some() && paint != base && first_raise(bit) {
+        *live = paint.clone();
+    }
+}
+
+/// True the first time marker `bit` is stored this frame (`PAINT_RAISED`).
+fn first_raise(bit: u32) -> bool {
+    PAINT_RAISED.with(|done| {
+        let mask = 1 << bit;
+        let first = done.get() & mask == 0;
+        done.set(done.get() | mask);
+        first
+    })
+}
+
+/// [`take_ui`] for the config, except fields written off the render thread
+/// (workers, keybinds): those keep live's value unless the frame changed them
+/// too, so a slider drag cannot revert a worker's write and save it.
+fn merge_config(live: &mut AppConfig, base: &AppConfig, paint: &AppConfig) {
+    fn keep<T: Clone + PartialEq>(merged: &mut T, live: &T, base: &T, paint: &T) {
+        *merged = live.clone();
+        take_ui(merged, base, paint);
+    }
+    if paint == base {
+        return;
+    }
+    let mut merged = paint.clone();
+    keep(
+        &mut merged.cache_build_number,
+        &live.cache_build_number,
+        &base.cache_build_number,
+        &paint.cache_build_number,
+    );
+    keep(
+        &mut merged.client_id,
+        &live.client_id,
+        &base.client_id,
+        &paint.client_id,
+    );
+    // Setup's key validation workers store the keys they accepted.
+    keep(
+        &mut merged.gw2_api_key,
+        &live.gw2_api_key,
+        &base.gw2_api_key,
+        &paint.gw2_api_key,
+    );
+    keep(
+        &mut merged.gemini_api_key,
+        &live.gemini_api_key,
+        &base.gemini_api_key,
+        &paint.gemini_api_key,
+    );
+    keep(
+        &mut merged.openai_api_key,
+        &live.openai_api_key,
+        &base.openai_api_key,
+        &paint.openai_api_key,
+    );
+    keep(
+        &mut merged.anthropic_api_key,
+        &live.anthropic_api_key,
+        &base.anthropic_api_key,
+        &paint.anthropic_api_key,
+    );
+    keep(
+        &mut merged.openrouter_api_key,
+        &live.openrouter_api_key,
+        &base.openrouter_api_key,
+        &paint.openrouter_api_key,
+    );
+    keep(
+        &mut merged.window_visible,
+        &live.window_visible,
+        &base.window_visible,
+        &paint.window_visible,
+    );
+    keep(
+        &mut merged.radio.last_station,
+        &live.radio.last_station,
+        &base.radio.last_station,
+        &paint.radio.last_station,
+    );
+    keep(
+        &mut merged.radio.mini_radio.enabled,
+        &live.radio.mini_radio.enabled,
+        &base.radio.mini_radio.enabled,
+        &paint.radio.mini_radio.enabled,
+    );
+    keep(
+        &mut merged.radio.mini_radio.anchored,
+        &live.radio.mini_radio.anchored,
+        &base.radio.mini_radio.anchored,
+        &paint.radio.mini_radio.anchored,
+    );
+    *live = merged;
 }
 
 pub(crate) fn take_ui<T: Clone + PartialEq>(live: &mut T, base: &T, paint: &T) {
@@ -2001,26 +2262,6 @@ fn merge_db(
         }
     };
     if same(live, base) && !same(paint, base) {
-        *live = paint.clone();
-    }
-}
-
-fn build_sig(build: &ResolvedBuild) -> (&str, &str) {
-    (&build.character_name, &build.profession)
-}
-
-fn merge_build(
-    live: &mut Option<ResolvedBuild>,
-    base: &Option<ResolvedBuild>,
-    paint: &Option<ResolvedBuild>,
-) {
-    let live_sig = live.as_ref().map(build_sig);
-    let base_sig = base.as_ref().map(build_sig);
-    if live_sig != base_sig {
-        return;
-    }
-    let paint_sig = paint.as_ref().map(build_sig);
-    if paint_sig != base_sig {
         *live = paint.clone();
     }
 }
@@ -2688,8 +2929,8 @@ mod tests {
         assert_eq!(err.as_deref(), Some("from-worker"));
         assert_eq!(tab, MainTab::NewBuild, "spawn must not merge the paint tab");
         assert!(
-            !optimizing,
-            "a sibling publish owns the epoch; this spawn must not store busy flags over it"
+            optimizing,
+            "a raise this frame made reaches live even after a sibling publish"
         );
         assert_eq!(n, 1);
 
@@ -2739,6 +2980,413 @@ mod tests {
         assert!(spawned);
         drop(_pin);
         let _ = join_workers(Duration::from_secs(2));
+        reset_state();
+    }
+
+    /// A publish from a thread that is not the render thread: bumps the
+    /// epoch, so the frame in flight commits through the merge.
+    fn publish_from_worker(f: impl FnOnce(&mut AddonState) + Send + 'static) {
+        std::thread::spawn(move || {
+            with_state(f).expect("state");
+        })
+        .join()
+        .expect("publisher panicked");
+    }
+
+    fn paint_frame() -> PaintFrame {
+        with_state(|s| PaintCapture::take(s))
+            .expect("state")
+            .materialize()
+    }
+
+    /// FCR-002: Stop renews the token in paint. A worker publish in the same
+    /// frame must not leave live holding the cancelled token, or every later
+    /// worker is born cancelled.
+    #[test]
+    fn stop_in_a_mismatch_frame_renews_the_live_token() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        init_worker_test("paint_stop_token");
+        let (run, pick) =
+            with_state(|s| (s.cancel_token.clone(), s.pick_cancel_token.clone())).unwrap();
+
+        let mut frame = paint_frame();
+        publish_from_worker(|s| s.main.optimize_stage = "step 3".into());
+        // Stop (optimize and chat) and the reset's pick-token renew.
+        frame.state.cancel_and_renew();
+        frame.state.pick_cancel_token.cancel();
+        frame.state.pick_cancel_token = CancellationToken::new();
+        with_state(|s| frame.commit(s)).expect("commit");
+
+        assert!(run.is_cancelled() && pick.is_cancelled());
+        let (run_now, pick_now, stage) = with_state(|s| {
+            (
+                s.cancel_token.is_cancelled(),
+                s.pick_cancel_token.is_cancelled(),
+                s.main.optimize_stage.clone(),
+            )
+        })
+        .unwrap();
+        assert!(!run_now, "live must hold the fresh run token");
+        assert!(!pick_now, "live must hold the fresh pick token");
+        assert_eq!(stage, "step 3", "the worker publish survives");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawned = with_state(|s| {
+            s.spawn_worker("after-stop", move |token| {
+                tx.send(token.is_cancelled()).unwrap();
+            })
+        })
+        .unwrap();
+        assert!(spawned);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(2)),
+            Ok(false),
+            "the next worker must not be born cancelled"
+        );
+        let _ = join_workers(Duration::from_secs(2));
+        reset_state();
+    }
+
+    /// FCR-008: a spawn after a sibling publish still stores the raise, so
+    /// commit keeps it and Stop reaches the running worker.
+    #[test]
+    fn spawn_after_publish_keeps_the_busy_flag_and_stop_reaches_the_worker() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        init_worker_test("paint_raise_mismatch");
+
+        let mut frame = paint_frame();
+        let pin = frame.pin_baseline();
+        publish_from_worker(|s| s.main.error = Some("sibling".into()));
+        frame.state.main.optimizing = true;
+        frame.state.main.feedback.sending = Some("report-1".into());
+        let go = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let w_go = go.clone();
+        assert!(frame.state.spawn_worker("raise-mismatch", move |token| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !w_go.load(Ordering::SeqCst) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            tx.send(token.is_cancelled()).unwrap();
+        }));
+        let busy = || with_state(|s| (s.main.optimizing, s.main.feedback.sending.clone())).unwrap();
+        assert_eq!(busy(), (true, Some("report-1".into())), "after spawn");
+        drop(pin);
+        with_state(|s| frame.commit(s)).expect("commit");
+        assert_eq!(busy(), (true, Some("report-1".into())), "after commit");
+        assert_eq!(
+            with_state(|s| s.main.error.clone()).unwrap().as_deref(),
+            Some("sibling")
+        );
+
+        // Stop, as stop_optimization does it: only while optimizing.
+        let mut stop = paint_frame();
+        assert!(stop.state.main.optimizing, "Stop must be offered");
+        stop.state.cancel_and_renew();
+        with_state(|s| stop.commit(s)).expect("commit");
+        go.store(true, Ordering::SeqCst);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(2)),
+            Ok(true),
+            "Stop must cancel the running worker"
+        );
+        let _ = join_workers(Duration::from_secs(2));
+        reset_state();
+    }
+
+    /// FCR-008: a second spawn in one frame must not re-raise a flag the
+    /// first spawn's worker already cleared.
+    #[test]
+    fn second_spawn_does_not_re_raise_a_cleared_flag() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        init_worker_test("paint_raise_once");
+
+        let mut frame = paint_frame();
+        let pin = frame.pin_baseline();
+        frame.state.main.optimizing = true;
+        let (tx, rx) = std::sync::mpsc::channel();
+        assert!(frame.state.spawn_worker("fast", move |_token| {
+            with_state(|s| s.main.optimizing = false);
+            tx.send(()).unwrap();
+        }));
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("worker blocked");
+        frame.state.main.api_health_checking = true;
+        assert!(frame.state.spawn_worker("second", |_token| {}));
+        let flags = || with_state(|s| (s.main.optimizing, s.main.api_health_checking)).unwrap();
+        assert_eq!(flags(), (false, true), "after the second spawn");
+        drop(pin);
+        with_state(|s| frame.commit(s)).expect("commit");
+        assert_eq!(flags(), (false, true), "after commit");
+        let _ = join_workers(Duration::from_secs(2));
+        reset_state();
+    }
+
+    /// FCR-009: a same-character PvE to PvP re-resolve in paint is kept, and a
+    /// worker's resolve is kept when paint did not resolve.
+    #[test]
+    fn re_resolve_in_a_mismatch_frame_moves_the_whole_view() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        init_worker_test("paint_resolve");
+        with_state(|s| {
+            s.main.current_build = Some(dummy_resolved_build());
+            s.main.current_stats = Some(StatBlock::default());
+            s.main.comparison.current_combat_solo = Some(dummy_combat_metrics(100));
+        });
+
+        let mut frame = paint_frame();
+        publish_from_worker(|s| s.main.optimize_stage = "busy".into());
+        // What resolve_selected_build_inner writes for the same character.
+        let mut pvp = dummy_resolved_build();
+        pvp.game_mode = GameMode::PvP;
+        frame.state.main.game_mode = GameMode::PvP;
+        frame.state.main.resolve_rev += 1;
+        frame.state.main.current_build = Some(pvp);
+        frame.state.main.current_stats = None;
+        frame.state.main.comparison.current_combat_solo = Some(dummy_combat_metrics(200));
+        with_state(|s| frame.commit(s)).expect("commit");
+        let view = || {
+            with_state(|s| {
+                (
+                    s.main.current_build.as_ref().map(|b| b.game_mode.clone()),
+                    s.main.current_stats.is_some(),
+                    s.main
+                        .comparison
+                        .current_combat_solo
+                        .as_ref()
+                        .map(|c| c.total_dps_index),
+                )
+            })
+            .unwrap()
+        };
+        assert_eq!(view(), (Some(GameMode::PvP), false, Some(200)));
+        assert_eq!(
+            with_state(|s| s.main.game_mode.clone()),
+            Some(GameMode::PvP)
+        );
+
+        // A worker resolve during a frame that did not resolve stays.
+        let mut frame = paint_frame();
+        frame.state.main.active_tab = MainTab::Settings;
+        publish_from_worker(|s| {
+            s.main.resolve_rev += 1;
+            s.main.current_build = Some(dummy_resolved_build());
+            s.main.comparison.current_combat_solo = Some(dummy_combat_metrics(300));
+        });
+        with_state(|s| frame.commit(s)).expect("commit");
+        assert_eq!(view(), (Some(GameMode::PvE), false, Some(300)));
+        reset_state();
+    }
+
+    /// FCR-021: a UI config edit in the frame a worker saved another config
+    /// field must not revert the worker's field.
+    #[test]
+    fn config_edit_keeps_a_worker_config_write() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        init_worker_test("paint_config");
+        let mini_before = with_state(|s| s.config.radio.mini_radio.enabled).unwrap();
+
+        let mut frame = paint_frame();
+        publish_from_worker(move |s| {
+            s.config.cache_build_number = Some(170_001);
+            s.config.radio.mini_radio.enabled = !mini_before;
+        });
+        frame.state.config.radio.volume_percent = 33;
+        with_state(|s| frame.commit(s)).expect("commit");
+        let (volume, build, mini) = with_state(|s| {
+            (
+                s.config.radio.volume_percent,
+                s.config.cache_build_number,
+                s.config.radio.mini_radio.enabled,
+            )
+        })
+        .unwrap();
+        assert_eq!(volume, 33, "the drag lands");
+        assert_eq!(
+            build,
+            Some(170_001),
+            "the refresh worker's build number stays"
+        );
+        assert_eq!(mini, !mini_before, "the keybind's toggle stays");
+        reset_state();
+    }
+
+    /// FCR-021 disk half: a worker saves one config field mid-frame while the
+    /// frame edits and saves another. The file must carry both.
+    #[test]
+    fn frame_config_save_writes_the_merged_config() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        init_worker_test("paint_config_save");
+
+        let mut frame = paint_frame();
+        let pin = frame.pin_baseline();
+        publish_from_worker(|s| {
+            s.config.cache_build_number = Some(170_002);
+            crate::ui::save_config_detached(s);
+        });
+        frame.state.config.radio.volume_percent = 44;
+        crate::ui::save_config_detached(&frame.state);
+        drop(pin);
+        with_state(|s| frame.commit(s)).expect("commit");
+        let _ = join_workers(Duration::from_secs(2));
+
+        let path = with_state(|s| s.config_path.clone()).unwrap();
+        let (disk, _) = AppConfig::load(&path);
+        assert_eq!(disk.cache_build_number, Some(170_002), "worker's save");
+        assert_eq!(disk.radio.volume_percent, 44, "frame's save");
+        reset_state();
+    }
+
+    /// FCR-021: the client id path saves the frame copy synchronously; it
+    /// must still leave commit to rewrite the merged config, and a worker's
+    /// accepted key survives a UI config edit in the same frame.
+    #[test]
+    fn client_id_save_is_followed_by_the_merged_save() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        init_worker_test("paint_client_id");
+
+        let mut frame = paint_frame();
+        let pin = frame.pin_baseline();
+        publish_from_worker(|s| {
+            s.config.cache_build_number = Some(170_003);
+            s.config.gw2_api_key = Some("accepted".into());
+            crate::ui::save_config_detached(s);
+        });
+        let id = crate::feedback::tasks::ensure_client_id(&mut frame.state);
+        drop(pin);
+        with_state(|s| frame.commit(s)).expect("commit");
+        let _ = join_workers(Duration::from_secs(2));
+
+        let path = with_state(|s| s.config_path.clone()).unwrap();
+        let (disk, _) = AppConfig::load(&path);
+        assert_eq!(disk.client_id.as_deref(), Some(id.as_str()));
+        assert_eq!(disk.cache_build_number, Some(170_003));
+        assert_eq!(disk.gw2_api_key.as_deref(), Some("accepted"));
+        reset_state();
+    }
+
+    /// A frame whose commit never runs drops its deferred save and clears
+    /// the flag, so a later frame does not save for it.
+    #[test]
+    fn dropped_commit_clears_the_deferred_save() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        init_worker_test("paint_config_drop");
+        let frame = paint_frame();
+        let pin = frame.pin_baseline();
+        assert!(defer_paint_config_save());
+        drop(pin);
+        drop_paint_config_save();
+        assert!(!PAINT_CONFIG_SAVE.with(|c| c.get()));
+        reset_state();
+    }
+
+    fn saved(name: &str, notes: &str) -> SavedBuild {
+        SavedBuild {
+            name: name.into(),
+            timestamp: 1000,
+            character_name: "TestChar".into(),
+            game_mode: GameMode::PvE,
+            profession: "Necromancer".into(),
+            engine_version: "1.0.0".into(),
+            balance_manifest_version: None,
+            label: "Build 1".into(),
+            stat_prefix: "Berserker's".into(),
+            gear_prefixes: gw2_core::types::GearPrefixGroups::default(),
+            slot_prefixes: None,
+            specializations: vec![],
+            weapons: vec![],
+            skills: vec![],
+            rune: String::new(),
+            sigils: vec![],
+            relic: String::new(),
+            explanation: String::new(),
+            synergy_explanation: String::new(),
+            changes_made: vec![],
+            estimated_stats: None,
+            notes: notes.into(),
+        }
+    }
+
+    /// FCR-022: a same-length Ranch edit (notes, overwrite in place) in a
+    /// mismatch frame is kept.
+    #[test]
+    fn ranch_in_place_edit_survives_a_mismatch_frame() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        init_worker_test("paint_ranch");
+        with_state(|s| s.main.saved_builds = vec![saved("a", "old"), saved("b", "")]);
+
+        let mut frame = paint_frame();
+        publish_from_worker(|s| s.main.optimize_stage = "busy".into());
+        frame.state.main.saved_builds[0].notes = "new".into();
+        with_state(|s| frame.commit(s)).expect("commit");
+        let notes = with_state(|s| {
+            s.main
+                .saved_builds
+                .iter()
+                .map(|b| b.notes.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap();
+        assert_eq!(notes, ["new", ""]);
+        reset_state();
+    }
+
+    /// FCR-010: the mini strip's capture does not clone `main`, and its
+    /// commit folds back what the strip wrote without touching the rest.
+    #[test]
+    fn mini_frame_commits_only_what_the_strip_writes() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        init_worker_test("paint_mini");
+        with_state(|s| {
+            s.main.characters = vec!["Alt".into()];
+            s.main.saved_builds = vec![saved("a", "")];
+        });
+
+        let mut frame = with_state(|s| PaintCapture::take_mini(s))
+            .expect("state")
+            .materialize();
+        assert!(frame.state.main.characters.is_empty());
+        assert!(frame.state.main.saved_builds.is_empty());
+        frame.state.radio.search_text = "jazz".into();
+        frame.state.config.radio.volume_percent = 12;
+        frame.state.main.active_tab = MainTab::Radio;
+        frame.state.window_visible = true;
+        with_state(|s| frame.commit(s)).expect("commit");
+
+        let got = with_state(|s| {
+            (
+                s.main.characters.clone(),
+                s.main.saved_builds.len(),
+                s.radio.search_text.clone(),
+                s.config.radio.volume_percent,
+                s.main.active_tab.clone(),
+                s.window_visible,
+            )
+        })
+        .unwrap();
+        assert_eq!(
+            got,
+            (
+                vec!["Alt".to_string()],
+                1,
+                "jazz".to_string(),
+                12,
+                MainTab::Radio,
+                true
+            )
+        );
         reset_state();
     }
 
@@ -3163,6 +3811,31 @@ mod tests {
             with_state(|_s| ()).is_none(),
             "unload must drop the state once the wait is over"
         );
+    }
+
+    /// In the DLL every worker ends in `FreeLibraryAndExitThread`, from inside
+    /// the std thread closure, so std never releases the result slot and
+    /// `JoinHandle::is_finished` stays false for good. Unload then reported
+    /// every worker "still running" (1.14.51 log: game-data-refresh, done 19 s
+    /// earlier, listed at unload) and spawn never reaped a handle. The test exe
+    /// cannot pin, so the body exits the thread the same way itself.
+    #[cfg(windows)]
+    #[test]
+    fn join_workers_counts_a_worker_that_left_through_exit_thread() {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn ExitThread(code: u32) -> !;
+        }
+        let _serial = state_test_guard();
+        init_worker_test("exit_thread");
+
+        with_state(|s| s.spawn_worker("test-exit-thread", |_token| unsafe { ExitThread(0) }));
+        std::thread::sleep(Duration::from_millis(50));
+
+        let report = join_workers(Duration::from_millis(500));
+        clear();
+        assert_eq!(report.joined, 1, "{report}");
+        assert!(report.abandoned.is_empty(), "{report}");
     }
 
     #[test]

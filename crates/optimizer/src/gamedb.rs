@@ -10,6 +10,17 @@ use gw2_api::models::{
     Item, ItemStat, Legend, Pet, Profession, PvpAmulet, Skill, Specialization, Trait as GW2Trait,
 };
 
+/// Tail of every "catalog missing from the cache" [`GameDb::load`] error. It
+/// names the fix, and [`is_missing_catalog`] keys on it.
+const MISSING_CATALOG_HINT: &str = " — use Settings > Refresh game data to download it";
+
+/// Does this [`GameDb::load`] error mean a catalog is missing or empty? A
+/// default refresh repairs that (e.g. a cache from before pets were fetched).
+// ponytail: string suffix match; a typed load error when a second caller branches on it.
+pub fn is_missing_catalog(err: &str) -> bool {
+    err.ends_with(MISSING_CATALOG_HINT)
+}
+
 /// `data/form_variants.json`: palette skill id -> the id cast outside the
 /// form. Compile-time data, parsed by `druid_bar_carries_the_out_of_form_glyph`.
 fn form_variants() -> &'static HashMap<u32, u32> {
@@ -108,34 +119,20 @@ impl GameDb {
             .unwrap_or_default();
 
         // Validate critical data is non-empty
-        if professions_vec.is_empty() {
-            return Err("No professions found in cache — game data may not be downloaded".into());
-        }
-        if specs_vec.is_empty() {
-            return Err(
-                "No specializations found in cache — game data may not be downloaded".into(),
-            );
-        }
-        if itemstats_vec.is_empty() {
-            return Err("No item stats found in cache — game data may not be downloaded".into());
-        }
-        if skills_vec.is_empty() {
-            return Err("No skills found in cache — game data may not be downloaded".into());
-        }
-        if traits_vec.is_empty() {
-            return Err("No traits found in cache — game data may not be downloaded".into());
-        }
-        if items_vec.is_empty() {
-            return Err("No items found in cache — game data may not be downloaded".into());
-        }
-        if legends_vec.is_empty() {
-            return Err("No legends found in cache — game data may not be downloaded".into());
-        }
-        if pets_vec.is_empty() {
-            return Err("No pets found in cache — game data may not be downloaded".into());
-        }
-        if pvp_amulets_vec.is_empty() {
-            return Err("No PvP amulets found in cache — game data may not be downloaded".into());
+        for (empty, what) in [
+            (professions_vec.is_empty(), "professions"),
+            (specs_vec.is_empty(), "specializations"),
+            (itemstats_vec.is_empty(), "item stats"),
+            (skills_vec.is_empty(), "skills"),
+            (traits_vec.is_empty(), "traits"),
+            (items_vec.is_empty(), "items"),
+            (legends_vec.is_empty(), "legends"),
+            (pets_vec.is_empty(), "pets"),
+            (pvp_amulets_vec.is_empty(), "PvP amulets"),
+        ] {
+            if empty {
+                return Err(format!("No {what} found in cache{MISSING_CATALOG_HINT}"));
+            }
         }
 
         let items: HashMap<u32, Item> = items_vec.into_iter().map(|i| (i.id, i)).collect();
@@ -1208,9 +1205,12 @@ mod tests {
                     Ok(_) => panic!("{catalog} skip={skip:?} empty={empty:?} must fail"),
                     Err(e) => e,
                 };
+                // FCR-012: the error names the fix, and the addon's predicate
+                // sees it so the load path can start that refresh itself.
                 assert!(
                     err.to_lowercase().contains(needle)
-                        && err.contains("game data may not be downloaded"),
+                        && err.contains("Settings > Refresh game data")
+                        && is_missing_catalog(&err),
                     "{catalog} skip={skip:?} empty={empty:?}: {err}"
                 );
                 let _ = std::fs::remove_dir_all(&dir);
@@ -1220,6 +1220,8 @@ mod tests {
         seed_load_catalogs(&cache, "", "");
         GameDb::load(&cache).expect("full seed must load");
         let _ = std::fs::remove_dir_all(&dir);
+        // A broken file is not a missing catalog: no refresh loop on it.
+        assert!(!is_missing_catalog("expected value at line 1 column 1"));
     }
 
     /// Live `/v2/itemstats` ships several Giver's multiplier shapes under one

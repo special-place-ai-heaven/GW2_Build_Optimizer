@@ -116,33 +116,44 @@ fn nothing_outside_fidelity_reads_a_fight_profile() {
 /// (profession, spec, mode, observable, max p90 |error|, reason), keyed like
 /// `compare::bands`: spec is the log's elite spec or core profession name.
 ///
-/// Seeded from sprint 008 Gate 3b run-3 median |error| on fixture specs that
-/// are n=1 bands (so p90 = that one |error|). Not a fresh cache p90 — do not
-/// replace these with numbers nobody measured. `skill_share` / boon uptimes /
-/// WvW DPS stay out: the documented ranges are too wide to ratchet and the
-/// engine moved since run 3. `kent_fidelity_fixture_budgets_ratchet` fails
-/// if this table is emptied (vacuous well-formed / ignored compare).
+/// Each budget is a cache p90 measured by
+/// `no_observable_exceeds_its_fidelity_budget` on 2026-09-25 (1.14.50 plus
+/// FCR-025), both rows n=1, rounded up by a margin inside [`stale_slack`].
+/// They are ratchet ceilings on today's engine, not accuracy claims. Only
+/// that `#[ignore]` gate reads simulator output: plain CI checks the table's
+/// shape and its log-side facts, so a regression here is caught only by a
+/// manual `--ignored` run with a synced cache. `skill_share` / boon uptimes /
+/// WvW DPS stay out: the documented ranges are too wide to ratchet.
+/// `kent_fidelity_fixture_budgets_ratchet` fails if this table is emptied.
 const EXPECTED_FIDELITY: &[(&str, &str, &str, &str, f64, &str)] = &[
     (
         "Necromancer",
         "Reaper",
         "PvE",
         "condi_fraction",
-        0.003,
-        "sprint 008 Gate 3b run-3 median |error|; golem fixture Reaper is n=1 so p90=median",
+        0.0015,
+        "measured p90 0.00121 (n=1, golem fixture), 2026-09-25; was run-3 median 0.003",
     ),
     (
         "Engineer",
         "Mechanist",
         "WvW",
         "condi_fraction",
-        0.005,
-        "sprint 008 Gate 3b run-3 median |error|; aBtd Joe Wvw Mechanist is n=1 so p90=median",
+        0.055,
+        "measured ratchet ceiling, not accuracy: p90 0.0489 (n=1, aBtd Joe Wvw), 2026-09-25; run-3 median 0.005 no longer holds",
     ),
 ];
 
-/// Ratchet slack: a budget more than this above the measured p90 is stale.
-const STALE_BY: f64 = 0.05;
+/// Ratchet slack, relative: a budget more than this share of itself above
+/// the measured p90 is stale. An absolute slack exceeded these small
+/// budgets, so the check could never fire.
+const STALE_BY: f64 = 0.5;
+/// Floor under the slack so a tiny budget does not flap on rounding.
+const STALE_FLOOR: f64 = 0.0005;
+
+fn stale_slack(budget: f64) -> f64 {
+    (STALE_BY * budget).max(STALE_FLOOR)
+}
 
 const PROFESSIONS: [&str; 9] = [
     "Elementalist",
@@ -188,6 +199,10 @@ fn the_fidelity_budget_table_is_well_formed() {
         assert!(
             budget.is_finite() && budget > 0.0,
             "EXPECTED_FIDELITY: {key:?} budgets {budget}"
+        );
+        assert!(
+            budget - stale_slack(budget) > 0.0,
+            "EXPECTED_FIDELITY: {key:?} staleness threshold is not positive, so the ratchet cannot fire"
         );
         assert!(
             !reason.trim().is_empty(),
@@ -374,9 +389,10 @@ fn no_observable_exceeds_its_fidelity_budget() {
                 "{profession} · {spec} · {mode} · {observable}: p90 {:.3} over budget {budget}",
                 b.p90_abs
             )),
-            Some(b) if b.p90_abs < budget - STALE_BY => failures.push(format!(
-                "{profession} · {spec} · {mode} · {observable}: p90 {:.3} under budget {budget} by more than {STALE_BY} — ratchet it down",
-                b.p90_abs
+            Some(b) if b.p90_abs < budget - stale_slack(budget) => failures.push(format!(
+                "{profession} · {spec} · {mode} · {observable}: p90 {:.4} under budget {budget} by more than {:.4} — ratchet it down",
+                b.p90_abs,
+                stale_slack(budget)
             )),
             Some(_) => {}
         }

@@ -818,6 +818,7 @@ fn render_role_chips(ui: &Ui, state: &mut AddonState) {
 /// the Generations tab opening a record made on another character.
 pub(in crate::ui::main_view) fn select_character(state: &mut AddonState, idx: usize, name: String) {
     state.main.selected_character = Some(idx);
+    state.main.resolve_rev = state.main.resolve_rev.wrapping_add(1);
     state.main.current_build = None;
     state.main.current_stats = None;
     state.main.build_tabs.clear();

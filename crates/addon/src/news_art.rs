@@ -123,23 +123,72 @@ pub(crate) fn normalized_host(url: &reqwest::Url) -> Option<&str> {
     )
 }
 
-/// Shared radio stream/logo screen. DNS resolution must run on a worker.
-/// An unresolved hostname is left to the transport's connection error.
+/// Shared radio stream/logo screen: no host, "localhost", or a reserved
+/// literal IP. Never touches DNS, so it is safe inside a redirect policy that
+/// runs on the polling thread (FCR-019). Hostnames are screened where the
+/// connect resolves them, by [`ScreenedResolver`].
 pub(crate) fn url_host_is_reserved(url: &reqwest::Url) -> bool {
-    use std::net::ToSocketAddrs;
     let Some(host) = normalized_host(url) else {
         return true;
     };
-    if reserved_still_host(host) {
-        return true;
+    reserved_still_host(host)
+}
+
+/// DNS resolver for every client that dials a community-submitted or
+/// feed-supplied URL (news stills, radio logos, radio streams). The connect
+/// itself goes through this, on the first URL and every redirect hop, so the
+/// address that was screened is the address that is dialed: no second lookup
+/// for a TTL-0 name to rebind (FCR-020). Literal-IP URLs never reach a
+/// resolver; the syntactic screens above cover those.
+///
+/// The blocking `getaddrinfo` runs on the runtime's blocking pool (the same
+/// place reqwest's default resolver puts it), never on the future that a
+/// Stop/timeout `select!` polls (FCR-019).
+pub(crate) struct ScreenedResolver;
+
+impl reqwest::dns::Resolve for ScreenedResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            use std::net::ToSocketAddrs;
+            // Port 0: reqwest substitutes the URL's port.
+            let lookup = tokio::task::spawn_blocking(move || {
+                (host.as_str(), 0).to_socket_addrs().map(Vec::from_iter)
+            })
+            .await?;
+            let addrs: reqwest::dns::Addrs = Box::new(screen_resolved(lookup)?.into_iter());
+            Ok(addrs)
+        })
     }
-    if host.parse::<std::net::IpAddr>().is_ok() {
-        return false;
+}
+
+/// Local, fail-closed DNS screen of the INITIAL URL's host, same rule as
+/// [`ScreenedResolver`]. Needed because behind an HTTP proxy reqwest hands the
+/// target name to the proxy, so the resolver only ever sees the proxy host.
+/// Blocking: call on a worker or the audio-owner thread before any polling,
+/// never from a redirect policy or a polled future (FCR-019). Redirect hops
+/// behind a proxy get the literal screen only.
+pub(crate) fn initial_host_resolves_public(url: &reqwest::Url) -> Result<(), String> {
+    use std::net::ToSocketAddrs;
+    let host = normalized_host(url).ok_or("URL has no host")?;
+    screen_resolved((host, 0).to_socket_addrs().map(Vec::from_iter)).map(drop)
+}
+
+/// Pure half of [`ScreenedResolver`]: keep only public addresses. Fails closed
+/// on a lookup error and when nothing public remains, so a SERVFAIL or an
+/// all-private answer never falls through to some other resolver.
+fn screen_resolved(
+    lookup: std::io::Result<Vec<std::net::SocketAddr>>,
+) -> Result<Vec<std::net::SocketAddr>, String> {
+    let public: Vec<_> = lookup
+        .map_err(|e| format!("DNS lookup failed: {e}"))?
+        .into_iter()
+        .filter(|a| !ip_is_reserved(a.ip()))
+        .collect();
+    if public.is_empty() {
+        return Err("host resolves only to private addresses".to_string());
     }
-    match (host, url.port_or_known_default().unwrap_or(443)).to_socket_addrs() {
-        Ok(mut addrs) => addrs.any(|a| ip_is_reserved(a.ip())),
-        Err(_) => false,
-    }
+    Ok(public)
 }
 
 /// At most `max` redirects (`previous().len() > max`, same cut as radio logos).
@@ -160,7 +209,8 @@ pub(crate) fn screened_redirect_policy(
     })
 }
 
-/// Worker-only: allowlist plus DNS, for the original URL and every redirect hop.
+/// Allowlist plus literal-IP screen, for the original URL and every redirect
+/// hop. No DNS: [`ScreenedResolver`] screens the addresses the connect uses.
 fn hop_ok(url: &str) -> bool {
     url_ok(url)
         && reqwest::Url::parse(url)
@@ -367,9 +417,11 @@ pub fn download(
     if token.is_cancelled() || !hop_ok(url) {
         return None;
     }
+    initial_host_resolves_public(&reqwest::Url::parse(url).ok()?).ok()?;
     let client = reqwest::blocking::Client::builder()
         .timeout(TIMEOUT)
         .redirect(screened_redirect_policy(2, hop_ok))
+        .dns_resolver(std::sync::Arc::new(ScreenedResolver))
         .build()
         .ok()?;
     let mut headers = HeaderMap::new();
@@ -515,11 +567,19 @@ pub(crate) fn slots_test_guard() -> std::sync::MutexGuard<'static, ()> {
 
 /// Origin is a loopback 302 (reqwest screens `attempt.url()`, the *next* hop).
 /// A reserved Location must `stop()`: no connect, no body, still a 3xx from origin.
+///
+/// Nothing here reads a clock. Loopback bytes were measured arriving >1 s late
+/// on a loaded Windows box, which made the old 2 s budget and `elapsed < 1.5 s`
+/// check flaky. A followed hop is caught structurally instead: a connection
+/// queued on the probe listener, a send error, or a non-3xx / non-origin reply.
+/// The timeouts below are headroom and only matter when the policy is broken.
 #[cfg(test)]
 pub(crate) fn assert_policy_stops_reserved_redirects(policy: reqwest::redirect::Policy) {
     use std::io::{BufRead, Read, Write};
     use std::net::{Shutdown, TcpListener};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+
+    const HEADROOM: Duration = Duration::from_secs(30);
 
     fn drain_headers(stream: &std::net::TcpStream) {
         let mut reader = std::io::BufReader::new(stream.try_clone().expect("clone"));
@@ -543,7 +603,7 @@ pub(crate) fn assert_policy_stops_reserved_redirects(policy: reqwest::redirect::
                 return;
             };
             let _ = stream.set_nodelay(true);
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+            let _ = stream.set_read_timeout(Some(HEADROOM));
             drain_headers(&stream);
             let body = format!(
                 "HTTP/1.1 302 Found\r\nLocation: {loc}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -558,10 +618,11 @@ pub(crate) fn assert_policy_stops_reserved_redirects(policy: reqwest::redirect::
     }
 
     let probe = TcpListener::bind("127.0.0.1:0").expect("bind probe");
+    probe.set_nonblocking(true).expect("probe nonblocking");
     let probe_port = probe.local_addr().expect("probe addr").port();
     let client = reqwest::blocking::Client::builder()
         .redirect(policy)
-        .timeout(Duration::from_secs(2))
+        .timeout(HEADROOM)
         .pool_max_idle_per_host(0)
         .build()
         .expect("client");
@@ -579,15 +640,13 @@ pub(crate) fn assert_policy_stops_reserved_redirects(policy: reqwest::redirect::
     ];
     for loc in &locations {
         let origin = serve_302(loc);
-        let t0 = Instant::now();
         let resp = client
             .get(&origin)
             .send()
             .unwrap_or_else(|e| panic!("origin GET for {loc}: {e}"));
         assert!(
-            t0.elapsed() < Duration::from_millis(1500),
-            "redirect to {loc} was dialed (elapsed {:?})",
-            t0.elapsed()
+            matches!(probe.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "redirect to {loc} dialed the loopback probe"
         );
         assert!(
             resp.status().is_redirection(),
@@ -776,6 +835,74 @@ mod tests {
     #[test]
     fn redirect_to_reserved_is_stopped_before_connect() {
         assert_policy_stops_reserved_redirects(screened_redirect_policy(2, hop_ok));
+    }
+
+    fn sa(s: &str) -> std::net::SocketAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn resolver_screen_drops_reserved_and_keeps_public() {
+        let kept = screen_resolved(Ok(vec![
+            sa("127.0.0.1:0"),
+            sa("93.184.216.34:0"),
+            sa("10.1.2.3:0"),
+            sa("[fd00::1]:0"),
+            sa("[::ffff:192.168.1.1]:0"),
+            sa("[2606:4700:4700::1111]:0"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            kept,
+            vec![sa("93.184.216.34:0"), sa("[2606:4700:4700::1111]:0")]
+        );
+    }
+
+    #[test]
+    fn initial_prescreen_refuses_hostname_resolving_to_loopback() {
+        let local = reqwest::Url::parse("http://localhost:8080/x.png").unwrap();
+        assert!(initial_host_resolves_public(&local).is_err());
+        // Literals take no DNS; a public one passes, a reserved one does not.
+        let public = reqwest::Url::parse("https://[2606:4700:4700::1111]/x").unwrap();
+        assert!(initial_host_resolves_public(&public).is_ok());
+        let private = reqwest::Url::parse("http://192.168.1.8/x").unwrap();
+        assert!(initial_host_resolves_public(&private).is_err());
+    }
+
+    #[test]
+    fn resolver_screen_fails_closed() {
+        // Every answer private (the rebinding case): nothing to dial.
+        assert!(screen_resolved(Ok(vec![sa("127.0.0.1:0"), sa("[::1]:0")])).is_err());
+        assert!(screen_resolved(Ok(Vec::new())).is_err());
+        // A failed lookup (SERVFAIL, timeout) is an error, not a pass.
+        assert!(screen_resolved(Err(std::io::Error::other("servfail"))).is_err());
+    }
+
+    /// End to end through reqwest: a hostname that resolves to loopback is
+    /// refused by the resolver the connect uses, so a listener on that very
+    /// address never sees a connection. Also proves the resolver's
+    /// `spawn_blocking` has a runtime inside the blocking client.
+    #[test]
+    fn resolver_refuses_hostname_resolving_to_loopback_before_connect() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let port = listener.local_addr().expect("addr").port();
+        let client = reqwest::blocking::Client::builder()
+            .dns_resolver(std::sync::Arc::new(ScreenedResolver))
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("client");
+        let err = client
+            .get(format!("http://localhost:{port}/"))
+            .send()
+            .expect_err("loopback hostname must be refused");
+        assert!(err.is_connect(), "{err:?}");
+        assert!(
+            matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "the screened client dialed loopback"
+        );
     }
 
     /// The hosts the live feeds ACTUALLY serve stills from, captured

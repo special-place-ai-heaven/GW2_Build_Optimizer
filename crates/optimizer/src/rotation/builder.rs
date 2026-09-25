@@ -708,6 +708,62 @@ pub(crate) fn sourced_skill_value(ctx: &BalanceContext, skill_id: u32, field: &s
     }
 }
 
+/// The evidence level of a played override (`OverrideResult::Value`), which
+/// [`sourced_skill_value`] drops.
+fn sourced_skill_evidence(
+    ctx: &BalanceContext,
+    skill_id: u32,
+    field: &str,
+) -> Option<crate::data::EvidenceLevel> {
+    match overrides().lookup(
+        &ctx.patch_id,
+        ctx.game_mode.label(),
+        "Skill",
+        skill_id,
+        field,
+    ) {
+        Some(OverrideResult::Value { evidence_level, .. }) => Some(evidence_level),
+        Some(OverrideResult::Unknown { .. }) | None => None,
+    }
+}
+
+/// Bar skills that play a Heuristic balance override, as
+/// `"<skill> (heuristic <field>)"` for `CoverageHonesty::heuristic`: the
+/// value plays and the build reads Provisional by name (FCR-013, Whirling
+/// Wrath's `hit_count` 2 rounded from a logged 1.75).
+// ponytail: the statically named fields only; a Heuristic
+// `status_duration_ms:*` override would need its field listed here.
+pub(crate) fn heuristic_override_stamps(
+    skills: &[RotationSkill],
+    ctx: &BalanceContext,
+) -> Vec<String> {
+    const FIELDS: [&str; 8] = [
+        "hit_count",
+        "activation_ms",
+        "recharge_ms",
+        "initiative_cost",
+        "combo_field_duration_ms",
+        "damage_coefficient:above_50",
+        "damage_coefficient:below_50",
+        "damage_coefficient:below_25",
+    ];
+    let mut out: Vec<String> = skills
+        .iter()
+        .flat_map(|skill| {
+            FIELDS
+                .iter()
+                .filter(|field| {
+                    sourced_skill_evidence(ctx, skill.skill_id, field)
+                        == Some(crate::data::EvidenceLevel::Heuristic)
+                })
+                .map(|field| crate::data::quality::heuristic_entry(&skill.name, field).rendered())
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 pub(crate) fn sourced_skill_u32(ctx: &BalanceContext, skill_id: u32, field: &str) -> Option<u32> {
     sourced_skill_value(ctx, skill_id, field)
         .filter(|value| value.is_finite() && *value >= 0.0 && *value <= u32::MAX as f64)
@@ -3358,6 +3414,17 @@ mod fact_selection_tests {
     /// not `hit_timing.json` hits 14.
     #[test]
     fn whirling_wrath_lands_sourced_projectile_hits_per_mode() {
+        let factual = bar_skill(
+            &db_with(&[r#"{"id": 9168, "name": "Factual Hits", "slot": "Weapon_1", "facts": []}"#]),
+            9168,
+            GameMode::PvE,
+            &[],
+        );
+        assert!(
+            crate::rotation::builder::heuristic_override_stamps(&[factual], &BalanceContext::pve())
+                .is_empty(),
+            "a Factual hit_count override (9168: 4) is sourced, not heuristic"
+        );
         let db = db_with(&[WHIRLING_WRATH]);
         for mode in [GameMode::PvE, GameMode::WvW, GameMode::PvP] {
             let skill = bar_skill(&db, 9081, mode.clone(), &[]);
@@ -3375,6 +3442,34 @@ mod fact_selection_tests {
             .filter(|n| n.contains("impacts"))
             .collect();
             assert_eq!(impact_gaps, Vec::<String>::new(), "{mode:?}");
+            // FCR-013: was silent (empty gap list, read as sourced). The
+            // override is Heuristic, so the build names it and reads
+            // Provisional.
+            let ctx = BalanceContext::new(mode.clone());
+            let stamps = crate::rotation::builder::heuristic_override_stamps(
+                std::slice::from_ref(&skill),
+                &ctx,
+            );
+            assert_eq!(
+                stamps,
+                vec!["Whirling Wrath (heuristic hit_count)".to_string()],
+                "{mode:?}"
+            );
+            let reasons = crate::data::quality::mode_honesty_reasons(
+                "Guardian",
+                &mode,
+                None,
+                &[],
+                false,
+                &stamps,
+            );
+            assert!(
+                reasons
+                    .iter()
+                    .any(|r| r.field == crate::data::quality::HEURISTIC_FIELD
+                        && r.explanation.contains("Whirling Wrath")),
+                "{mode:?}: {reasons:?}"
+            );
         }
         let unsourced =
             extract_effects_for_context(0, &db.skills[&9081].facts, None, &BalanceContext::pve());

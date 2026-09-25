@@ -951,6 +951,16 @@ fn validate_effects_file(file: &NormalizedEffectsFile) -> Result<(), NormalizedE
                 Gate::Interval { every_ms, .. } if *every_ms == 0 => {
                     return fail("Interval gate requires every_ms > 0")
                 }
+                // FCR-011: with no `while` state the interval is the only
+                // clock, a ceiling calibrated to simulator output, not a
+                // page number.
+                Gate::Interval {
+                    while_state: None, ..
+                } if effect.evidence_level == EvidenceLevel::Factual => {
+                    return fail(
+                        "Interval gate without a while state requires Heuristic evidence_level",
+                    )
+                }
                 Gate::Weapon { types, .. } => {
                     if types.is_empty() {
                         return fail("Weapon gate requires at least one weapon type");
@@ -1825,6 +1835,29 @@ mod tests {
             }),
             "Interval gate requires every_ms > 0",
         );
+        // FCR-011: an Interval with no while state is a calibrated ceiling.
+        rejected(
+            gated(Gate::Interval {
+                every_ms: 20_000,
+                while_state: None,
+            }),
+            "Interval gate without a while state requires Heuristic evidence_level",
+        );
+        let mut ceiling = gated(Gate::Interval {
+            every_ms: 20_000,
+            while_state: None,
+        });
+        ceiling.evidence_level = EvidenceLevel::Heuristic;
+        ceiling.source = Some("calibrated ceiling".into());
+        assert!(validate_effects_file(&wvw_file(vec![ceiling])).is_ok());
+        let clocked = gated(Gate::Interval {
+            every_ms: 3_000,
+            while_state: Some(StateGate {
+                in_shroud: Some(false),
+                ..Default::default()
+            }),
+        });
+        assert!(validate_effects_file(&wvw_file(vec![clocked])).is_ok());
         rejected(
             gated(Gate::Weapon {
                 types: Vec::new(),

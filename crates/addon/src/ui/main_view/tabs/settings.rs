@@ -297,13 +297,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.main.available_models.clear();
         state.main.models_error = None;
         state.main.settings_model_search.clear();
-        if let Err(e) = state.config.save(&state.config_path) {
-            nexus::log::log(
-                nexus::log::LogLevel::Warning,
-                "GW2BuildOpt",
-                format!("Config save failed: {}", e),
-            );
-        }
+        crate::ui::save_config_detached(state);
     }
     ui.spacing();
 

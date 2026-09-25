@@ -12,8 +12,35 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 struct CacheEntry<T> {
     build: u32,
+    /// [`CACHE_FORMAT`] at write time; absent (0) in files older than it.
+    #[serde(default)]
+    format: u32,
     fetched_at: DateTime<Utc>,
     data: T,
+}
+
+/// Format stamp written on every save. Bump it when a cached model changes
+/// meaning, and give each affected key that floor in [`FORMAT_FLOORS`].
+const CACHE_FORMAT: u32 = 1;
+
+/// Oldest format each key may carry before it is stale for the same build.
+/// 1: skills and traits carry the `fact_parse_drops` stamp (#88); older files
+/// dropped unparsed facts without it, so they read as Verified.
+const FORMAT_FLOORS: &[(&str, u32)] = &[("skills", 1), ("traits", 1)];
+
+fn min_format(key: &str) -> u32 {
+    FORMAT_FLOORS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map_or(0, |(_, floor)| *floor)
+}
+
+/// The envelope minus `data`, for staleness checks.
+#[derive(Deserialize)]
+struct Meta {
+    build: u32,
+    #[serde(default)]
+    format: u32,
 }
 
 /// Local file-based cache for GW2 API data.
@@ -36,6 +63,7 @@ impl DataCache {
     pub fn save<T: Serialize>(&self, key: &str, data: &T, build: u32) -> Result<(), CacheError> {
         let entry = CacheEntry {
             build,
+            format: CACHE_FORMAT,
             fetched_at: Utc::now(),
             data,
         };
@@ -72,7 +100,8 @@ impl DataCache {
         Ok(Some(entry.data))
     }
 
-    /// Check if the cached entry's build number differs from `current_build`.
+    /// Check if the cached entry's build number differs from `current_build`,
+    /// or its format is below the key's floor in [`FORMAT_FLOORS`].
     ///
     /// Any mismatch — including rollback (cached > current) — is treated as
     /// stale. Callers are expected to refetch on `true`.
@@ -90,14 +119,23 @@ impl DataCache {
         };
         let reader = BufReader::new(file);
         // Parse just the metadata, not the full data
-        #[derive(Deserialize)]
-        struct Meta {
-            build: u32,
-        }
         let Ok(meta) = serde_json::from_reader::<_, Meta>(reader) else {
             return true;
         };
-        meta.build != current_build
+        meta.build != current_build || meta.format < min_format(key)
+    }
+
+    /// Does a cached file predate its key's format floor? Then it loads, but
+    /// the next refresh must refetch it even on the same build. A missing
+    /// file is not outdated: that is a missing catalog.
+    pub fn format_outdated(&self) -> bool {
+        FORMAT_FLOORS.iter().any(|&(key, floor)| {
+            let Ok(file) = std::fs::File::open(self.path_for(key)) else {
+                return false;
+            };
+            serde_json::from_reader::<_, Meta>(BufReader::new(file))
+                .map_or(true, |meta| meta.format < floor)
+        })
     }
 
     pub fn cached_build(&self, key: &str) -> Option<u32> {
@@ -117,8 +155,9 @@ impl DataCache {
     ///
     /// Ada FOLD3: when every cached row still equals the live row, Refresh must
     /// not rewrite the data payload; stamping the live build lets the next
-    /// `RefreshMode::Default` take the same-build skip. If `build` already
-    /// matches, this is a no-op (no disk write).
+    /// `RefreshMode::Default` take the same-build skip. The rows just matched
+    /// the live API under this parser, so the format is stamped current too.
+    /// If both already match, this is a no-op (no disk write).
     pub fn stamp_build(&self, key: &str, build: u32) -> Result<(), CacheError> {
         let path = self.path_for(key);
         if !path.exists() {
@@ -130,10 +169,11 @@ impl DataCache {
         let file = std::fs::File::open(&path)?;
         let reader = BufReader::new(file);
         let mut entry: CacheEntry<serde_json::Value> = serde_json::from_reader(reader)?;
-        if entry.build == build {
+        if entry.build == build && entry.format >= CACHE_FORMAT {
             return Ok(());
         }
         entry.build = build;
+        entry.format = CACHE_FORMAT;
         entry.fetched_at = Utc::now();
         let tmp_path = self.base_path.join(format!("{}.tmp", key));
         let result = (|| -> Result<(), CacheError> {
@@ -358,6 +398,34 @@ mod tests {
         assert_eq!(loaded, Some(vec![1, 2, 3]));
         // Same build: no-op success.
         cache.stamp_build("stamp_me", 101).unwrap();
+        let _ = cache.clear_all();
+    }
+
+    /// FCR-023: a skills/traits file written before `format` existed (1.14.48)
+    /// lost its unparsed facts without a `fact_parse_drops` stamp. Same build,
+    /// yet stale, so one refresh refetches it; other keys stay fresh.
+    #[test]
+    fn pre_format_skills_and_traits_are_stale_on_the_same_build() {
+        let cache = temp_cache();
+        let old = r#"{"build":100,"fetched_at":"2026-09-19T00:00:00Z","data":[]}"#;
+        for key in ["skills", "traits", "itemstats"] {
+            std::fs::write(cache.path_for(key), old).unwrap();
+        }
+        assert!(cache.format_outdated());
+        assert!(cache.is_stale("skills", 100));
+        assert!(cache.is_stale("traits", 100));
+        assert!(!cache.is_stale("itemstats", 100));
+        let loaded: Option<Vec<u32>> = cache.load("skills").unwrap();
+        assert_eq!(loaded, Some(vec![]), "an old file still loads");
+
+        // A refresh whose rows all match restamps rather than rewrites: that
+        // must lift the format too, or every refresh refetches forever.
+        cache.stamp_build("skills", 100).unwrap();
+        cache.save("traits", &Vec::<u32>::new(), 100).unwrap();
+        assert!(!cache.is_stale("skills", 100));
+        assert!(!cache.is_stale("traits", 100));
+        assert!(!cache.format_outdated());
+
         let _ = cache.clear_all();
     }
 

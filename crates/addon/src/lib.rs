@@ -14,7 +14,7 @@ use nexus::imgui::Ui;
 use nexus::keybind::{keybind_handler, register_keybind_with_string};
 use nexus::log::{log, LogLevel};
 use nexus::paths::get_addon_dir;
-use nexus::quick_access::add_quick_access;
+use nexus::quick_access::{add_quick_access, remove_quick_access};
 use nexus::texture::get_texture_or_create_from_memory;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
@@ -57,6 +57,7 @@ pub(crate) const CHROME_SETTLE: Duration = Duration::from_millis(2000);
 static HOST_ATTACHED: AtomicBool = AtomicBool::new(false);
 static BOOTSTRAP_FAILED: AtomicBool = AtomicBool::new(false);
 static CHROME_AT: OnceLock<Instant> = OnceLock::new();
+const QUICK_ACCESS_ID: &str = "QA_GW2_BUILD_OPTIMIZER";
 
 /// D3D-touching chrome that must wait for ArcDPS to finish hooking: texture
 /// uploads and the Nexus quick-access entry. The ImGui `Render` hook for
@@ -84,13 +85,16 @@ fn attach_overlay_host() {
             include_bytes!("../assets/build_optimizer_hover.png"),
         );
         add_quick_access(
-            "QA_GW2_BUILD_OPTIMIZER",
+            QUICK_ACCESS_ID,
             "GW2_BUILD_OPT_ICON_v1",
             "GW2_BUILD_OPT_ICON_HOVER_v1",
             "GW2_BUILD_OPT_TOGGLE",
             "GW2 Build Optimizer",
         )
-        .revert_on_unload();
+        // Removed by the action `on_load` registers, never from here: this
+        // runs on the render thread, and nexus-rs `deinit` holds its
+        // unload-action lock while it waits for this very frame to end.
+        .leak();
     });
     if result.is_err() {
         HOST_ATTACHED.store(false, Ordering::Release);
@@ -142,6 +146,9 @@ fn on_load() {
         // A pinned image keeps statics across unload/reload; undo the
         // previous unload's playback latch.
         radio::player::arm();
+        // Same for the chrome slot the previous unload closed.
+        HOST_ATTACHED.store(false, Ordering::SeqCst);
+        BOOTSTRAP_FAILED.store(false, Ordering::SeqCst);
         state::init(addon_dir);
         let _ = CHROME_AT.set(Instant::now() + CHROME_SETTLE);
 
@@ -249,6 +256,13 @@ fn on_load() {
             nexus::gui::render!(bootstrap_chrome),
         )
         .revert_on_unload();
+
+        // After the render hooks: `deinit` runs actions in push order, and the
+        // two deregisters above wait out the frame in flight, so by the time
+        // these run no callback can attach chrome or add a font. Nexus removes
+        // a shortcut by id, so one that never attached has nothing to remove.
+        nexus::on_unload(|| remove_quick_access(QUICK_ACCESS_ID));
+        nexus::on_unload(ui::fonts::release_all);
         log(
             LogLevel::Info,
             "GW2 Build Optimizer",
@@ -274,6 +288,12 @@ fn unload_step(step: &str, run: impl FnOnce() + std::panic::UnwindSafe) {
 }
 
 fn on_unload() {
+    // Close the chrome attach slot for the rest of this load: the PostRender
+    // bootstrap stays registered until nexus-rs `deinit`, which holds its
+    // unload-action lock while it deregisters the render hooks. An attach in
+    // that window calls `revert_on_unload` from inside the frame the
+    // deregister waits on, and the game freezes. `on_load` reopens it.
+    HOST_ATTACHED.store(true, Ordering::SeqCst);
     // Cancel first: the workers get the window-rect disk write worth of head start
     // on their `is_cancelled()` checks before anything waits on them.
     // Audio first: the playback stack owns OS threads (cpal, tokio) that must
@@ -289,8 +309,6 @@ fn on_unload() {
     let report = std::panic::catch_unwind(|| state::join_workers(state::UNLOAD_JOIN_BUDGET))
         .unwrap_or_default();
     unload_step("release state", state::clear);
-    HOST_ATTACHED.store(false, Ordering::SeqCst);
-    BOOTSTRAP_FAILED.store(false, Ordering::SeqCst);
 
     log(
         LogLevel::Info,
@@ -363,6 +381,67 @@ mod tests {
             body.contains("RenderType::Render"),
             "on_load must register the Render hook for ui::render; registering it from PostRender mutates the very vector Nexus is iterating (heap crash)"
         );
+    }
+
+    /// Pin: unload closes the chrome attach slot and never reopens it.
+    ///
+    /// Nexus runs unload off the render thread, and the PostRender bootstrap
+    /// stays registered until nexus-rs `deinit` removes it. `deinit` holds its
+    /// unload-action lock while it deregisters the render hooks; an attach in
+    /// that window calls `revert_on_unload` for the same lock from inside the
+    /// frame the deregister waits on, and the game freezes (1.14.51, second
+    /// unload). The first unload that day logged "Overlay chrome attached."
+    /// after "Addon unloaded.": the reset flag had re-armed the attach.
+    /// Source pin: `on_unload` needs the Nexus API table, which tests lack.
+    #[test]
+    fn on_unload_closes_the_chrome_slot_and_on_load_reopens_it() {
+        let src = include_str!("lib.rs");
+        let body_of = |name: &str| {
+            let start = src.find(name).expect("function must exist");
+            let rest = &src[start..];
+            &rest[..rest.find("\n}\n").expect("top-level fn ends")]
+        };
+        let unload = body_of("\nfn on_unload()");
+        let close = unload
+            .find("HOST_ATTACHED.store(true")
+            .expect("on_unload must close the attach slot");
+        let first_step = unload.find("unload_step(").expect("unload steps");
+        assert!(close < first_step, "close the slot before any unload step");
+        assert!(
+            !unload.contains("HOST_ATTACHED.store(false"),
+            "on_unload must not re-arm the attach while PostRender is still registered"
+        );
+        let load = body_of("\nfn on_load()");
+        let reopen = load
+            .find("HOST_ATTACHED.store(false")
+            .expect("on_load must reopen the slot for a pinned image");
+        let post_render = load.find("PostRender").unwrap();
+        assert!(
+            reopen < post_render,
+            "reopen before the bootstrap is registered"
+        );
+
+        // Render-thread registrations must not push unload actions: `deinit`
+        // holds that lock while it waits for the frame. Their removals are
+        // pushed at load, after the render hooks, so they run once no frame
+        // can register another.
+        let attach = body_of("\nfn attach_overlay_host()");
+        assert!(
+            !attach.contains("revert_on_unload"),
+            "attach runs on the render thread; leak and remove from on_load"
+        );
+        let fonts = include_str!("ui/fonts.rs");
+        assert!(
+            !fonts.contains(".revert_on_unload()"),
+            "font adds run on the render thread; leak and release from on_load"
+        );
+        for removal in ["remove_quick_access(", "fonts::release_all"] {
+            let at = load.find(removal).expect("on_load registers the removal");
+            assert!(
+                at > post_render,
+                "{removal} must run after the render hooks are deregistered"
+            );
+        }
     }
 
     #[test]
