@@ -1250,12 +1250,28 @@ pub fn calculate_validated_stats(
     profession_name: &str,
     ctx: &BalanceContext,
 ) -> (stats::StatBlock, DamageModifiers) {
+    let (stats, modifiers, _) =
+        calculate_validated_stats_with_reasons(validated, db, profession_name, ctx);
+    (stats, modifiers)
+}
+
+/// [`calculate_validated_stats`] plus every reason a gear slot could not be
+/// priced, from the same pass. Hot paths that grade quality (the referee, once
+/// per search candidate) use this instead of pricing gear a second time.
+pub fn calculate_validated_stats_with_reasons(
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    ctx: &BalanceContext,
+) -> (
+    stats::StatBlock,
+    DamageModifiers,
+    Vec<data::DataQualityReason>,
+) {
     let mut full_stats = stats::base_stats();
 
-    // Reasons are dropped here on purpose — the signature is fixed by callers
-    // outside this module. `gear_quality_reasons` re-runs the same applier for
-    // the paths that report them.
-    apply_validated_gear_stats(&mut full_stats, db, validated, profession_name, ctx);
+    let gear_reasons =
+        apply_validated_gear_stats(&mut full_stats, db, validated, profession_name, ctx);
 
     // Rune and sigil flat stat bonuses (permanent stats only).
     let rune_id = validated.rune.as_ref().map(|r| r.id);
@@ -1301,7 +1317,7 @@ pub fn calculate_validated_stats(
     // gear, not infusions; move them into the snapshot if a sheet shows they convert.
     crate::infusions::fold_into_validated_stats(&mut full_stats, validated, db);
 
-    (full_stats, modifiers)
+    (full_stats, modifiers, gear_reasons)
 }
 
 /// Simulate a rotation from validated skill IDs.
@@ -1978,6 +1994,13 @@ fn gear_slot_for_budget_slot(slot_name: &str) -> Option<GearSlot> {
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread ran [`apply_validated_gear_stats`]; lets a
+    /// test prove a hot path prices gear once.
+    pub(crate) static GEAR_APPLIER_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Per-slot gear stats for a validated build. Returns every reason a slot could
 /// not be priced — an empty Vec means the sheet is complete.
 fn apply_validated_gear_stats(
@@ -1987,6 +2010,8 @@ fn apply_validated_gear_stats(
     profession_name: &str,
     ctx: &BalanceContext,
 ) -> Vec<data::DataQualityReason> {
+    #[cfg(test)]
+    GEAR_APPLIER_CALLS.with(|calls| calls.set(calls.get() + 1));
     if ctx.game_mode == GameMode::PvP {
         // Amulets replace gear; match by the build's primary prefix name.
         let fallback = validated.primary_prefix().map(|prefix| prefix.itemstat_id);
@@ -2064,11 +2089,9 @@ pub fn validated_gear_stats(
 
 /// Re-run the gear appliers purely to collect their data quality reasons.
 ///
-/// [`calculate_validated_stats`] returns stats and modifiers, and its shape is
-/// fixed by callers outside this module (`referee.rs`, `grouped_sheet.rs`).
-/// Rather than duplicate the "what could not be priced" predicate at the
-/// reporting sites, run the one applier that owns it and throw the numbers
-/// away — a few dozen HashMap lookups, once per result.
+/// For once-per-result reporting sites that already hold a stat sheet. Hot
+/// paths take the reasons from [`calculate_validated_stats_with_reasons`]
+/// instead of pricing gear twice.
 pub fn gear_quality_reasons(
     validated: &ValidatedBuild,
     db: &GameDb,

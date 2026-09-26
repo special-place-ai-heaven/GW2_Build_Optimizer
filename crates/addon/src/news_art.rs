@@ -234,6 +234,7 @@ pub(crate) fn ip_is_reserved(ip: std::net::IpAddr) -> bool {
                 || is_cgnat(v)
                 || is_this_network(v)
                 || is_benchmarking_range(v)
+                || is_reserved_240(v)
         }
         std::net::IpAddr::V6(v) => {
             v.to_ipv4_mapped()
@@ -244,6 +245,10 @@ pub(crate) fn ip_is_reserved(ip: std::net::IpAddr) -> bool {
                 || ipv6_unique_local_or_link_local(v)
                 || is_nat64(v)
                 || is_6to4(v)
+                || is_ipv4_compatible(v)
+                || is_teredo(v)
+                || is_local_nat64(v)
+                || is_v6_documentation(v)
         }
     }
 }
@@ -294,6 +299,49 @@ fn is_6to4(v: std::net::Ipv6Addr) -> bool {
         && ip_is_reserved(std::net::IpAddr::V4(std::net::Ipv4Addr::new(
             o[2], o[3], o[4], o[5],
         )))
+}
+
+/// RFC 1112 (reserved, `240.0.0.0/4`). Overlaps the top of `is_broadcast`'s
+/// single /32 but that's harmless double coverage.
+fn is_reserved_240(v: std::net::Ipv4Addr) -> bool {
+    v.octets()[0] >= 240
+}
+
+/// RFC 4291 §2.5.5.1 (IPv4-compatible, `::a.b.c.d`, top 96 bits zero):
+/// distinct from the IPv4-mapped `::ffff:a.b.c.d` form `to_ipv4_mapped`
+/// already unwraps above. `::` and `::1` are already screened by
+/// `is_unspecified`/`is_loopback`, so exclude them here to avoid a
+/// redundant recursive call.
+fn is_ipv4_compatible(v: std::net::Ipv6Addr) -> bool {
+    let o = v.octets();
+    o[0..12] == [0; 12]
+        && !v.is_unspecified()
+        && !v.is_loopback()
+        && ip_is_reserved(std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+            o[12], o[13], o[14], o[15],
+        )))
+}
+
+/// RFC 4380 (Teredo, `2001::/32`). The client's IPv4 is XOR-obfuscated in
+/// the low 32 bits, so it can't be re-screened like NAT64/6to4 -- the whole
+/// tunnel prefix is treated as reserved instead.
+fn is_teredo(v: std::net::Ipv6Addr) -> bool {
+    let o = v.octets();
+    o[0] == 0x20 && o[1] == 0x01 && o[2] == 0 && o[3] == 0
+}
+
+/// RFC 8215 (local-use NAT64, `64:ff9b:1::/48`). Embedded-v4 bit layout
+/// varies by the deployed prefix length (32/40/48/56/64/96), so -- same
+/// call as Teredo -- the whole prefix is treated as reserved rather than
+/// re-screening a fixed offset that would be wrong for some of them.
+fn is_local_nat64(v: std::net::Ipv6Addr) -> bool {
+    v.octets()[0..6] == [0, 0x64, 0xff, 0x9b, 0, 1]
+}
+
+/// RFC 3849 (documentation, `2001:db8::/32`).
+fn is_v6_documentation(v: std::net::Ipv6Addr) -> bool {
+    let o = v.octets();
+    o[0] == 0x20 && o[1] == 0x01 && o[2] == 0x0d && o[3] == 0xb8
 }
 
 fn cache_id(url: &str) -> String {
@@ -941,6 +989,34 @@ mod tests {
         assert!(ip_is_reserved("2002:c000:0201::".parse().unwrap()));
         assert!(!ip_is_reserved("64:ff9b::5db8:d822".parse().unwrap()));
         assert!(!ip_is_reserved("2002:5db8:d822::".parse().unwrap()));
+    }
+
+    /// `::a.b.c.d` (IPv4-compatible, RFC 4291) unwraps like NAT64/6to4;
+    /// `240.0.0.0/4`, Teredo, local-use NAT64, and `2001:db8::/32` are
+    /// whole-prefix rejects; embedded-mapped and non-Teredo public v6 stay
+    /// accepted.
+    #[test]
+    fn ipv4_compatible_and_remaining_reserved_ranges_are_covered() {
+        for ip in [
+            "::a9fe:a9fe",  // IPv4-compatible, embeds 169.254.169.254
+            "::c0a8:101",   // IPv4-compatible, embeds 192.168.1.1
+            "::7f00:1",     // IPv4-compatible, embeds 127.0.0.1
+            "241.1.2.3",    // RFC 1112 reserved 240/4
+            "2001::1",      // RFC 4380 Teredo
+            "64:ff9b:1::5", // RFC 8215 local-use NAT64
+            "2001:db8::1",  // RFC 3849 documentation
+        ] {
+            let addr: std::net::IpAddr = ip.parse().expect(ip);
+            assert!(ip_is_reserved(addr), "{ip} must be reserved");
+        }
+
+        for ip in [
+            "::ffff:5db8:d822",     // IPv4-mapped, embeds public 93.184.216.34
+            "2001:4860:4860::8888", // public v6 (Google DNS), not Teredo
+        ] {
+            let addr: std::net::IpAddr = ip.parse().expect(ip);
+            assert!(!ip_is_reserved(addr), "{ip} must stay accepted");
+        }
     }
 
     #[test]

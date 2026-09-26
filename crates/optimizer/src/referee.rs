@@ -1460,7 +1460,8 @@ fn evaluate_inner(
     opener: &[u32],
     always_realize: bool,
 ) -> RefereeReport {
-    let (stats, modifiers) = engine::calculate_validated_stats(validated, db, profession_name, ctx);
+    let (stats, modifiers, gear) =
+        engine::calculate_validated_stats_with_reasons(validated, db, profession_name, ctx);
     let derived = stats::compute_derived(&stats, profession_name);
     let buff_profiles = combat::buff_profiles_for_profession(profession_name, ctx);
     let condition_weights = combat::condition_weights_for_profession(profession_name, ctx);
@@ -1601,7 +1602,6 @@ fn evaluate_inner(
     // Gear the slot-budget model could not price, and bonus strings with no
     // known category, graded as `engine::synergy_result_from_validated`
     // grades them: a zeroed sheet is not a Verified one.
-    let gear = engine::gear_quality_reasons(validated, db, profession_name, ctx);
     if !gear.is_empty() {
         quality = quality.merge(&DataQuality::Provisional);
         quality_reasons.extend(gear);
@@ -3808,6 +3808,50 @@ pub(crate) mod tests {
         for reason in &gear {
             assert!(shown.contains(&reason.to_string()), "{reason} missing");
         }
+    }
+
+    /// Search referees every candidate, so the referee prices gear in one
+    /// pass: the reasons come out of the pass that produced the stats.
+    #[test]
+    fn referee_prices_gear_once_per_evaluation() {
+        use crate::engine::GEAR_APPLIER_CALLS;
+        let db = make_test_db();
+        let mut validated = make_minimal_validated();
+        validated.gear_slots = gw2_core::types::GearSlots::from_legacy(
+            "Berserker's",
+            &gw2_core::types::GearPrefixGroups::default(),
+        );
+        let ctx = BalanceContext::new(GameMode::PvE);
+        let scenario = ScenarioSpec::from_balance_context(&ctx);
+        let weights = OptimizationWeights::default_for_mode(GameMode::PvE.label());
+
+        GEAR_APPLIER_CALLS.with(|calls| calls.set(0));
+        let report =
+            evaluate_validated_build(&validated, &db, "Guardian", &weights, &ctx, &scenario);
+        assert_eq!(GEAR_APPLIER_CALLS.with(|calls| calls.get()), 1);
+        assert_eq!(report.quality, DataQuality::Provisional);
+    }
+
+    /// `cargo test -p gw2-optimizer --release referee_eval_timing -- --ignored --nocapture`
+    #[test]
+    #[ignore = "timing probe, not a check"]
+    fn referee_eval_timing() {
+        let db = make_test_db();
+        let mut validated = make_minimal_validated();
+        validated.gear_slots = gw2_core::types::GearSlots::from_legacy(
+            "Berserker's",
+            &gw2_core::types::GearPrefixGroups::default(),
+        );
+        let ctx = BalanceContext::new(GameMode::PvE);
+        let scenario = ScenarioSpec::from_balance_context(&ctx);
+        let weights = OptimizationWeights::default_for_mode(GameMode::PvE.label());
+        let start = std::time::Instant::now();
+        for _ in 0..10_000 {
+            std::hint::black_box(evaluate_validated_build(
+                &validated, &db, "Guardian", &weights, &ctx, &scenario,
+            ));
+        }
+        println!("10k evaluate_validated_build: {:?}", start.elapsed());
     }
 
     #[test]
