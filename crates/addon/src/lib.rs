@@ -23,13 +23,96 @@ use std::time::{Duration, Instant};
 /// Crate version from `Cargo.toml`. UI and logs must use this, never a literal.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-nexus::export! {
-    name: "GW2 Build Optimizer",
+// Hand-written instead of `nexus::export!`: the macro's load wrapper calls
+// nexus-rs `globals::init`, which `expect`s that its `OnceLock`s are empty.
+// A detached worker keeps this image pinned past unload (`pin_addon_module`),
+// so an Enable in that window reloads the SAME image and `init` panics
+// ("addon api initialized multiple times", 1.14.52). The globals it would set
+// are still set, so a reload into this image skips it. Nexus hands out one
+// API table per version that outlives the addon (2026.2.17 caches it; main
+// leaks a fresh one per load and never frees the old), so the kept pointer
+// stays valid.
+const ADDON_NAME: &str = "GW2 Build Optimizer";
+
+/// Set by the first load of this image, never cleared: it lives exactly as
+/// long as the nexus-rs globals it stands for.
+static NEXUS_GLOBALS_SET: AtomicBool = AtomicBool::new(false);
+
+/// True only for the first load of this mapped image.
+fn first_load_of_image() -> bool {
+    !NEXUS_GLOBALS_SET.swap(true, Ordering::AcqRel)
+}
+
+const fn version_part(s: &str) -> i16 {
+    let b = s.as_bytes();
+    let mut n: i16 = 0;
+    let mut i = 0;
+    while i < b.len() {
+        assert!(b[i].is_ascii_digit(), "crate version not number");
+        n = n * 10 + (b[i] - b'0') as i16;
+        i += 1;
+    }
+    n
+}
+
+// The macro encodes pre-release tags into `revision`; this export does not.
+const _: () = assert!(
+    env!("CARGO_PKG_VERSION_PRE").is_empty(),
+    "pre-release versions need the nexus-rs revision encoding"
+);
+
+static ADDON_DEF: nexus::addon::AddonDefinition = nexus::addon::AddonDefinition {
     signature: -0x47573242,
-    load: on_load,
-    unload: on_unload,
+    api_version: nexus::AddonApi::VERSION,
+    name: c"GW2 Build Optimizer".as_ptr(),
+    version: nexus::addon::AddonVersion {
+        major: version_part(env!("CARGO_PKG_VERSION_MAJOR")),
+        minor: version_part(env!("CARGO_PKG_VERSION_MINOR")),
+        build: version_part(env!("CARGO_PKG_VERSION_PATCH")),
+        revision: -1, // stable: Nexus hides it
+    },
+    author: concat!(env!("CARGO_PKG_AUTHORS"), "\0").as_ptr().cast(),
+    description: concat!(env!("CARGO_PKG_DESCRIPTION"), "\0").as_ptr().cast(),
+    load: load_wrapper,
+    unload: Some(unload_wrapper),
+    flags: nexus::AddonFlags::None,
     provider: UpdateProvider::GitHub,
-    update_link: "https://github.com/special-place-ai-heaven/GW2_Build_Optimizer",
+    update_link: c"https://github.com/special-place-ai-heaven/GW2_Build_Optimizer".as_ptr(),
+};
+
+#[no_mangle]
+unsafe extern "system-unwind" fn GetAddonDef() -> *const nexus::addon::AddonDefinition {
+    &ADDON_DEF
+}
+
+/// Log from a wrapper without ever unwinding: if nexus-rs `init` panicked
+/// before storing the API table, `log` itself panics, and that is swallowed.
+fn wrapper_log(message: &str) {
+    let _ = std::panic::catch_unwind(|| log(LogLevel::Critical, ADDON_NAME, message));
+}
+
+unsafe extern "C-unwind" fn load_wrapper(api: *const nexus::AddonApi) {
+    if first_load_of_image() {
+        let api = std::panic::AssertUnwindSafe(api);
+        // SAFETY: Nexus passes a valid API table that outlives the addon.
+        let init = std::panic::catch_unwind(move || unsafe {
+            nexus::__macro::init(*api, ADDON_NAME, None)
+        });
+        if init.is_err() {
+            // Without the globals every Nexus call in `on_load` would panic.
+            wrapper_log("nexus-rs init panicked; addon stays inert until the game restarts.");
+            return;
+        }
+    }
+    on_load();
+}
+
+unsafe extern "C-unwind" fn unload_wrapper() {
+    on_unload();
+    // SAFETY: called once per load, from Nexus unload, as the macro does.
+    if std::panic::catch_unwind(|| unsafe { nexus::__macro::deinit() }).is_err() {
+        wrapper_log("nexus-rs deinit panicked; some unload actions may not have run.");
+    }
 }
 
 /// Run addon load with an unwind guard.
@@ -441,6 +524,89 @@ mod tests {
                 at > post_render,
                 "{removal} must run after the render hooks are deregistered"
             );
+        }
+    }
+
+    /// The hand-written export must describe the addon exactly as
+    /// `nexus::export!` did, or Nexus sees a different addon (signature) or
+    /// a wrong version to update against.
+    #[test]
+    fn hand_written_export_matches_the_macro_contract() {
+        use std::ffi::CStr;
+        let def = &super::ADDON_DEF;
+        let text = |p: *const std::ffi::c_char| unsafe { CStr::from_ptr(p) }.to_str().unwrap();
+        assert_eq!(def.signature, -0x47573242);
+        assert_eq!(def.api_version, nexus::AddonApi::VERSION);
+        assert_eq!(text(def.name), super::ADDON_NAME);
+        assert_eq!(text(def.author), env!("CARGO_PKG_AUTHORS"));
+        assert_eq!(text(def.description), env!("CARGO_PKG_DESCRIPTION"));
+        assert_eq!(
+            text(def.update_link),
+            "https://github.com/special-place-ai-heaven/GW2_Build_Optimizer"
+        );
+        assert_eq!(def.provider, nexus::addon::UpdateProvider::GitHub);
+        assert_eq!(def.flags, nexus::AddonFlags::None);
+        assert!(def.unload.is_some());
+        let v = &def.version;
+        assert_eq!(
+            format!("{}.{}.{}", v.major, v.minor, v.build),
+            crate::VERSION
+        );
+        assert_eq!(v.revision, -1);
+        assert!(std::ptr::eq(unsafe { super::GetAddonDef() }, def));
+    }
+
+    /// Enable while the previous load's image is still pinned reloads the
+    /// same image: nexus-rs `init` must run for the first load only, and
+    /// our `on_load` for every load. `init` needs a live Nexus API table, so
+    /// the wrapper is pinned by source; the flag is exercised directly.
+    #[test]
+    fn reload_into_a_pinned_image_skips_nexus_init() {
+        let _ = super::first_load_of_image();
+        assert!(!super::first_load_of_image(), "second load of an image");
+        assert!(!super::first_load_of_image(), "third load of an image");
+
+        let src = include_str!("lib.rs");
+        assert!(
+            !src.contains(&["nexus::export", "! {"].concat()),
+            "the macro's load wrapper panics on a reload into a pinned image"
+        );
+        let start = src
+            .find("\nunsafe extern \"C-unwind\" fn load_wrapper")
+            .unwrap();
+        let body = &src[start..start + src[start..].find("\n}\n").unwrap()];
+        let gate = body
+            .find("if first_load_of_image()")
+            .expect("init is gated");
+        let init = body.find("__macro::init").expect("first load inits");
+        let load = body.find("on_load()").expect("every load runs on_load");
+        assert!(gate < init && init < load, "gate, then init, then on_load");
+        assert_eq!(body.matches("on_load()").count(), 1);
+        let catch = body.find("catch_unwind").expect("init is caught");
+        assert!(
+            gate < catch && catch < init,
+            "init runs inside catch_unwind"
+        );
+        let start = src
+            .find("\nunsafe extern \"C-unwind\" fn unload_wrapper")
+            .unwrap();
+        let unload = &src[start..start + src[start..].find("\n}\n").unwrap()];
+        assert!(
+            unload.contains("catch_unwind(|| unsafe { nexus::__macro::deinit() })"),
+            "deinit runs inside catch_unwind"
+        );
+
+        // The resumed image still holds the previous unload's latches.
+        let start = src.find("\nfn on_load()").unwrap();
+        let on_load = &src[start..start + src[start..].find("\n}\n").unwrap()];
+        let init = on_load.find("state::init").unwrap();
+        for reset in [
+            "radio::player::arm()",
+            "HOST_ATTACHED.store(false",
+            "BOOTSTRAP_FAILED.store(false",
+        ] {
+            let at = on_load.find(reset).unwrap_or(usize::MAX);
+            assert!(at < init, "on_load must run {reset} before state::init");
         }
     }
 

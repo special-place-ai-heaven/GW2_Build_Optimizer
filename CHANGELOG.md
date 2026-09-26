@@ -4,6 +4,8 @@ All notable changes to GW2 Build Optimizer are documented here.
 
 ## 1.14.52
 
+- Re-enabling the addon in Nexus shortly after disabling it, while a background worker or a radio stream was still winding down, crashed the game with "addon api initialized multiple times"; the addon now reloads cleanly into a still-mapped image, and radio and the quick-access icon come back.
+- Long data-quality reasons no longer run off the right edge: the result header, Ranch and Generations wrap them, and suggestion cards clip them with the full text on hover.
 - The reserved/private-address screen used for redirect hops on radio and news downloads now also blocks CGNAT, multicast, broadcast, documentation, benchmarking, NAT64, and 6to4 ranges, closing gaps the earlier loopback/private/link-local check missed.
 - A cache file is now checked for staleness by reading only its header instead of the whole file. An empty game-data catalog or an empty language pack for the current game build is now picked up by a normal Refresh instead of needing Clear Cache, and a file truncated before its first data row is correctly read as stale.
 - Any heuristic data record or balance override equipped by a build now names itself as a Provisional reason instead of listing its fields. Sharpened Edges is corrected to the wiki and reads Factual; Phalanx Strength's might durations are corrected but stay Provisional; Path of Corruption and Sigil of Concentration read Provisional by name, with the wiki mismatch recorded in their data records (Relic of Isgarren's mismatch is recorded too; relics are not simulated, so it does not stamp); the Reaper's Onslaught record carries the measured gap against the committed WvW logs; a dead Whirling Wrath timing row is removed.

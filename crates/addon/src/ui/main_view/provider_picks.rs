@@ -415,6 +415,11 @@ pub(in crate::ui::main_view) fn render_provider_picks(
             // Shown, not hidden - and told exactly what failed. An empty
             // panel teaches the player nothing, and neither does "we cannot
             // confirm this"; the gate's own note usually can.
+            //
+            // The card's fixed-height rows can't wrap, so a long reason
+            // (1.14.52 named more of them) is clipped to width with an
+            // ellipsis instead of running off the card unread.
+            let caveat_w = (width - 12.0).max(20.0);
             for (n, (text, muted)) in caveat.iter().enumerate() {
                 let col = if *muted {
                     p.muted
@@ -427,9 +432,16 @@ pub(in crate::ui::main_view) fn render_provider_picks(
                         origin[1] + 6.0 + ui.text_line_height() * (2.0 + n as f32),
                     ],
                     crate::ui::color_u32(col),
-                    text,
+                    truncate_to_width(ui, text, caveat_w),
                 );
             }
+        }
+        if hovered && caveat.iter().any(|(text, _)| clips(ui, text, width - 12.0)) {
+            theme::wide_tooltip(ui, |ui| {
+                for (text, _) in &caveat {
+                    ui.text_wrapped(text);
+                }
+            });
         }
         if clicked {
             chosen = Some(i);
@@ -466,6 +478,30 @@ pub(in crate::ui::main_view) fn render_provider_picks(
         );
     }
     chosen
+}
+
+/// Whether `text` is wider than `max_w` and would need clipping.
+fn clips(ui: &Ui, text: &str, max_w: f32) -> bool {
+    ui.calc_text_size(text)[0] > max_w
+}
+
+/// Clip `text` to `max_w`, chars()-safe, with a trailing ellipsis.
+fn truncate_to_width(ui: &Ui, text: &str, max_w: f32) -> String {
+    if !clips(ui, text, max_w) {
+        return text.to_string();
+    }
+    let mut s = String::new();
+    for c in text.chars() {
+        let mut next = s.clone();
+        next.push(c);
+        next.push('\u{2026}');
+        if clips(ui, &next, max_w) {
+            break;
+        }
+        s.push(c);
+    }
+    s.push('\u{2026}');
+    s
 }
 
 /// A source id as a page would write it: `guildjen` -> `Guildjen`.

@@ -1319,9 +1319,12 @@ fn render_data_quality_badge(ui: &Ui, suggestion: &BuildSuggestion) {
     }
     if let Some(note) = suggestion.coverage_note.as_deref() {
         ui.same_line();
-        ui.text_colored(
+        // `text_colored` never wraps; this line grew with the 1.14.52
+        // honesty reasons and ran off the pane edge unread.
+        crate::ui::theme::wrapped(
+            ui,
             crate::ui::theme::pal().muted,
-            tf(
+            &tf(
                 "quality.coverage_line",
                 &[("detail", &localize_coverage_detail(note))],
             ),
