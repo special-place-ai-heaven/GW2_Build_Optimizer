@@ -61,20 +61,18 @@ pub enum PackStatus {
     Stale,
 }
 
-/// Cache state for an official `/v2?lang=` name pack.
+/// Cache state for an official `/v2?lang=` name pack. A pack with no names
+/// (downloaded before the English catalogs existed) is `Stale`, like one from
+/// another build: `DataCache::is_stale` decides both.
 pub fn pack_status(cache: &DataCache, lang: &str, current_build: Option<u32>) -> PackStatus {
     if !API_LANGS.contains(&lang) {
         return PackStatus::None;
     }
-    match cache.cached_build(&cache_key(lang)) {
+    let key = cache_key(lang);
+    match cache.cached_build(&key) {
         None => PackStatus::Missing,
-        Some(b) => {
-            if current_build.is_some_and(|c| c != b) {
-                PackStatus::Stale
-            } else {
-                PackStatus::Ready
-            }
-        }
+        Some(b) if cache.is_stale(&key, current_build.unwrap_or(b)) => PackStatus::Stale,
+        Some(_) => PackStatus::Ready,
     }
 }
 
@@ -326,13 +324,45 @@ mod tests {
                 &cache_key("fr"),
                 &LocalizedNames {
                     lang: "fr".into(),
+                    skills: HashMap::from([(7, "Sceau de malice".into())]),
                     ..Default::default()
                 },
                 100,
             )
             .unwrap();
         assert_eq!(pack_status(&cache, "fr", Some(100)), PackStatus::Ready);
+        assert_eq!(pack_status(&cache, "fr", None), PackStatus::Ready);
         assert_eq!(pack_status(&cache, "fr", Some(101)), PackStatus::Stale);
+        let _ = cache.clear_all();
+    }
+
+    #[test]
+    fn pack_status_fr_empty_data_is_stale() {
+        let cache = temp_cache();
+        for data in [serde_json::json!({}), serde_json::json!([])] {
+            cache.save(&cache_key("fr"), &data, 100).unwrap();
+            assert_eq!(
+                pack_status(&cache, "fr", Some(100)),
+                PackStatus::Stale,
+                "{data}"
+            );
+        }
+        let _ = cache.clear_all();
+    }
+
+    /// A pack saved with no names on the current build read Ready forever,
+    /// so the overlay stayed English. It is Stale now, and `load` skips it.
+    #[test]
+    fn pack_status_fr_without_names_is_stale() {
+        let cache = temp_cache();
+        let empty = LocalizedNames {
+            lang: "fr".into(),
+            ..Default::default()
+        };
+        cache.save(&cache_key("fr"), &empty, 100).unwrap();
+        assert_eq!(pack_status(&cache, "fr", Some(100)), PackStatus::Stale);
+        assert_eq!(pack_status(&cache, "fr", None), PackStatus::Stale);
+        assert!(load(&cache, "fr", Some(100)).unwrap().is_none());
         let _ = cache.clear_all();
     }
 }

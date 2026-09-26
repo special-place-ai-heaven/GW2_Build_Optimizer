@@ -92,12 +92,11 @@
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnHit",
       "uptime_model": {
-        "kind": "Estimated",
-        "uptime": 0.6
+        "kind": "Unknown"
       },
       "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Phalanx_Strength",
-      "effect_duration": 6.0,
+      "source": "https://wiki.guildwars2.com/wiki/Phalanx_Strength (read 2026-09-26: Might 5 s in PvE and PvP, 4 other targets in a 600 radius, no ICD on the page. Structural mismatch: the page fires when you grant yourself Might and copies it to allies; the record grants the player Might on hit, throttled by a 1 s ICD that is not a page fact, so it stays Heuristic)",
+      "effect_duration": 5.0,
       "internal_cooldown": 1.0,
       "max_stacks": 25,
       "status_operation": {
@@ -106,7 +105,7 @@
         "status_kind": "Might",
         "amount_mode": "Stacks",
         "amount_value": 1.0,
-        "base_duration_ms": 6000,
+        "base_duration_ms": 5000,
         "target_scope": "NearbyAllies",
         "target_count": 5,
         "internal_cooldown_ms": 1000,
@@ -123,13 +122,12 @@
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnCrit",
       "uptime_model": {
-        "kind": "Estimated",
-        "uptime": 0.5
+        "kind": "Unknown"
       },
-      "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Sharpened_Edges",
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sharpened_Edges (read 2026-09-26: 33% chance on critical hit, 1 Bleeding stack for 3 s, no ICD)",
       "effect_duration": 3.0,
-      "internal_cooldown": 2.0,
+      "proc_chance": 0.33,
       "max_stacks": 25,
       "status_operation": {
         "operation_type": "AppliesCondition",
@@ -138,8 +136,7 @@
         "amount_mode": "Stacks",
         "amount_value": 1.0,
         "base_duration_ms": 3000,
-        "target_scope": "SingleTarget",
-        "internal_cooldown_ms": 2000
+        "target_scope": "SingleTarget"
       }
     },
     {
@@ -250,11 +247,10 @@
       "trigger_rule": "OnHealthThreshold",
       "health_threshold": { "above": true, "percent": null },
       "uptime_model": {
-        "kind": "Estimated",
-        "uptime": 0.85
+        "kind": "Unknown"
       },
       "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Relic_of_Isgarren (read 2026-09-08: health threshold percent not transcribed, left unresolved)"
+      "source": "https://wiki.guildwars2.com/wiki/Relic_of_Isgarren (read 2026-09-08: health threshold percent not transcribed, left unresolved; re-read 2026-09-26: structural mismatch: the page places the Eye of Isgarren on a foe after you evade (6 s, stacking in duration to 60 s) for +10% strike damage and +10% condition duration against that foe; the record models a health threshold as CritDamagePct and omits the condition-duration part)"
     },
     {
       "effect_id": "relic:100579:0",
@@ -305,11 +301,10 @@
       "stacking_rule": "Additive",
       "trigger_rule": "OnSkillUse",
       "uptime_model": {
-        "kind": "Estimated",
-        "uptime": 0.33
+        "kind": "Unknown"
       },
       "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Concentration",
+      "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Concentration (read 2026-09-26: structural mismatch: the page gives a passive +10% Boon Duration with no trigger or ICD; the record models an OnSkillUse proc with a 9 s ICD)",
       "internal_cooldown": 9.0
     },
     {
@@ -399,11 +394,10 @@
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnHit",
       "uptime_model": {
-        "kind": "Estimated",
-        "uptime": 0.3
+        "kind": "Unknown"
       },
       "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Path_of_Corruption",
+      "source": "https://wiki.guildwars2.com/wiki/Path_of_Corruption (read 2026-09-26: structural mismatch: the page converts 2 boons (1 with Scourge) when Shroud skill 2 is used, not on any hit, and states no ICD; the record's OnHit with a 10 s ICD is a stand-in)",
       "internal_cooldown": 10.0,
       "status_operation": {
         "operation_type": "CorruptsBoon",

@@ -1133,29 +1133,15 @@ mod tests {
     fn same_build_default_hits_only_build_endpoint() {
         let dir = temp_cache_dir("same_build");
         let cache = DataCache::new(&dir);
-        // Seed every KEPT catalog at build 42 with tiny empty/minimal payloads.
-        cache
-            .save("itemstats", &Vec::<models::ItemStat>::new(), 42)
-            .unwrap();
-        cache
-            .save("specializations", &Vec::<models::Specialization>::new(), 42)
-            .unwrap();
-        cache
-            .save("traits", &Vec::<models::Trait>::new(), 42)
-            .unwrap();
-        cache
-            .save("skills", &Vec::<models::Skill>::new(), 42)
-            .unwrap();
-        cache
-            .save("professions", &Vec::<models::Profession>::new(), 42)
-            .unwrap();
-        cache
-            .save("legends", &Vec::<models::Legend>::new(), 42)
-            .unwrap();
-        cache.save("pets", &Vec::<models::Pet>::new(), 42).unwrap();
-        cache
-            .save("pvp_amulets", &Vec::<models::PvpAmulet>::new(), 42)
-            .unwrap();
+        // Seed every KEPT catalog at build 42 with a one-row placeholder.
+        cache.save("itemstats", &ROW, 42).unwrap();
+        cache.save("specializations", &ROW, 42).unwrap();
+        cache.save("traits", &ROW, 42).unwrap();
+        cache.save("skills", &ROW, 42).unwrap();
+        cache.save("professions", &ROW, 42).unwrap();
+        cache.save("legends", &ROW, 42).unwrap();
+        cache.save("pets", &ROW, 42).unwrap();
+        cache.save("pvp_amulets", &ROW, 42).unwrap();
         cache.save("items", &vec![food_row(5)], 42).unwrap();
         cache.save(ITEMS_IDS_KEY, &Vec::<u32>::new(), 42).unwrap();
 
@@ -1211,10 +1197,8 @@ mod tests {
             "pets",
             "pvp_amulets",
         ] {
-            // empty vec as json value — type erased via serde_json
-            cache
-                .save(key, &Vec::<serde_json::Value>::new(), 101)
-                .unwrap();
+            // one-row placeholder: an empty catalog would read stale
+            cache.save(key, &ROW, 101).unwrap();
         }
 
         let mut server = mockito::Server::new();
@@ -1433,35 +1417,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A current catalog needs a row: an empty one reads stale.
+    const ROW: [u32; 1] = [0];
+
     fn seed_kept_except_items(cache: &DataCache, build: u32) {
-        cache
-            .save("itemstats", &Vec::<models::ItemStat>::new(), build)
-            .unwrap();
-        cache
-            .save(
-                "specializations",
-                &Vec::<models::Specialization>::new(),
-                build,
-            )
-            .unwrap();
-        cache
-            .save("traits", &Vec::<models::Trait>::new(), build)
-            .unwrap();
-        cache
-            .save("skills", &Vec::<models::Skill>::new(), build)
-            .unwrap();
-        cache
-            .save("professions", &Vec::<models::Profession>::new(), build)
-            .unwrap();
-        cache
-            .save("legends", &Vec::<models::Legend>::new(), build)
-            .unwrap();
-        cache
-            .save("pets", &Vec::<models::Pet>::new(), build)
-            .unwrap();
-        cache
-            .save("pvp_amulets", &Vec::<models::PvpAmulet>::new(), build)
-            .unwrap();
+        cache.save("itemstats", &ROW, build).unwrap();
+        cache.save("specializations", &ROW, build).unwrap();
+        cache.save("traits", &ROW, build).unwrap();
+        cache.save("skills", &ROW, build).unwrap();
+        cache.save("professions", &ROW, build).unwrap();
+        cache.save("legends", &ROW, build).unwrap();
+        cache.save("pets", &ROW, build).unwrap();
+        cache.save("pvp_amulets", &ROW, build).unwrap();
     }
 
     fn item_json(id: u32, keep: bool) -> String {
@@ -1552,9 +1519,7 @@ mod tests {
             RefreshMode::Default
         ));
 
-        cache
-            .save("items", &Vec::<models::Item>::new(), 42)
-            .unwrap();
+        cache.save("items", &ROW, 42).unwrap();
         assert_eq!(
             items_fill_kind(&cache, 42, RefreshMode::Default),
             Some(ItemsFillKind::SameBuildSkip)

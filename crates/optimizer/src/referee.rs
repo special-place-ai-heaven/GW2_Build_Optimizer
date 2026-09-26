@@ -753,9 +753,13 @@ pub fn evaluate_viability_gates_for(
                             );
                             // Never a silent pass: say what the ledger does
                             // not model, whether the gate passed or failed.
+                            // The model is complete here (an incomplete one
+                            // abstains above), so its gaps are rotation gaps:
+                            // chain steps, records the flow cannot play. Same
+                            // wording as `engine::rotation_quality_reasons`.
                             if !fight.resource_model_gaps.is_empty() {
                                 note.push_str(&format!(
-                                    "; resource model incomplete: {} not modelled",
+                                    "; rotation gaps: {} not modelled",
                                     fight.resource_model_gaps.join(", ")
                                 ));
                             }
@@ -1594,6 +1598,19 @@ fn evaluate_inner(
         }));
     }
 
+    // Gear the slot-budget model could not price, and bonus strings with no
+    // known category, graded as `engine::synergy_result_from_validated`
+    // grades them: a zeroed sheet is not a Verified one.
+    let gear = engine::gear_quality_reasons(validated, db, profession_name, ctx);
+    if !gear.is_empty() {
+        quality = quality.merge(&DataQuality::Provisional);
+        quality_reasons.extend(gear);
+    }
+    let (unparsed, unparsed_reasons) =
+        engine::quality_from_modifiers(&modifiers, &[], false, ctx.game_mode.label());
+    quality = quality.merge(&unparsed);
+    quality_reasons.extend(unparsed_reasons);
+
     let honesty =
         engine::rotation_quality_reasons(rotation.as_ref(), profession_name, &ctx.game_mode);
     if !honesty.is_empty() {
@@ -1961,6 +1978,37 @@ pub(crate) mod tests {
         let never = gate(0.0, vec!["Deadly Blades".into()]);
         assert!(!never.passed, "cost above the cap can never be paid");
         assert!(never.note.contains("Deadly Blades"), "{}", never.note);
+    }
+
+    /// W5 (verify-CT): the gate note is user-visible (comparison panel,
+    /// Choya gate notes). The judged branch runs only on a complete model,
+    /// so it names the gaps as rotation gaps, never "incomplete".
+    #[test]
+    fn a_complete_resource_model_note_names_rotation_gaps() {
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Solo;
+        let combat = make_viable_combat();
+        let mut rot = make_viable_rotation();
+        {
+            let fight = rot.wvw.as_mut().expect("wvw fixture");
+            fight.resource_simulated = true;
+            fight.resource_model_complete = true;
+            fight.resource_model_gaps = vec!["Swing auto chain (step 99999 missing)".into()];
+        }
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let gate = report
+            .gates
+            .iter()
+            .find(|g| g.gate == ViabilityGate::ResourceLegality)
+            .expect("resource gate");
+        assert!(!gate.skipped, "{}", gate.note);
+        assert!(
+            gate.note
+                .contains("rotation gaps: Swing auto chain (step 99999 missing) not modelled"),
+            "{}",
+            gate.note
+        );
+        assert!(!gate.note.contains("incomplete"), "{}", gate.note);
     }
 
     /// A scenario that never named a profile is still judged by the data
@@ -3724,6 +3772,42 @@ pub(crate) mod tests {
             report_a.viability.is_viable, report_b.viability.is_viable,
             "viability gate outcome must be deterministic"
         );
+    }
+
+    /// A legacy save's gear (names, itemstat id 0) cannot be priced. The
+    /// referee must not grade that zeroed sheet Verified: the same plate
+    /// referees Verified without it.
+    #[test]
+    fn referee_grades_unpriced_legacy_gear_provisional() {
+        let db = make_test_db();
+        let mut validated = make_minimal_validated();
+        validated.gear_slots = gw2_core::types::GearSlots::from_legacy(
+            "Berserker's",
+            &gw2_core::types::GearPrefixGroups::default(),
+        );
+        let ctx = BalanceContext::new(GameMode::PvE);
+        let mut scenario = ScenarioSpec::from_balance_context(&ctx);
+        scenario.combat_tier = CombatTier::Party;
+        let weights = OptimizationWeights::default_for_mode(GameMode::PvE.label());
+
+        let gear = crate::engine::gear_quality_reasons(&validated, &db, "Guardian", &ctx);
+        assert!(!gear.is_empty(), "legacy ids are unpriced");
+        let report =
+            evaluate_validated_build(&validated, &db, "Guardian", &weights, &ctx, &scenario);
+        assert_eq!(
+            report.quality,
+            DataQuality::Provisional,
+            "{:?}",
+            report.quality_reasons
+        );
+        let shown: Vec<String> = report
+            .quality_reasons
+            .iter()
+            .map(|r| r.to_string())
+            .collect();
+        for reason in &gear {
+            assert!(shown.contains(&reason.to_string()), "{reason} missing");
+        }
     }
 
     #[test]

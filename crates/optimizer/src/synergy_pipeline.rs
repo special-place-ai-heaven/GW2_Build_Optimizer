@@ -3052,6 +3052,66 @@ mod tier_honesty_tests {
             "PvE Onslaught is page numbers"
         );
     }
+
+    /// W2 (verify-CT): prepare wires the socketed sigils and the equipped
+    /// traits into the record stamps. PvE Superior Sigil of Concentration and
+    /// Path of Corruption are shipped Heuristic records: equipped, the build
+    /// reads Provisional and names each; unequipped, no line.
+    #[test]
+    fn equipped_heuristic_sigil_and_trait_records_read_provisional_by_name() {
+        const CONCENTRATION: u32 = 72339;
+        let sigil_line = "Superior Sigil of Concentration (heuristic record)";
+        let trait_line = "Path of Corruption (heuristic record)";
+        let db = fx::db();
+        let run = |build: ValidatedBuild| {
+            let ctx = BalanceContext::new(GameMode::PvE);
+            let scenario = ScenarioSpec::from_balance_context(&ctx);
+            let result = engine::synergy_result_from_validated(
+                build,
+                &db,
+                "Necromancer",
+                &ctx,
+                Some(&scenario),
+            );
+            let lines: Vec<String> = result
+                .quality_reasons
+                .iter()
+                .filter(|q| q.field == HEURISTIC_FIELD)
+                .map(|q| q.explanation.clone())
+                .collect();
+            (result.data_quality, lines)
+        };
+        let named = |lines: &[String], line: &str| lines.iter().any(|l| l.contains(line));
+
+        let (_, control) = run(fx::build());
+        assert!(
+            !named(&control, sigil_line) && !named(&control, trait_line),
+            "{control:?}"
+        );
+
+        let mut with_sigil = fx::build();
+        with_sigil.sigils[1] = ValidatedItem {
+            id: CONCENTRATION,
+            name: "Superior Sigil of Concentration".into(),
+        };
+        with_sigil.sigil_seats = crate::sigil_slots::SigilSlots::new([
+            Some(fx::SIGIL_OF_FIRE),
+            Some(CONCENTRATION),
+            None,
+            None,
+        ]);
+        let (quality, lines) = run(with_sigil);
+        assert_eq!(quality, DataQuality::Provisional, "{lines:?}");
+        assert!(named(&lines, sigil_line), "{lines:?}");
+
+        let mut with_trait = fx::build();
+        with_trait.specializations[0]
+            .all_trait_ids
+            .push(fx::PATH_OF_CORRUPTION);
+        let (quality, lines) = run(with_trait);
+        assert_eq!(quality, DataQuality::Provisional, "{lines:?}");
+        assert!(named(&lines, trait_line), "{lines:?}");
+    }
     /// FCR-013 end to end (from verify-E's probe): a Heuristic override on
     /// the bar reaches the label through `prepare_validated_rotation`, on
     /// tier 1 and tier 2 in every mode, and WvW Onslaught's ceiling reaches

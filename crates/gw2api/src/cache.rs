@@ -2,11 +2,16 @@
 //! Each cache file stores metadata (build number, timestamp) alongside the data.
 //! Cache is invalidated when the GW2 game build number changes.
 
+use std::fmt;
 use std::io::{BufReader, BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::de::{
+    self, DeserializeOwned, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess,
+    Visitor,
+};
+use serde::{Deserialize, Serialize};
 
 /// Wrapper around cached data with metadata for staleness checks.
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,12 +40,147 @@ fn min_format(key: &str) -> u32 {
         .map_or(0, |(_, floor)| *floor)
 }
 
-/// The envelope minus `data`, for staleness checks.
-#[derive(Deserialize)]
+/// The envelope minus the rows, for staleness checks: `build`, `format`, and
+/// whether `data` is an empty array or object.
+#[derive(Debug, PartialEq)]
 struct Meta {
     build: u32,
-    #[serde(default)]
     format: u32,
+    empty: bool,
+}
+
+impl Meta {
+    /// Reads up to the first row of `data` and stops, so a multi-MB catalog
+    /// costs its header and one row. `None` if the file is missing or the
+    /// envelope does not parse. A tail past that first row is never read.
+    fn read(path: &Path) -> Option<Meta> {
+        let file = std::fs::File::open(path).ok()?;
+        let mut de = serde_json::Deserializer::from_reader(BufReader::new(file));
+        let mut meta = None;
+        // Err for any non-empty file: serde_json rejects the unread rows
+        // after the visitor stops. `meta` holds what was read before that.
+        let _ = (&mut de).deserialize_map(MetaVisitor(&mut meta));
+        meta
+    }
+}
+
+/// Fills its slot at `data`. `save` writes build, format, fetched_at, data
+/// in that order; a `data` ahead of `build` leaves the slot `None` (stale).
+struct MetaVisitor<'a>(&'a mut Option<Meta>);
+
+impl<'de> Visitor<'de> for MetaVisitor<'_> {
+    type Value = ();
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a cache entry")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+        let (mut build, mut format) = (None, 0);
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "build" => build = Some(map.next_value()?),
+                "format" => format = map.next_value()?,
+                "data" => {
+                    let mut empty = None;
+                    // Err after a first row is the early stop, not a fault.
+                    let _ = map.next_value_seed(FirstRow(&mut empty));
+                    *self.0 = build.zip(empty).map(|(build, empty)| Meta {
+                        build,
+                        format,
+                        empty,
+                    });
+                    return Ok(());
+                }
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+        *self.0 = build.map(|build| Meta {
+            build,
+            format,
+            empty: true,
+        });
+        Ok(())
+    }
+}
+
+/// Sets its flag to whether `data` has no first row: `[]`, or an object
+/// whose values are all strings or empty (a name pack of `{}` maps). Stops at
+/// the first row found. A scalar, or an error before the first row is read
+/// (a truncated or corrupt head), leaves it `None`: the file reads stale.
+struct FirstRow<'a>(&'a mut Option<bool>);
+
+impl<'de> DeserializeSeed<'de> for FirstRow<'_> {
+    type Value = ();
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for FirstRow<'_> {
+    type Value = ();
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("cached rows")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+        *self.0 = Some(seq.next_element::<IgnoredAny>()?.is_none());
+        Ok(())
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+        while map.next_key::<IgnoredAny>()?.is_some() {
+            let mut found = false;
+            let read = map.next_value_seed(HasRow(&mut found));
+            // Err after a found row is the early stop, as in `Meta::read`;
+            // Err before one is a broken file and leaves the flag `None`.
+            if found {
+                *self.0 = Some(false);
+                return Ok(());
+            }
+            read?;
+        }
+        *self.0 = Some(true);
+        Ok(())
+    }
+}
+
+/// Sets its flag once this value's first element or entry is read. A string
+/// has none.
+struct HasRow<'a>(&'a mut bool);
+
+impl<'de> DeserializeSeed<'de> for HasRow<'_> {
+    type Value = ();
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for HasRow<'_> {
+    type Value = ();
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a string, array or object")
+    }
+
+    fn visit_str<E: de::Error>(self, _: &str) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+        *self.0 = seq.next_element::<IgnoredAny>()?.is_some();
+        Ok(())
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+        *self.0 = map.next_key::<IgnoredAny>()?.is_some();
+        Ok(())
+    }
 }
 
 /// Local file-based cache for GW2 API data.
@@ -101,28 +241,18 @@ impl DataCache {
     }
 
     /// Check if the cached entry's build number differs from `current_build`,
-    /// or its format is below the key's floor in [`FORMAT_FLOORS`].
+    /// its format is below the key's floor in [`FORMAT_FLOORS`], or its
+    /// `data` is empty (a `[]` on the current build is a failed fetch, not a
+    /// catalog).
     ///
     /// Any mismatch — including rollback (cached > current) — is treated as
     /// stale. Callers are expected to refetch on `true`.
     ///
-    /// Streams via `BufReader` + `serde(deny_unknown_fields = false)` so the
-    /// 50 MB items cache is not pulled fully into a `String` just to extract
-    /// the 4-byte `build` field.
+    /// Reads the header and at most one row of `data` ([`Meta::read`]).
     pub fn is_stale(&self, key: &str, current_build: u32) -> bool {
-        let path = self.path_for(key);
-        if !path.exists() {
-            return true;
-        }
-        let Ok(file) = std::fs::File::open(&path) else {
-            return true;
-        };
-        let reader = BufReader::new(file);
-        // Parse just the metadata, not the full data
-        let Ok(meta) = serde_json::from_reader::<_, Meta>(reader) else {
-            return true;
-        };
-        meta.build != current_build || meta.format < min_format(key)
+        Meta::read(&self.path_for(key)).is_none_or(|meta| {
+            meta.empty || meta.build != current_build || meta.format < min_format(key)
+        })
     }
 
     /// Does a cached file predate its key's format floor? Then it loads, but
@@ -130,25 +260,13 @@ impl DataCache {
     /// file is not outdated: that is a missing catalog.
     pub fn format_outdated(&self) -> bool {
         FORMAT_FLOORS.iter().any(|&(key, floor)| {
-            let Ok(file) = std::fs::File::open(self.path_for(key)) else {
-                return false;
-            };
-            serde_json::from_reader::<_, Meta>(BufReader::new(file))
-                .map_or(true, |meta| meta.format < floor)
+            let path = self.path_for(key);
+            path.exists() && Meta::read(&path).is_none_or(|meta| meta.format < floor)
         })
     }
 
     pub fn cached_build(&self, key: &str) -> Option<u32> {
-        let path = self.path_for(key);
-        let file = std::fs::File::open(&path).ok()?;
-        let reader = BufReader::new(file);
-        #[derive(Deserialize)]
-        struct Meta {
-            build: u32,
-        }
-        serde_json::from_reader::<_, Meta>(reader)
-            .ok()
-            .map(|m| m.build)
+        Meta::read(&self.path_for(key)).map(|meta| meta.build)
     }
 
     /// Update `CacheEntry.build` (and `fetched_at`) without changing `data`.
@@ -379,7 +497,7 @@ mod tests {
     #[test]
     fn test_staleness() {
         let cache = temp_cache();
-        cache.save("stale_test", &"hello", 100).unwrap();
+        cache.save("stale_test", &vec![1u32], 100).unwrap();
 
         assert!(!cache.is_stale("stale_test", 100)); // same build
         assert!(cache.is_stale("stale_test", 101)); // different build
@@ -407,7 +525,7 @@ mod tests {
     #[test]
     fn pre_format_skills_and_traits_are_stale_on_the_same_build() {
         let cache = temp_cache();
-        let old = r#"{"build":100,"fetched_at":"2026-09-19T00:00:00Z","data":[]}"#;
+        let old = r#"{"build":100,"fetched_at":"2026-09-19T00:00:00Z","data":[1]}"#;
         for key in ["skills", "traits", "itemstats"] {
             std::fs::write(cache.path_for(key), old).unwrap();
         }
@@ -416,16 +534,105 @@ mod tests {
         assert!(cache.is_stale("traits", 100));
         assert!(!cache.is_stale("itemstats", 100));
         let loaded: Option<Vec<u32>> = cache.load("skills").unwrap();
-        assert_eq!(loaded, Some(vec![]), "an old file still loads");
+        assert_eq!(loaded, Some(vec![1]), "an old file still loads");
 
         // A refresh whose rows all match restamps rather than rewrites: that
         // must lift the format too, or every refresh refetches forever.
         cache.stamp_build("skills", 100).unwrap();
-        cache.save("traits", &Vec::<u32>::new(), 100).unwrap();
+        cache.save("traits", &vec![1u32], 100).unwrap();
         assert!(!cache.is_stale("skills", 100));
         assert!(!cache.is_stale("traits", 100));
         assert!(!cache.format_outdated());
 
+        let _ = cache.clear_all();
+    }
+
+    /// An empty catalog stamped with the current build used to read fresh
+    /// forever; only Clear Cache repaired it. It is stale now.
+    #[test]
+    fn empty_catalog_on_the_current_build_is_stale() {
+        let cache = temp_cache();
+        cache.save("pets", &Vec::<u32>::new(), 100).unwrap();
+        assert!(cache.is_stale("pets", 100));
+        assert_eq!(cache.cached_build("pets"), Some(100));
+        cache
+            .save("pets", &std::collections::HashMap::<u32, u32>::new(), 100)
+            .unwrap();
+        assert!(cache.is_stale("pets", 100), "an empty object is empty too");
+        cache.save("pets", &vec![7u32], 100).unwrap();
+        assert!(!cache.is_stale("pets", 100));
+        let _ = cache.clear_all();
+    }
+
+    /// The early stop reads the same header a full parse does.
+    #[test]
+    fn meta_read_matches_a_full_parse() {
+        let cache = temp_cache();
+        let files = [
+            r#"{"build":7,"format":1,"fetched_at":"2026-09-19T00:00:00Z","data":[{"id":1},{"id":2}]}"#,
+            r#"{"build":8,"fetched_at":"2026-09-19T00:00:00Z","data":[]}"#,
+            r#"{ "build" : 9 , "format" : 3 , "fetched_at" : "2026-09-19T00:00:00Z" , "data" : { "lang" : "de" } }"#,
+            r#"{"build":10,"format":1,"fetched_at":"2026-09-19T00:00:00Z","data":[[1,2],3]}"#,
+            r#"{"build":11,"format":1,"fetched_at":"2026-09-19T00:00:00Z","data":{"lang":"fr","skills":{},"traits":{}}}"#,
+            r#"{"build":12,"format":1,"fetched_at":"2026-09-19T00:00:00Z","data":{"lang":"fr","skills":{},"traits":{"5":"x","6":"y"}}}"#,
+        ];
+        for text in files {
+            let path = cache.path_for("meta_fixture");
+            std::fs::write(&path, text).unwrap();
+            let full: CacheEntry<serde_json::Value> = serde_json::from_str(text).unwrap();
+            let empty = match &full.data {
+                serde_json::Value::Array(a) => a.is_empty(),
+                serde_json::Value::Object(o) => o.values().all(|v| match v {
+                    serde_json::Value::String(_) => true,
+                    serde_json::Value::Array(a) => a.is_empty(),
+                    serde_json::Value::Object(o) => o.is_empty(),
+                    _ => false,
+                }),
+                _ => false,
+            };
+            let expect = Meta {
+                build: full.build,
+                format: full.format,
+                empty,
+            };
+            assert_eq!(Meta::read(&path), Some(expect), "{text}");
+        }
+        let _ = cache.clear_all();
+    }
+
+    /// Load-bearing for the early stop: nothing after the first row is read,
+    /// so a broken tail does not change the answer.
+    #[test]
+    fn meta_read_stops_after_the_first_row() {
+        let cache = temp_cache();
+        let truncated =
+            r#"{"build":7,"format":1,"fetched_at":"2026-09-19T00:00:00Z","data":[{"id":1},{"id":"#;
+        std::fs::write(cache.path_for("skills"), truncated).unwrap();
+        assert!(!cache.is_stale("skills", 7));
+        assert!(!cache.format_outdated());
+        assert_eq!(cache.cached_build("skills"), Some(7));
+        let _ = cache.clear_all();
+    }
+
+    /// A file cut off at or inside its first row has no readable row: it
+    /// reads stale (and missing), as the old full parse did.
+    #[test]
+    fn meta_read_truncated_before_a_whole_row_is_stale() {
+        let cache = temp_cache();
+        let head = r#"{"build":7,"format":1,"fetched_at":"2026-09-19T00:00:00Z","data":"#;
+        for tail in [
+            "",
+            "[",
+            r#"[{"id":1"#,
+            r#"[{"id":}]"#,
+            r#"{"lang":"fr"#,
+            "null",
+        ] {
+            std::fs::write(cache.path_for("skills"), format!("{head}{tail}")).unwrap();
+            assert!(cache.is_stale("skills", 7), "{tail}");
+            assert!(cache.format_outdated(), "{tail}");
+            assert_eq!(cache.cached_build("skills"), None, "{tail}");
+        }
         let _ = cache.clear_all();
     }
 

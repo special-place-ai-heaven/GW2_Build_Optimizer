@@ -294,7 +294,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.main.settings_key_status = None;
         state.main.settings_key_valid = false;
         state.main.settings_key_warning = None;
-        state.main.available_models.clear();
+        state.main.available_models = Default::default();
         state.main.models_error = None;
         state.main.settings_model_search.clear();
         crate::ui::save_config_detached(state);
@@ -603,7 +603,7 @@ pub(in crate::ui::main_view) fn render_talk_model_row(ui: &Ui, state: &mut Addon
                 && !sel
             {
                 state.config.active_provider = provider.clone();
-                state.main.available_models.clear();
+                state.main.available_models = Default::default();
                 state.main.models_error = None;
                 state.main.settings_model_search.clear();
                 state.main.provider_issue = None;
@@ -732,7 +732,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     if state.main.models_loading {
         ui.text_colored(theme::pal().muted, "...");
     } else if theme::gold_button_sized(ui, format!("{}##models", refresh), [refresh_w, 0.0]) {
-        state.main.available_models.clear();
+        state.main.available_models = Default::default();
         state.main.models_error = None;
         stats::start_fetch_models(state);
     }

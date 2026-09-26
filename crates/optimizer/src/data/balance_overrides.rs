@@ -140,6 +140,46 @@ impl BalanceOverrides {
         })
     }
 
+    /// Every valued `Heuristic` entry for `(patch_id, mode)`, as
+    /// `(source_type, source_id, field)`, whatever the field.
+    pub fn heuristic_entries<'a>(
+        &'a self,
+        patch_id: &str,
+        mode: &str,
+    ) -> impl Iterator<Item = (&'a str, u32, &'a str)> + 'a {
+        self.files
+            .get(&(patch_id.to_string(), mode.to_string()))
+            .into_iter()
+            .flat_map(|file| &file.entities)
+            .flat_map(|entity| {
+                entity
+                    .overrides
+                    .iter()
+                    .filter(|(_, entry)| {
+                        entry.value.is_some() && entry.evidence_level == EvidenceLevel::Heuristic
+                    })
+                    .map(move |(field, _)| {
+                        (
+                            entity.source_type.as_str(),
+                            entity.source_id,
+                            field.as_str(),
+                        )
+                    })
+            })
+    }
+
+    /// Overrides from inline override files (tests inject a Heuristic entry
+    /// the shipped data does not carry).
+    #[cfg(test)]
+    pub(crate) fn from_json(files: &[&str]) -> Self {
+        let files = files
+            .iter()
+            .map(|json| load_override_file(json).expect("inline override file"))
+            .map(|file| ((file.patch_id.clone(), file.mode.clone()), file))
+            .collect();
+        BalanceOverrides { files }
+    }
+
     pub fn file_count(&self) -> usize {
         self.files.len()
     }
@@ -874,6 +914,146 @@ mod tests {
                 evidence_level: EvidenceLevel::Factual
             }),
         );
+    }
+
+    fn probe_skill(id: u32) -> crate::rotation::RotationSkill {
+        let json = format!(r#"{{"id": {id}, "name": "Probe", "facts": []}}"#);
+        crate::rotation::builder::skill_to_rotation(&serde_json::from_str(&json).unwrap())
+    }
+
+    /// T1 (FCR-013 generic stamping): each shipped entity on the bar or
+    /// equipped stamps exactly its valued Heuristic fields, by the db name;
+    /// an all-Factual entity stamps nothing.
+    #[test]
+    fn shipped_heuristic_entries_stamp_by_name_and_factual_ones_do_not() {
+        use crate::balance::BalanceContext;
+        use crate::rotation::builder::heuristic_override_stamps;
+        use gw2_core::types::GameMode;
+        let o = overrides();
+        let (mut stamped, mut silent) = (0, 0);
+        for mode in [GameMode::PvE, GameMode::PvP, GameMode::WvW] {
+            let ctx = BalanceContext::new(mode.clone());
+            let file = &o.files[&(ctx.patch_id.clone(), mode.label().to_string())];
+            for entity in &file.entities {
+                let id = entity.source_id;
+                let (skills, traits) = match entity.source_type.as_str() {
+                    "Skill" => (vec![probe_skill(id)], vec![]),
+                    "Trait" => (vec![], vec![(id, "Probe")]),
+                    other => panic!("{other} entries have no stamp branch"),
+                };
+                let mut expected: Vec<String> = entity
+                    .overrides
+                    .iter()
+                    .filter(|(_, e)| {
+                        e.value.is_some() && e.evidence_level == EvidenceLevel::Heuristic
+                    })
+                    .map(|(field, _)| format!("Probe (heuristic {field})"))
+                    .collect();
+                expected.sort();
+                let stamps = heuristic_override_stamps(o, &skills, &traits, &ctx);
+                assert_eq!(stamps, expected, "{mode:?} {} {id}", entity.name);
+                if expected.is_empty() {
+                    silent += 1;
+                } else {
+                    stamped += 1;
+                }
+            }
+        }
+        assert_eq!(stamped, 3, "Whirling Wrath hit_count, once per mode");
+        assert_eq!(silent, 51);
+    }
+
+    /// T2: the branches the shipped data does not exercise. A Heuristic
+    /// Trait `condition_damage_pct:*` and a Heuristic Skill
+    /// `status_duration_ms:*` both stamp; an Unknown-valued Heuristic entry
+    /// and an unequipped source do not.
+    #[test]
+    fn heuristic_trait_and_status_duration_entries_stamp() {
+        use crate::balance::BalanceContext;
+        use crate::rotation::builder::heuristic_override_stamps;
+        use gw2_core::types::GameMode;
+        let json = r#"{
+            "patch_id": "2026-07-15",
+            "mode": "PvE",
+            "entities": [
+                {
+                    "source_type": "Trait",
+                    "source_id": 100,
+                    "name": "English Trait",
+                    "overrides": {
+                        "condition_damage_pct:bleeding": {
+                            "value": 10.0,
+                            "evidence_level": "Heuristic"
+                        },
+                        "damage_increase_pct": {
+                            "value": null,
+                            "evidence_level": "Heuristic"
+                        }
+                    }
+                },
+                {
+                    "source_type": "Skill",
+                    "source_id": 200,
+                    "name": "English Skill",
+                    "overrides": {
+                        "status_duration_ms:daze": {
+                            "value": 1000.0,
+                            "evidence_level": "Heuristic"
+                        },
+                        "recharge_ms": {
+                            "value": 8000.0,
+                            "evidence_level": "Factual"
+                        }
+                    }
+                }
+            ]
+        }"#;
+        let file = load_override_file(json).unwrap();
+        let mut files = HashMap::new();
+        files.insert((file.patch_id.clone(), file.mode.clone()), file);
+        let o = BalanceOverrides { files };
+        let ctx = BalanceContext::for_patch(GameMode::PvE, "2026-07-15");
+        let stamps = heuristic_override_stamps(&o, &[probe_skill(200)], &[(100, "Db Trait")], &ctx);
+        assert_eq!(
+            stamps,
+            vec![
+                "Db Trait (heuristic condition_damage_pct:bleeding)".to_string(),
+                "Probe (heuristic status_duration_ms:daze)".to_string(),
+            ]
+        );
+        assert!(
+            heuristic_override_stamps(&o, &[probe_skill(201)], &[(101, "Other")], &ctx).is_empty()
+        );
+    }
+
+    /// A `hit_timing.json` row named like an override entity with a
+    /// `hit_count` agrees on the count (the dead 14-hit Whirling Wrath row
+    /// disagreed with the sourced 2 and was deleted).
+    #[test]
+    fn hit_timing_rows_agree_with_override_hit_counts() {
+        let timing: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../data/formulas/hit_timing.json"))
+                .unwrap();
+        let mut checked = 0;
+        for file in overrides().files.values() {
+            for entity in &file.entities {
+                let (Some(row), Some(Some(count))) = (
+                    timing["skills"].get(&entity.name),
+                    entity.overrides.get("hit_count").map(|e| e.value),
+                ) else {
+                    continue;
+                };
+                assert_eq!(
+                    row["hits"].as_f64(),
+                    Some(count),
+                    "{} {}",
+                    file.mode,
+                    entity.name
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 3, "Sword of Justice, once per mode");
     }
 
     /// Verify known_mode_splits returns a non-empty list with all Phase A entries handled.

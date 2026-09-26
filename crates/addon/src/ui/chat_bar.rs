@@ -16,7 +16,8 @@ use gw2_core::i18n::{t, tf};
 #[derive(Clone, Default)]
 pub struct ChatBarState {
     pub input: String,
-    pub history: Vec<ChatMessage>,
+    /// `Arc` so the paint clone shares it; edits go through `Arc::make_mut`.
+    pub history: Arc<Vec<ChatMessage>>,
     /// Lowercased names the game data knows, for the accent pass in bubbles.
     /// Filled once the game database is loaded (`chat_markup::name_index`).
     pub names: Option<Arc<HashSet<String>>>,
@@ -130,12 +131,13 @@ pub fn queue_user_message(state: &mut ChatBarState, msg: &str) -> Option<String>
     if msg.is_empty() {
         return None;
     }
-    state.history.push(ChatMessage {
+    let history = Arc::make_mut(&mut state.history);
+    history.push(ChatMessage {
         from_user: true,
         text: msg.to_string(),
         ..Default::default()
     });
-    trim_history(&mut state.history);
+    trim_history(history);
     state.input.clear();
     state.scroll_to_end = true;
     state.dirty = true;
@@ -876,14 +878,15 @@ pub fn add_plated_response(
     // Whole reply, whatever its length (specs/006 FR-001): the bubble wraps
     // and the transcript scrolls. `CHAT_HISTORY_CAP` bounds the count only.
     let text = fold_punctuation(&text);
-    state.history.push(ChatMessage {
+    let history = Arc::make_mut(&mut state.history);
+    history.push(ChatMessage {
         from_user: false,
         text,
         chips,
         open_result,
         ..Default::default()
     });
-    trim_history(&mut state.history);
+    trim_history(history);
     state.scroll_to_end = true;
     state.dirty = true;
 }
@@ -895,15 +898,15 @@ pub fn add_plated_response(
 /// player with nothing.
 pub fn add_failed_build_response(state: &mut ChatBarState, text: String) {
     add_ai_response(state, text);
-    if let Some(last) = state.history.last_mut() {
+    if let Some(last) = Arc::make_mut(&mut state.history).last_mut() {
         last.build_failed = true;
     }
 }
 
 /// Attach inbound chips to the latest player message.
 pub fn attach_order_chips(state: &mut ChatBarState, display: String, chips: Vec<ChatChip>) {
-    if let Some(last) = state.history.last_mut() {
-        if last.from_user {
+    if state.history.last().is_some_and(|m| m.from_user) {
+        if let Some(last) = Arc::make_mut(&mut state.history).last_mut() {
             last.text = display;
             last.chips = chips;
             state.dirty = true;
@@ -1049,7 +1052,7 @@ mod tests {
     #[test]
     fn attach_order_chips_updates_last_customer_line() {
         let mut state = ChatBarState::default();
-        state.history.push(ChatMessage {
+        Arc::make_mut(&mut state.history).push(ChatMessage {
             from_user: true,
             text: "[&AgEEYQAA]".into(),
             chips: Vec::new(),

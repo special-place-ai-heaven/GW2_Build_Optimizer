@@ -92,12 +92,11 @@
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnHit",
       "uptime_model": {
-        "kind": "Estimated",
-        "uptime": 0.5
+        "kind": "Unknown"
       },
       "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Phalanx_Strength",
-      "effect_duration": 6.0,
+      "source": "https://wiki.guildwars2.com/wiki/Phalanx_Strength (read 2026-09-26: Might 3 s in WvW (2025-11-18), 4 other targets in a 600 radius, no ICD on the page. Structural mismatch: the page fires when you grant yourself Might and copies it to allies; the record grants the player Might on hit, throttled by a 1 s ICD that is not a page fact, so it stays Heuristic)",
+      "effect_duration": 3.0,
       "internal_cooldown": 1.0,
       "max_stacks": 25,
       "status_operation": {
@@ -106,7 +105,7 @@
         "status_kind": "Might",
         "amount_mode": "Stacks",
         "amount_value": 1.0,
-        "base_duration_ms": 6000,
+        "base_duration_ms": 3000,
         "target_scope": "NearbyAllies",
         "target_count": 5,
         "internal_cooldown_ms": 1000,
@@ -123,13 +122,12 @@
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnCrit",
       "uptime_model": {
-        "kind": "Estimated",
-        "uptime": 0.45
+        "kind": "Unknown"
       },
-      "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Sharpened_Edges",
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Sharpened_Edges (read 2026-09-26: 33% chance on critical hit, 1 Bleeding stack for 3 s, no ICD)",
       "effect_duration": 3.0,
-      "internal_cooldown": 2.0,
+      "proc_chance": 0.33,
       "max_stacks": 25,
       "status_operation": {
         "operation_type": "AppliesCondition",
@@ -138,8 +136,7 @@
         "amount_mode": "Stacks",
         "amount_value": 1.0,
         "base_duration_ms": 3000,
-        "target_scope": "SingleTarget",
-        "internal_cooldown_ms": 2000
+        "target_scope": "SingleTarget"
       }
     },
     {
@@ -193,11 +190,10 @@
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnHit",
       "uptime_model": {
-        "kind": "Estimated",
-        "uptime": 0.3
+        "kind": "Unknown"
       },
       "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Path_of_Corruption",
+      "source": "https://wiki.guildwars2.com/wiki/Path_of_Corruption (read 2026-09-26: structural mismatch: the page converts 2 boons (1 with Scourge) when Shroud skill 2 is used, not on any hit, and states no ICD; the record's OnHit with a 10 s ICD is a stand-in)",
       "internal_cooldown": 10.0,
       "status_operation": {
         "operation_type": "CorruptsBoon",
@@ -2019,7 +2015,7 @@
         "kind": "Unknown"
       },
       "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Reaper%27s_Onslaught (read 2026-09-25: quickness 3 s every 3 s in shroud, no mode split; internal_cooldown and base_duration stay those page numbers. WvW flow ceiling, not a page fact: SelfBoonAbsent so a pulse does not duration-stack onto Quickness already running, and an Interval gate. 15 s was calibrated to pre-E18 under-shroud; E22b recalibrates that ceiling to 20 s now that shroud matches E18 policy. Without the gate the 3 s pulse banks skill Quickness to the 30 s cap)",
+      "source": "https://wiki.guildwars2.com/wiki/Reaper%27s_Onslaught (read 2026-09-25: quickness 3 s every 3 s in shroud, no mode split; internal_cooldown and base_duration stay those page numbers. WvW flow ceiling, not a page fact: SelfBoonAbsent so a pulse does not duration-stack onto Quickness already running, and an Interval gate. 15 s was calibrated to pre-E18 under-shroud; E22b recalibrates that ceiling to 20 s now that shroud matches E18 policy. Without the gate the 3 s pulse banks skill Quickness to the 30 s cap; aBtd Akätosh log self 0.142 vs sim 0.542 at 20 s; 0.397 with the record removed; the gap is shroud dwell and skill Quickness, not this interval; Piero Rosso row is a wrong-archetype corpus kit)",
       "status_operation": {
         "operation_type": "AppliesBoon",
         "target_side": "self",

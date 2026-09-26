@@ -821,8 +821,8 @@ pub(in crate::ui::main_view) fn select_character(state: &mut AddonState, idx: us
     state.main.resolve_rev = state.main.resolve_rev.wrapping_add(1);
     state.main.current_build = None;
     state.main.current_stats = None;
-    state.main.build_tabs.clear();
-    state.main.equipment_tabs.clear();
+    state.main.build_tabs = Default::default();
+    state.main.equipment_tabs = Default::default();
     state.main.selected_build_tab = None;
     state.main.selected_equipment_tab = None;
     state.main.build_chat_code = None;

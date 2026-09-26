@@ -360,7 +360,7 @@ fn cycle_list(state: &AddonState) -> Vec<RbStation> {
             .map(player::station_from_saved)
             .collect()
     } else {
-        state.radio.results.clone()
+        state.radio.results.to_vec()
     }
 }
 

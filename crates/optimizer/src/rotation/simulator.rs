@@ -219,6 +219,10 @@ pub struct SimParams {
     /// `in_shroud` prerequisite is [`TriggeredProc::in_form`], which only
     /// a form satisfies.
     pub triggered: Vec<TriggeredProc>,
+    /// Standing modifiers live while every `(boon, must carry)` gate holds
+    /// on the player (`Conditional` records gated only by self boons, built
+    /// by `engine::trait_procs_for_build`; WvW Excessive Energy under Vigor).
+    pub while_boons: Vec<BoonGatedMod>,
     /// Additive-bucket sums inside `strike_mult` / `condition_mult`
     /// (fractions; `data/formulas/modifier_buckets.json`), so a timed
     /// modifier from an additive source joins that bucket.
@@ -247,6 +251,8 @@ pub struct FoldedShares {
     pub condition_add: f64,
     /// Ferocity removed (15 per critical-damage percentage point).
     pub ferocity: f64,
+    /// Critical chance percentage points removed.
+    pub crit_chance: f64,
 }
 
 impl Default for FoldedShares {
@@ -257,6 +263,7 @@ impl Default for FoldedShares {
             condition_mult: 1.0,
             condition_add: 0.0,
             ferocity: 0.0,
+            crit_chance: 0.0,
         }
     }
 }
@@ -268,6 +275,8 @@ pub enum ModAxis {
     Condition,
     /// Critical damage percentage points.
     CritDamage,
+    /// Critical chance percentage points.
+    CritChance,
 }
 
 /// One percent modifier from a record: `percent` points on `axis`,
@@ -277,6 +286,16 @@ pub struct DamageMod {
     pub axis: ModAxis,
     pub percent: f64,
     pub additive: bool,
+}
+
+/// A standing modifier live while every `(boon, must carry)` gate holds
+/// ([`SimParams::while_boons`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoonGatedMod {
+    /// The record's source name, for the "no simulated source" stamp.
+    pub source: String,
+    pub gates: Vec<(String, bool)>,
+    pub modifier: DamageMod,
 }
 
 /// A fired [`FormProc::Modifier`]: live while any stack is unexpired.
@@ -452,6 +471,7 @@ impl SimParams {
             weaver: false,
             form: None,
             triggered: Vec::new(),
+            while_boons: Vec::new(),
             strike_add: 0.0,
             condition_add: 0.0,
             condition_type_mults: HashMap::new(),
@@ -683,6 +703,7 @@ impl SimState {
             / folded.condition_mult;
         params.condition_add -= folded.condition_add;
         params.ferocity -= folded.ferocity;
+        params.crit_chance_bonus -= folded.crit_chance;
         let skill_states = skills
             .iter()
             .map(|_| SkillState {
@@ -1280,7 +1301,8 @@ impl SimState {
     }
 
     /// Live modifiers on `axis` with their stack counts, plus the form's
-    /// `while_in` ones while it stands.
+    /// `while_in` ones while it stands and the `while_boons` ones while
+    /// their boons hold.
     fn live_mods_on(&self, axis: ModAxis) -> impl Iterator<Item = (&DamageMod, f64)> {
         let now = self.current_time_ms;
         let timed = self.live_mods.iter().map(move |m| {
@@ -1294,8 +1316,21 @@ impl SimState {
             .map(|form| form.while_in.iter().map(|m| (m, 1.0)))
             .into_iter()
             .flatten();
+        let boon_gated = self
+            .params
+            .while_boons
+            .iter()
+            .filter(move |gated| {
+                gated.gates.iter().all(|(boon, want)| {
+                    self.buffs.iter().any(|b| {
+                        b.remaining_ms > 0 && self.buff_slots[b.slot].eq_ignore_ascii_case(boon)
+                    }) == *want
+                })
+            })
+            .map(|gated| (&gated.modifier, 1.0));
         timed
             .chain(in_form)
+            .chain(boon_gated)
             .filter(move |(m, stacks)| m.axis == axis && *stacks > 0.0)
     }
 
@@ -1306,7 +1341,7 @@ impl SimState {
         let bucket = match axis {
             ModAxis::Strike => self.params.strike_add,
             ModAxis::Condition => self.params.condition_add,
-            ModAxis::CritDamage => return 1.0,
+            ModAxis::CritDamage | ModAxis::CritChance => return 1.0,
         };
         let (mut product, mut added) = (1.0, 0.0);
         for (m, stacks) in self.live_mods_on(axis) {
@@ -1438,6 +1473,11 @@ impl SimState {
                 .live_mods_on(ModAxis::CritDamage)
                 .map(|(m, stacks)| m.percent * stacks)
                 .sum();
+            let fury_bonus = fury_bonus
+                + self
+                    .live_mods_on(ModAxis::CritChance)
+                    .map(|(m, stacks)| m.percent * stacks)
+                    .sum::<f64>();
             let mut damage =
                 weapon_strength * effective_power / reference_armor() * hit.dmg_multiplier;
             damage *= strike_crit_factor_with_bonus(

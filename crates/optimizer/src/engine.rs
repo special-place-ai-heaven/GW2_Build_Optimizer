@@ -1499,9 +1499,12 @@ pub fn prepare_validated_rotation(
     let inventory_due = coverage_inventory_due(validated, &rotation_skills, &mode);
     let mut heuristic_coverage =
         rotation::builder::heuristic_coverage_stamps(&rotation_skills, db, &equipped_traits);
-    heuristic_coverage.extend(interval_ceiling_stamps(validated, &mode));
-    heuristic_coverage.extend(rotation::builder::heuristic_override_stamps(
+    heuristic_coverage.extend(heuristic_input_stamps(
+        crate::data::balance_overrides::overrides(),
+        validated,
+        db,
         &rotation_skills,
+        &equipped_traits,
         &sim_ctx,
     ));
     heuristic_coverage.sort();
@@ -1532,6 +1535,7 @@ pub fn prepare_validated_rotation(
         weaver: equipped_spec_ids.contains(&rotation::attunement::WEAVER_SPEC_ID),
         form,
         triggered: procs.triggered,
+        while_boons: procs.while_boons,
         strike_add: mods.strike_add_pct.iter().sum(),
         condition_add: mods.condition_add_pct.iter().sum(),
         condition_type_mults: mods.specific_condi_mults(),
@@ -1677,8 +1681,48 @@ fn simulate_prepared_with(
 
     result.honesty.unhosted = prepared.unhosted.clone();
     result.honesty.heuristic = prepared.heuristic_coverage.clone();
+    // A self-boon gate whose boon this run never raised plays its bonus at
+    // zero; that is a gap in the simulated boon sources, named, not a
+    // measured 0% (UR-18 follow-up W4). The WvW timeline names its own.
+    for line in never_raised_boon_gates(&params.while_boons, &result.buff_uptime) {
+        let named_by_timeline = result
+            .wvw
+            .as_ref()
+            .is_some_and(|fight| fight.unmodeled_sources.contains(&line));
+        if !named_by_timeline && !result.honesty.heuristic.contains(&line) {
+            result.honesty.heuristic.push(line);
+        }
+    }
     result.honesty.inventory_skipped = prepared.inventory_due && result.wvw.is_none();
     result
+}
+
+/// `"{source} (gated on {boon}: no simulated source)"` for each boon-gated
+/// modifier whose must-carry boon has no uptime in `buff_uptime`. The same
+/// wording as the WvW timeline's end-of-fight note.
+fn never_raised_boon_gates(
+    while_boons: &[rotation::simulator::BoonGatedMod],
+    buff_uptime: &std::collections::HashMap<String, f64>,
+) -> Vec<String> {
+    let raised = |boon: &str| {
+        buff_uptime
+            .iter()
+            .any(|(name, uptime)| name.eq_ignore_ascii_case(boon) && *uptime > 0.0)
+    };
+    let mut out = Vec::new();
+    for gated in while_boons {
+        for (boon, _) in gated
+            .gates
+            .iter()
+            .filter(|(boon, want)| *want && !raised(boon))
+        {
+            out.push(rotation::wvw_timeline::no_boon_source_note(
+                &gated.source,
+                boon,
+            ));
+        }
+    }
+    out
 }
 
 /// The build's weapons as the timeline's `Gate::Weapon` reads them: one row
@@ -1760,10 +1804,11 @@ fn wvw_params_without_executed_conditionals(
                 && effect.source_id == trait_id
                 && effect.trigger_rule == TriggerRule::Conditional
                 && (effect.category == category || effect.inner_category == Some(category.clone()))
-                && effect
+                && (effect
                     .prerequisite
                     .as_ref()
                     .is_some_and(|p| p.in_shroud != Some(false))
+                    || rotation::wvw_timeline::self_boon_gates(effect).is_some())
                 && effect.value.is_resolved()
                 && effect.max_stacks.as_ref().is_none_or(|m| m.is_resolved())
                 && rotation::wvw_timeline::unexecutable_reason(effect).is_none()
@@ -1774,6 +1819,14 @@ fn wvw_params_without_executed_conditionals(
             for m in &standing.strike_pct {
                 out.strike_mult /= 1.0 + m;
             }
+            // An additive-bucket source (WvW Excessive Energy) leaves the
+            // bucket, as the flow sim's `FoldedShares` does.
+            // ponytail: the timeline then plays its percent as a plain
+            // factor, not inside the bucket; make `ConditionalSpec`
+            // bucket-aware if the difference ever shows in a pin.
+            out.strike_mult *=
+                (1.0 + out.strike_add - standing.strike_add_pct) / (1.0 + out.strike_add);
+            out.strike_add -= standing.strike_add_pct;
         }
         if runs_conditional(standing.trait_id, EffectCategory::CritChancePct) {
             out.crit_chance_bonus -= standing.crit_chance_pct;
@@ -2858,6 +2911,8 @@ enum FlowRecord {
     /// `(interval ms, proc)` while in the form.
     InForm(u32, rotation::simulator::FormProc),
     WhileIn(rotation::simulator::DamageMod),
+    /// Live while every `(boon, must carry)` gate holds.
+    WhileBoons(Vec<(String, bool)>, rotation::simulator::DamageMod),
     Triggered(rotation::simulator::TriggeredProc),
 }
 
@@ -2880,7 +2935,12 @@ fn flow_record(
         TriggerRule::Passive | TriggerRule::NotApplicable | TriggerRule::OnHealthThreshold => {
             return None
         }
-        TriggerRule::Conditional if in_shroud != Some(true) => return None,
+        TriggerRule::Conditional
+            if in_shroud != Some(true)
+                && rotation::wvw_timeline::self_boon_gates(effect).is_none() =>
+        {
+            return None
+        }
         _ => {}
     }
     let placed = place_flow_record(effect, has_form, life_force_cap, in_shroud);
@@ -2906,7 +2966,7 @@ impl FlowRecord {
     fn modifier(&self) -> Option<&rotation::simulator::DamageMod> {
         use rotation::simulator::FormProc;
         match self {
-            FlowRecord::WhileIn(modifier) => Some(modifier),
+            FlowRecord::WhileIn(modifier) | FlowRecord::WhileBoons(_, modifier) => Some(modifier),
             FlowRecord::OnEnter(proc_)
             | FlowRecord::OnExit(proc_)
             | FlowRecord::InForm(_, proc_)
@@ -2920,26 +2980,71 @@ impl FlowRecord {
     }
 }
 
-/// Equipped trait records whose `Interval` gate (no `while` state) fires
-/// slower than the page's internal cooldown: that floor is a calibrated
-/// ceiling, not a page fact, so both simulators play a heuristic uptime
-/// (WvW Reaper's Onslaught at 20 s against the page's 3 s, FCR-011).
-fn interval_ceiling_stamps(validated: &ValidatedBuild, mode: &GameMode) -> Vec<String> {
-    use crate::data::normalized_effects::Gate;
-    use crate::data::quality::FactualValue;
-    equipped_trait_records(validated, mode)
-        .filter(|effect| {
-            let page_ms = match &effect.internal_cooldown {
-                Some(FactualValue::Resolved(seconds)) => (seconds * 1_000.0).round() as u32,
-                _ => 0,
-            };
-            effect.gates.iter().any(|gate| {
-                matches!(gate, Gate::Interval { every_ms, while_state: None } if *every_ms > page_ms)
-            })
+/// The Heuristic stamps of the flow's inputs: records of the equipped
+/// traits, bar skills and socketed sigils, and `o`'s overrides on the bar
+/// skills and on the equipped traits (by db name).
+fn heuristic_input_stamps(
+    o: &crate::data::balance_overrides::BalanceOverrides,
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    rotation_skills: &[rotation::RotationSkill],
+    equipped_traits: &[u32],
+    ctx: &BalanceContext,
+) -> Vec<String> {
+    let bar_ids: Vec<u32> = rotation_skills.iter().map(|s| s.skill_id).collect();
+    let sigil_ids: Vec<u32> = sigil_seats(validated).into_keys().collect();
+    let mut out = heuristic_record_stamps(equipped_traits, &bar_ids, &sigil_ids, &ctx.game_mode);
+    let trait_names: Vec<(u32, &str)> = equipped_traits
+        .iter()
+        .filter_map(|id| db.traits.get(id).map(|t| (*id, t.name.as_str())))
+        .collect();
+    out.extend(rotation::builder::heuristic_override_stamps(
+        o,
+        rotation_skills,
+        &trait_names,
+        ctx,
+    ));
+    out
+}
+
+/// The flow's own `Heuristic` records for `mode` (equipped traits, bar
+/// skills, socketed sigils; never a rune or relic, which the flow does not
+/// play). An `Interval` gate with no `while` state is a calibrated ceiling,
+/// not a page fact (WvW Reaper's Onslaught at 20 s against the page's 3 s,
+/// FCR-011); any other Heuristic record reads "heuristic record".
+fn heuristic_record_stamps(
+    trait_ids: &[u32],
+    bar_skill_ids: &[u32],
+    sigil_ids: &[u32],
+    mode: &GameMode,
+) -> Vec<String> {
+    use crate::data::normalized_effects::{Gate, SourceType};
+    crate::data::normalized_effects::effects()
+        .effects_for_mode(mode.label())
+        .iter()
+        .filter(|effect| effect.evidence_level == crate::data::EvidenceLevel::Heuristic)
+        .filter(|effect| match effect.source_type {
+            SourceType::Trait => trait_ids.contains(&effect.source_id),
+            SourceType::Skill => bar_skill_ids.contains(&effect.source_id),
+            SourceType::Sigil => sigil_ids.contains(&effect.source_id),
+            SourceType::Rune | SourceType::Relic => false,
         })
         .map(|effect| {
-            crate::data::quality::heuristic_entry(&effect.source_name, "interval ceiling")
-                .rendered()
+            let ceiling = effect.gates.iter().any(|gate| {
+                matches!(
+                    gate,
+                    Gate::Interval {
+                        while_state: None,
+                        ..
+                    }
+                )
+            });
+            let kind = if ceiling {
+                "interval ceiling"
+            } else {
+                "record"
+            };
+            crate::data::quality::heuristic_entry(&effect.source_name, kind).rendered()
         })
         .collect()
 }
@@ -2995,10 +3100,11 @@ fn place_flow_record(
     {
         return Err("proc chance".into());
     }
+    let while_boons = rotation::wvw_timeline::self_boon_gates(effect).is_some();
     let form_trigger = matches!(
         effect.trigger_rule,
         TriggerRule::OnShroudEnter | TriggerRule::OnShroudExit | TriggerRule::Conditional
-    );
+    ) && !while_boons;
     if !has_form && (form_trigger || in_shroud == Some(true)) {
         return Err("no form".into());
     }
@@ -3010,8 +3116,10 @@ fn place_flow_record(
     let icd_ms = icd_ms.max(interval_floor_ms);
     if effect.trigger_rule == TriggerRule::Conditional {
         return match record_modifier(effect) {
+            Some(Ok(modifier)) if while_boons => Ok(FlowRecord::WhileBoons(self_boons, modifier)),
             Some(Ok(modifier)) => Ok(FlowRecord::WhileIn(modifier)),
             Some(Err(reason)) => Err(reason),
+            None if while_boons => Err(format!("{:?} under a self-boon gate", effect.category)),
             None => Err(format!("{:?} while in form", effect.category)),
         };
     }
@@ -3085,6 +3193,7 @@ fn record_modifier(
         EffectCategory::StrikeDamagePct => ModAxis::Strike,
         EffectCategory::ConditionDamagePct => ModAxis::Condition,
         EffectCategory::CritDamagePct => ModAxis::CritDamage,
+        EffectCategory::CritChancePct => ModAxis::CritChance,
         _ => return None,
     };
     let FactualValue::Resolved(percent) = effect.value else {
@@ -3176,6 +3285,7 @@ fn flow_payload(
 /// [`form_for_build`] already attached.
 pub(crate) struct TraitProcs {
     pub triggered: Vec<rotation::simulator::TriggeredProc>,
+    pub while_boons: Vec<rotation::simulator::BoonGatedMod>,
     pub folded: rotation::simulator::FoldedShares,
     pub unhosted: Vec<String>,
 }
@@ -3192,6 +3302,7 @@ pub(crate) fn trait_procs_for_build(
     let stat_sheet = stat_consumed_trait_ids(validated, db);
     let mut out = TraitProcs {
         triggered: Vec::new(),
+        while_boons: Vec::new(),
         folded: Default::default(),
         unhosted: Vec::new(),
     };
@@ -3219,9 +3330,19 @@ pub(crate) fn trait_procs_for_build(
                         fold_standing(&mut out.folded, standing, effect.source_id, m.axis);
                     }
                 }
-                if let FlowRecord::Triggered(mut t) = record {
-                    t.weapon_set = seat;
-                    out.triggered.push(t);
+                match record {
+                    FlowRecord::Triggered(mut t) => {
+                        t.weapon_set = seat;
+                        out.triggered.push(t);
+                    }
+                    FlowRecord::WhileBoons(gates, modifier) => {
+                        out.while_boons.push(rotation::simulator::BoonGatedMod {
+                            source: effect.source_name.clone(),
+                            gates,
+                            modifier,
+                        })
+                    }
+                    _ => {}
                 }
             }
         }
@@ -3291,6 +3412,7 @@ fn fold_standing(
             folded.ferocity += share.crit_damage_pct
                 * crate::data::universal_formulas::formulas().ferocity_per_crit_damage_pct;
         }
+        ModAxis::CritChance => folded.crit_chance += share.crit_chance_pct,
     }
 }
 
@@ -3400,12 +3522,23 @@ pub(crate) fn rotation_quality_reasons(
         result.honesty.inventory_skipped,
         &result.honesty.heuristic,
     );
-    if let Some(fight) = result.wvw.as_ref().filter(|f| !f.resource_model_complete) {
+    if let Some(fight) = result
+        .wvw
+        .as_ref()
+        .filter(|f| !f.resource_model_complete || !f.resource_model_gaps.is_empty())
+    {
         out.push(data::DataQualityReason {
             field: "wvw_timeline.resources".into(),
             entity: profession_name.into(),
             modes: vec![mode.label().to_string()],
-            explanation: if fight.resource_simulated {
+            explanation: if fight.resource_model_complete {
+                // Chain steps, unresolved alternatives, a form or a record
+                // the rotation cannot play; the resource rules themselves hold.
+                format!(
+                    "rotation gaps for {profession_name}: {} not modelled",
+                    fight.resource_model_gaps.join(", ")
+                )
+            } else if fight.resource_simulated {
                 format!(
                     "resource model incomplete for {profession_name}: {} not modelled",
                     fight.resource_model_gaps.join(", ")
@@ -4115,6 +4248,94 @@ mod tests {
         (prepared, scenario)
     }
 
+    /// W2 (verify-CT): an equipped trait's Heuristic override stamps by its
+    /// db name through the helper prepare calls. No shipped Trait override
+    /// is Heuristic, so the entry is inline.
+    #[test]
+    fn heuristic_trait_override_stamps_by_db_name() {
+        let db = rotation::reaper_fixture::db();
+        let build = rotation::reaper_fixture::build();
+        let trait_id = build.specializations[0]
+            .all_trait_ids
+            .iter()
+            .copied()
+            .find(|id| db.traits.contains_key(id))
+            .expect("a fixture trait in the db");
+        let json = format!(
+            r#"{{"patch_id": "2026-07-15", "mode": "PvE", "entities": [{{
+                "source_type": "Trait", "source_id": {trait_id}, "name": "Override Name",
+                "overrides": {{"condition_damage_pct:bleeding":
+                    {{"value": 10.0, "evidence_level": "Heuristic"}}}}}}]}}"#
+        );
+        let o = crate::data::balance_overrides::BalanceOverrides::from_json(&[&json]);
+        let ctx = BalanceContext::for_patch(GameMode::PvE, "2026-07-15");
+        let line = format!(
+            "{} (heuristic condition_damage_pct:bleeding)",
+            db.traits[&trait_id].name
+        );
+        let stamps = heuristic_input_stamps(&o, &build, &db, &[], &[trait_id], &ctx);
+        assert!(stamps.contains(&line), "{stamps:?}");
+        assert!(heuristic_input_stamps(&o, &build, &db, &[], &[], &ctx).is_empty());
+    }
+
+    /// T3 (FCR-013 generic stamping): every shipped Heuristic record the flow
+    /// plays (trait, skill, sigil) names itself when its source is equipped;
+    /// a rune or relic never does. No shipped record keeps the dead
+    /// `Estimated` uptime tag (nothing reads `uptime_model` at runtime).
+    #[test]
+    fn heuristic_records_stamp_when_equipped() {
+        use crate::data::normalized_effects::{Gate, SourceType, UptimeModelKind};
+        let mut stamped = 0;
+        for mode in [GameMode::PvE, GameMode::PvP, GameMode::WvW] {
+            for effect in crate::data::normalized_effects::effects().effects_for_mode(mode.label())
+            {
+                assert_ne!(
+                    effect.uptime_model.kind,
+                    UptimeModelKind::Estimated,
+                    "{mode:?} {}",
+                    effect.effect_id
+                );
+                let id = [effect.source_id];
+                let stamps = match effect.source_type {
+                    SourceType::Trait => heuristic_record_stamps(&id, &[], &[], &mode),
+                    SourceType::Skill => heuristic_record_stamps(&[], &id, &[], &mode),
+                    SourceType::Sigil => heuristic_record_stamps(&[], &[], &id, &mode),
+                    SourceType::Rune | SourceType::Relic => {
+                        assert!(heuristic_record_stamps(&id, &id, &id, &mode).is_empty());
+                        continue;
+                    }
+                };
+                if effect.evidence_level != crate::data::EvidenceLevel::Heuristic {
+                    continue;
+                }
+                let kind = if effect.gates.iter().any(|g| {
+                    matches!(
+                        g,
+                        Gate::Interval {
+                            while_state: None,
+                            ..
+                        }
+                    )
+                }) {
+                    "interval ceiling"
+                } else {
+                    "record"
+                };
+                let line = format!("{} (heuristic {kind})", effect.source_name);
+                assert!(stamps.contains(&line), "{mode:?} {line}: {stamps:?}");
+                stamped += 1;
+            }
+        }
+        // Phalanx Strength and Path of Corruption per mode, PvE Sigil of
+        // Concentration, WvW Onslaught: structure the wiki (2026-09-26) does
+        // not verify. Sharpened Edges verifies and is Factual.
+        assert_eq!(stamped, 8);
+        assert_eq!(
+            heuristic_record_stamps(&[2021], &[], &[], &GameMode::WvW),
+            vec!["Reaper's Onslaught (heuristic interval ceiling)".to_string()]
+        );
+    }
+
     /// Doctrine 8: the addon's own path (prepare, flow) enters the
     /// fixture's shroud with the shipped `shroud.json` numbers (PvE
     /// Reaper's Shroud: 4 %/s of a pool 69 % of health, 10 s recharge).
@@ -4414,6 +4635,367 @@ mod tests {
                 }
             )))
         ));
+    }
+
+    /// UR-18: a WvW trait bonus held only by the player's own boon
+    /// (Excessive Energy under Vigor, Hematic Focus's crit chance under Fury)
+    /// is never counted for the whole fight. Its parsed always-on share
+    /// leaves the timeline's parameters and the flow's, and the flow plays
+    /// it only while the boon holds: with no Vigor source the build gets
+    /// less than the ungated share, exactly the unbuffed damage; with the
+    /// boons up all fight it gets exactly the ungated damage, each share
+    /// counted once (W3: real precision, so the crit half is live).
+    #[test]
+    fn a_self_boon_gated_wvw_trait_is_not_counted_at_full_uptime() {
+        use crate::data::normalized_effects::effects;
+        use rotation::simulator::{simulate_with, BoonGatedMod, DamageMod, ModAxis, SimParams};
+
+        let record = |id: &str| {
+            effects()
+                .effects_for_mode("WvW")
+                .iter()
+                .find(|e| e.effect_id == id)
+                .unwrap_or_else(|| panic!("WvW {id}"))
+                .clone()
+        };
+        let excessive = record("trait:1936:0");
+        let hematic = record("trait:536:1");
+        let share = |trait_id, strike_add_pct, crit_chance_pct| combat::TraitStanding {
+            trait_id,
+            strike_pct: Vec::new(),
+            strike_add_pct,
+            condition_pct: Vec::new(),
+            condition_add_pct: 0.0,
+            crit_chance_pct,
+            crit_damage_pct: 0.0,
+        };
+        // What the fact parser folds: Excessive Energy's 10% in the additive
+        // bucket, Hematic Focus's 5 crit chance points.
+        let standing = vec![share(1936, 0.10, 0.0), share(536, 0.0, 5.0)];
+        let base = || {
+            let mut params = SimParams::basic(2_000.0, 0.0, 1_100.0);
+            params.mode = GameMode::WvW;
+            params.precision = 1_000.0;
+            params.ferocity = 500.0;
+            params
+        };
+        let mut ungated = base();
+        ungated.strike_add = 0.10;
+        ungated.strike_mult = 1.10;
+        ungated.crit_chance_bonus = 5.0;
+
+        let timeline = wvw_params_without_executed_conditionals(
+            &ungated,
+            &[],
+            &standing,
+            &[&excessive, &hematic],
+        );
+        assert!(
+            (timeline.strike_mult - 1.0).abs() < 1e-9,
+            "{}",
+            timeline.strike_mult
+        );
+        assert!(timeline.crit_chance_bonus.abs() < 1e-9);
+
+        let validated = ValidatedBuild {
+            specializations: vec![crate::validation::ValidatedSpec {
+                spec_id: 1,
+                name: "Test".into(),
+                elite: false,
+                trait_ids: vec![1936, 536],
+                trait_names: Vec::new(),
+                all_trait_ids: vec![1936, 536],
+            }],
+            ..Default::default()
+        };
+        let db = GameDb::empty_for_tests();
+        let bar = vec![rotation::RotationSkill {
+            targets: 1,
+            categories: Vec::new(),
+            slot_name: None,
+            skill_id: 1,
+            name: "Strike".into(),
+            slot: rotation::SkillSlot::Weapon1,
+            cast_time_ms: 500,
+            cooldown_ms: 0,
+            effects: vec![rotation::SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+            next_chain: None,
+            is_stunbreak: false,
+            reaches_allies: false,
+            weapon_set: 1,
+        }];
+        let procs = trait_procs_for_build(&validated, &db, &GameMode::WvW, &bar, None, &standing);
+        let gate = |source: &str, boon: &str, axis, percent, additive| BoonGatedMod {
+            source: source.into(),
+            gates: vec![(boon.to_string(), true)],
+            modifier: DamageMod {
+                axis,
+                percent,
+                additive,
+            },
+        };
+        assert_eq!(
+            procs.while_boons,
+            vec![
+                gate("Hematic Focus", "Fury", ModAxis::CritChance, 5.0, false),
+                gate("Excessive Energy", "Vigor", ModAxis::Strike, 10.0, true),
+            ]
+        );
+        assert!((procs.folded.strike_add - 0.10).abs() < 1e-9);
+        assert!((procs.folded.crit_chance - 5.0).abs() < 1e-9);
+
+        let mut gated = ungated.clone();
+        gated.while_boons = procs.while_boons;
+        gated.folded = procs.folded;
+        gated.triggered = procs.triggered;
+        let unbuffed = base();
+        let run = |bar: &[rotation::RotationSkill], params: &SimParams| {
+            simulate_with(bar, 10_000, params, Default::default())
+        };
+
+        // No Vigor or Fury source: both gates stay shut and both folded
+        // shares are gone, so the build deals exactly the unbuffed damage,
+        // less than the ungated share, and the unraised boons are named (W4).
+        let shut = run(&bar, &gated);
+        let ungated_shut = run(&bar, &ungated).strike_dps;
+        let unbuffed_shut = run(&bar, &unbuffed).strike_dps;
+        assert!(
+            shut.strike_dps < ungated_shut,
+            "gated {} vs ungated {ungated_shut}",
+            shut.strike_dps
+        );
+        assert!(
+            (shut.strike_dps - unbuffed_shut).abs() < 1e-6,
+            "gated {} vs unbuffed {unbuffed_shut}",
+            shut.strike_dps
+        );
+        assert_eq!(
+            never_raised_boon_gates(&gated.while_boons, &shut.buff_uptime),
+            vec![
+                "Hematic Focus (gated on Fury: no simulated source)".to_string(),
+                "Excessive Energy (gated on Vigor: no simulated source)".to_string(),
+            ]
+        );
+
+        // The strike raises Vigor and Fury for the whole fight: both gates
+        // hold at every strike, so the gated build equals the ungated one
+        // (each share counted once, never twice) and beats the unbuffed one.
+        let mut buffed_bar = bar.clone();
+        for boon in ["Vigor", "Fury"] {
+            buffed_bar[0].effects.insert(
+                0,
+                rotation::SkillEffect::ApplyBuff {
+                    buff: boon.into(),
+                    stacks: 1,
+                    duration_ms: 60_000,
+                },
+            );
+        }
+        let open = run(&buffed_bar, &gated);
+        let ungated_open = run(&buffed_bar, &ungated).strike_dps;
+        let unbuffed_open = run(&buffed_bar, &unbuffed).strike_dps;
+        assert!(
+            (open.strike_dps - ungated_open).abs() < 1e-6,
+            "gated {} vs ungated {ungated_open}",
+            open.strike_dps
+        );
+        assert!(
+            open.strike_dps > unbuffed_open,
+            "gated {} vs unbuffed {unbuffed_open}",
+            open.strike_dps
+        );
+        assert!(never_raised_boon_gates(&gated.while_boons, &open.buff_uptime).is_empty());
+    }
+
+    /// W4 (verify-CT): a self-boon bonus whose boon the fight never raises
+    /// is named, not scored as a silent zero. The Reaper fixture raises no
+    /// Vigor: with WvW Excessive Energy equipped, the timeline names it on
+    /// the coverage line, and a flow run without the timeline names it on
+    /// the heuristic line. Unequipped, no line.
+    #[test]
+    fn a_self_boon_gate_the_fight_never_raises_is_named() {
+        use rotation::reaper_fixture as fx;
+        const EXCESSIVE_ENERGY: u32 = 1936;
+        let line = "Excessive Energy (gated on Vigor: no simulated source)";
+        let db = fx::db();
+        let ctx = BalanceContext::new(GameMode::WvW);
+        let scenario = crate::scenario::ScenarioSpec::from_balance_context(&ctx);
+        let named = |equipped: bool| {
+            let mut build = fx::build();
+            if equipped {
+                build.specializations[2]
+                    .all_trait_ids
+                    .push(EXCESSIVE_ENERGY);
+            }
+            let (stats, _) = calculate_validated_stats(&build, &db, "Necromancer", &ctx);
+            let prepared = prepare_validated_rotation(&build, &db, &stats, Some(&scenario))
+                .expect("the fixture prepares");
+            let timeline = simulate_prepared(&prepared, &build, &db, Some(&scenario))
+                .wvw
+                .expect("WvW runs the timeline")
+                .unmodeled_sources
+                .contains(&line.to_string());
+            let flow = simulate_prepared(&prepared, &build, &db, None)
+                .honesty
+                .heuristic
+                .contains(&line.to_string());
+            (timeline, flow)
+        };
+        assert_eq!(named(true), (true, true));
+        assert_eq!(named(false), (false, false));
+    }
+
+    /// UR-18: every self-boon-gated `Conditional` record with no
+    /// prerequisite, in every mode file, is the flow simulation's to play
+    /// under its boon or to name on the gap line, never left to the fact
+    /// parser's always-on share; and when the timeline gates one on a damage
+    /// axis, the parsed share leaves the timeline's parameters.
+    #[test]
+    fn every_self_boon_gated_conditional_is_gated_or_named_by_the_flow() {
+        use crate::data::normalized_effects::{effects, EffectCategory, Gate, TriggerRule};
+        let none = std::collections::HashSet::new();
+        let mut seen = 0;
+        for mode in ["PvE", "PvP", "WvW"] {
+            for effect in effects().effects_for_mode(mode) {
+                let boon_gated = effect.gates.iter().any(|gate| {
+                    matches!(gate, Gate::SelfBoon { .. } | Gate::SelfBoonAbsent { .. })
+                });
+                if effect.trigger_rule != TriggerRule::Conditional
+                    || effect.prerequisite.is_some()
+                    || !boon_gated
+                {
+                    continue;
+                }
+                seen += 1;
+                let id = &effect.effect_id;
+                match flow_record(effect, false, None, &none) {
+                    Some(Ok(FlowRecord::WhileBoons(..))) | Some(Err(_)) => {}
+                    Some(Ok(_)) => panic!("{mode} {id}: played as something else"),
+                    None => panic!("{mode} {id}: left to the parser's always-on share"),
+                }
+                let axis = effect.inner_category.as_ref().unwrap_or(&effect.category);
+                let damage_axis = matches!(
+                    axis,
+                    EffectCategory::StrikeDamagePct
+                        | EffectCategory::CritChancePct
+                        | EffectCategory::CritDamagePct
+                );
+                if !damage_axis {
+                    continue;
+                }
+                let standing = [combat::TraitStanding {
+                    trait_id: effect.source_id,
+                    strike_pct: vec![0.10],
+                    strike_add_pct: 0.0,
+                    condition_pct: Vec::new(),
+                    condition_add_pct: 0.0,
+                    crit_chance_pct: 5.0,
+                    crit_damage_pct: 5.0,
+                }];
+                let mut params = rotation::simulator::SimParams::basic(2_000.0, 0.0, 1_100.0);
+                params.strike_mult = 1.10;
+                params.crit_chance_bonus = 5.0;
+                params.ferocity = 75.0;
+                let out =
+                    wvw_params_without_executed_conditionals(&params, &[], &standing, &[effect]);
+                let removed = match axis {
+                    EffectCategory::StrikeDamagePct => (out.strike_mult - 1.0).abs() < 1e-9,
+                    EffectCategory::CritChancePct => out.crit_chance_bonus.abs() < 1e-9,
+                    _ => out.ferocity.abs() < 1e-9,
+                };
+                assert!(
+                    removed,
+                    "{mode} {id}: {axis:?} share stays in the timeline params"
+                );
+            }
+        }
+        assert!(seen >= 9, "only {seen} self-boon-gated records");
+    }
+
+    /// UR-25: a WvW build whose resource model is complete but whose auto
+    /// chain misses a step reads Provisional with the gap named, and the
+    /// line does not claim the resource model is incomplete.
+    #[test]
+    fn a_complete_resource_model_still_names_a_missing_chain_step() {
+        let ctx = BalanceContext::new(GameMode::WvW);
+        let validated = ValidatedBuild::default();
+        let mut db = GameDb::empty_for_tests();
+        let eviscerate: gw2_api::models::Skill = serde_json::from_value(serde_json::json!({
+            "id": 14353, "name": "Eviscerate", "slot": "Profession_1",
+            "facts": [], "cost": 30
+        }))
+        .expect("skill");
+        db.skills.insert(eviscerate.id, eviscerate);
+        let skill = |skill_id, name: &str, slot, cooldown_ms, next_chain| rotation::RotationSkill {
+            targets: 1,
+            categories: Vec::new(),
+            slot_name: None,
+            skill_id,
+            name: name.into(),
+            slot,
+            cast_time_ms: 500,
+            cooldown_ms,
+            effects: Vec::new(),
+            next_chain,
+            is_stunbreak: false,
+            reaches_allies: false,
+            weapon_set: 1,
+        };
+        let bar = vec![
+            skill(
+                14353,
+                "Eviscerate",
+                rotation::SkillSlot::Profession,
+                8_000,
+                None,
+            ),
+            skill(
+                14354,
+                "Swing",
+                rotation::SkillSlot::Weapon1,
+                0,
+                Some(99_999),
+            ),
+        ];
+        let (_, complete, gaps) =
+            wvw_resource_rules(&validated, &bar, &db, "Warrior", &ctx, 20_000.0);
+        assert!(complete, "precondition: complete resource model ({gaps:?})");
+        assert_eq!(
+            gaps,
+            vec!["Swing auto chain (step 99999 missing)".to_string()]
+        );
+
+        let mut result = rotation::simulator::simulate_with(
+            &bar,
+            1_000,
+            &rotation::simulator::SimParams::basic(1_000.0, 0.0, 1_100.0),
+            Default::default(),
+        );
+        result.wvw = Some(rotation::wvw_timeline::WvwCombatReport {
+            resource_model_complete: complete,
+            resource_model_gaps: gaps,
+            resource_simulated: true,
+            ..Default::default()
+        });
+        // Any line makes the build Provisional (every tier merges this list).
+        let reasons = rotation_quality_reasons(Some(&result), "Warrior", &GameMode::WvW);
+        let line = reasons
+            .iter()
+            .find(|r| r.field == "wvw_timeline.resources")
+            .expect("the gap line");
+        assert!(
+            line.explanation.contains("step 99999 missing"),
+            "{}",
+            line.explanation
+        );
+        assert!(
+            !line.explanation.contains("incomplete"),
+            "{}",
+            line.explanation
+        );
     }
 
     /// Doctrine 6: a pressed entry that brings a bar but has no pool

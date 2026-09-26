@@ -191,12 +191,12 @@ impl RunTracker {
         let id = NEXT_RUN.fetch_add(1, Ordering::Relaxed);
         let started = Instant::now();
         crate::state::with_state(|s| {
-            s.main.run_feed = LiveFeed {
+            s.main.run_feed = Arc::new(LiveFeed {
                 run_id: id,
                 started: Some(started),
                 feed: RunFeed::default(),
                 live: true,
-            };
+            });
         });
         let tracker = Rc::new(Self {
             id,
@@ -262,7 +262,7 @@ impl RunTracker {
         let id = self.id;
         crate::state::with_state(|s| {
             if s.main.run_feed.run_id == id {
-                op(&mut s.main.run_feed.feed);
+                op(&mut Arc::make_mut(&mut s.main.run_feed).feed);
             }
         });
         out
@@ -616,7 +616,7 @@ impl RunTracker {
         let id = self.id;
         crate::state::with_state(|s| {
             if s.main.run_feed.run_id == id {
-                s.main.run_feed.live = false;
+                Arc::make_mut(&mut s.main.run_feed).live = false;
             }
         });
     }

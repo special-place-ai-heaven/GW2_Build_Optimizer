@@ -1988,6 +1988,115 @@ mod tests {
         (db, v)
     }
 
+    /// UR-16: a reopened save wears the referee's badge, never a stamped
+    /// Verified. The hand-built plate referees Provisional in WvW.
+    #[test]
+    fn a_reopened_save_wears_the_referee_badge() {
+        use gw2_optimizer::data::DataQuality;
+        use gw2_optimizer::scenario::{CombatTier, ScenarioSpec};
+        let (db, v) = three_spec_thief();
+        let weights = OptimizationWeights::default();
+        let ctx = gw2_optimizer::balance::BalanceContext::new(GameMode::WvW);
+        let scenario = ScenarioSpec::for_request(&ctx, CombatTier::Solo, None, &weights);
+        let report = gw2_optimizer::referee::evaluate_validated_build(
+            &v, &db, "Thief", &weights, &ctx, &scenario,
+        );
+        assert_eq!(
+            report.quality,
+            DataQuality::Provisional,
+            "fixture must referee Provisional: {:?}",
+            report.quality_reasons
+        );
+        let result = gw2_optimizer::engine::synergy_result_from_validated(
+            v,
+            &db,
+            "Thief",
+            &ctx,
+            Some(&scenario),
+        );
+        let served = crate::ui::main_view::optimization::synergy_result_to_suggestion(
+            &result, &db, "Thief", &scenario, None, None, None, &weights, &ctx,
+        );
+        let mut saved = crate::ui::main_view::tabs::saveload::suggestion_to_saved(
+            "ur16",
+            "Tester",
+            "Thief",
+            &GameMode::WvW,
+            None,
+            &served,
+        );
+
+        let loaded =
+            suggestion_from_saved_build(&saved, Some(&db), &GameMode::WvW, &weights, &scenario);
+        assert_eq!(loaded.data_quality, DataQuality::Provisional);
+        for reason in &report.quality_reasons {
+            let text = reason.to_string();
+            assert!(
+                loaded.quality_reasons.contains(&text),
+                "{text} missing from {:?}",
+                loaded.quality_reasons
+            );
+        }
+
+        let blind = suggestion_from_saved_build(&saved, None, &GameMode::WvW, &weights, &scenario);
+        assert_eq!(blind.data_quality, DataQuality::Provisional, "no game data");
+        assert!(!blind.quality_reasons.is_empty(), "says why");
+
+        // In PvE the badge is the referee's verdict on the save's own plate
+        // (its strings carry no rune or relic, which the referee grades).
+        let pve = gw2_optimizer::balance::BalanceContext::new(GameMode::PvE);
+        let pve_scenario = ScenarioSpec::for_request(&pve, CombatTier::Solo, None, &weights);
+        let reopened =
+            suggestion_from_saved_build(&saved, Some(&db), &GameMode::PvE, &weights, &pve_scenario);
+        let plate = crate::ui::main_view::chat_flow::plate_from_suggestion(&reopened);
+        let mut own = gw2_optimizer::validation::validate_gemini_build(&plate, &db, "Thief");
+        if let Some(slots) = &reopened.slot_prefixes {
+            own.gear_slots = slots.clone();
+        }
+        let own_report = gw2_optimizer::referee::evaluate_validated_build(
+            &own,
+            &db,
+            "Thief",
+            &weights,
+            &pve,
+            &pve_scenario,
+        );
+        assert_eq!(reopened.data_quality, own_report.quality, "PvE");
+        for reason in &own_report.quality_reasons {
+            assert!(reopened.quality_reasons.contains(&reason.to_string()));
+        }
+
+        // A legacy save (no per-slot map): its prefix name resolves to the
+        // itemstat, and the badge says the gear could not be priced.
+        let mut legacy = saved.clone();
+        legacy.slot_prefixes = None;
+        legacy.stat_prefix = "Berserker's".into();
+        let old = suggestion_from_saved_build(
+            &legacy,
+            Some(&db),
+            &GameMode::PvE,
+            &weights,
+            &pve_scenario,
+        );
+        assert_eq!(old.data_quality, DataQuality::Provisional);
+        assert!(
+            old.quality_reasons
+                .iter()
+                .any(|r| r.contains("Itemstat 161") && r.contains("cannot price")),
+            "resolved and graded: {:?}",
+            old.quality_reasons
+        );
+
+        saved.skills[0] = "Heal: Gone From The Game".into();
+        let stale =
+            suggestion_from_saved_build(&saved, Some(&db), &GameMode::WvW, &weights, &scenario);
+        assert_eq!(
+            stale.data_quality,
+            DataQuality::Blocked,
+            "names that no longer resolve"
+        );
+    }
+
     /// Opening a record on the hand-built db: the scenario and the
     /// character come back, the build is measured and plated with the
     /// original run's record attached, and the tab it was made on opens. A

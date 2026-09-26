@@ -79,7 +79,7 @@ pub(super) fn stop_chat(state: &mut AddonState) {
         format!("{partial}\n\n_{}_", t("chat.stopped"))
     };
     crate::ui::chat_bar::add_ai_response(&mut state.main.chat, text);
-    if let Some(last) = state.main.chat.history.last_mut() {
+    if let Some(last) = Arc::make_mut(&mut state.main.chat.history).last_mut() {
         last.stopped = true;
         last.retry_of = asked;
     }
@@ -1483,7 +1483,7 @@ fn send_chat_message_with(state: &mut AddonState, message: String, continuation:
                                 } else {
                                     crate::ui::chat_bar::add_ai_response(&mut s.main.chat, body);
                                 }
-                                if let Some(last) = s.main.chat.history.last_mut() {
+                                if let Some(last) = Arc::make_mut(&mut s.main.chat.history).last_mut() {
                                     last.retry_of = Some(message.clone());
                                 }
                             });

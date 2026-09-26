@@ -1,5 +1,7 @@
 //! Save/Load tab — saved-build list, save UI, and SavedBuild ↔ BuildSuggestion conversion.
 
+use std::sync::Arc;
+
 use nexus::imgui::Ui;
 
 use crate::state::{AddonState, MainTab};
@@ -115,12 +117,13 @@ fn persist_notes(state: &mut AddonState, name: &str) {
         .get(name)
         .cloned()
         .unwrap_or_default();
-    let Some(saved) = state.main.saved_builds.iter_mut().find(|b| b.name == name) else {
+    let Some(i) = state.main.saved_builds.iter().position(|b| b.name == name) else {
         return;
     };
-    if saved.notes == draft {
+    if state.main.saved_builds[i].notes == draft {
         return;
     }
+    let saved = &mut Arc::make_mut(&mut state.main.saved_builds)[i];
     saved.notes = draft;
     let snapshot = saved.clone();
     let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
@@ -393,7 +396,10 @@ fn overwrite_named(state: &mut AddonState, name: &str) {
     let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
     match storage.save_overwrite(&saved) {
         Ok(()) => {
-            if let Some(slot) = state.main.saved_builds.iter_mut().find(|b| b.name == name) {
+            if let Some(slot) = Arc::make_mut(&mut state.main.saved_builds)
+                .iter_mut()
+                .find(|b| b.name == name)
+            {
                 *slot = saved.clone();
             }
             state.main.save_status = Some(tf("ranch.updated", &[("name", name)]));
@@ -459,14 +465,15 @@ fn pending_note_snapshot(
         .get(name)
         .cloned()
         .unwrap_or_default();
-    let saved = state
+    let i = state
         .main
         .saved_builds
-        .iter_mut()
-        .find(|b| b.name == name)?;
-    if saved.notes == draft {
+        .iter()
+        .position(|b| b.name == name)?;
+    if state.main.saved_builds[i].notes == draft {
         return None;
     }
+    let saved = &mut Arc::make_mut(&mut state.main.saved_builds)[i];
     saved.notes = draft;
     Some(saved.clone())
 }
@@ -553,7 +560,7 @@ fn delete_named(state: &mut AddonState, name: &str) {
     let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
     match storage.delete(name) {
         Ok(()) => {
-            state.main.saved_builds.retain(|b| b.name != name);
+            Arc::make_mut(&mut state.main.saved_builds).retain(|b| b.name != name);
             state.main.note_drafts.remove(name);
             if state.main.confirm_delete.as_deref() == Some(name) {
                 state.main.confirm_delete = None;
@@ -749,7 +756,7 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
                 .entry(b.name.clone())
                 .or_insert_with(|| b.notes.clone());
         }
-        state.main.saved_builds = builds;
+        state.main.saved_builds = Arc::new(builds);
         state.main.saved_builds_skipped = skipped;
         state.main.saved_builds_loaded = true;
     }
@@ -940,12 +947,18 @@ fn saved_to_suggestion(
         // Not measured against the community here, so nothing to say about
         // whether the corpus is on disk.
         benchmarks_synced: false,
-        data_quality: gw2_optimizer::data::DataQuality::Verified,
+        // Unmeasured until the referee sees it: with game data Load takes
+        // its badge (`optimization::simulate_suggestion_rotation`).
+        data_quality: gw2_optimizer::data::DataQuality::Provisional,
         quality_reasons: vec![],
         coverage_note: None,
     };
     if let Some(db) = game_db {
         suggestion.chat_code = optimization::suggestion_to_chat_code(&suggestion, db);
+    } else {
+        suggestion
+            .quality_reasons
+            .push("saved build not measured: game data is not loaded".into());
     }
     suggestion
 }

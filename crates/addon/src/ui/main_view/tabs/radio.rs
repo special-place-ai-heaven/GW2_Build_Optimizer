@@ -323,7 +323,10 @@ fn filter_row(ui: &Ui, state: &mut AddonState) {
                 && cur_sort != opt
             {
                 state.radio.sort = opt;
-                apply_sort(&mut state.radio.results, opt);
+                apply_sort(
+                    std::sync::Arc::make_mut(&mut state.radio.results).as_mut_slice(),
+                    opt,
+                );
             }
         }
     }
@@ -481,7 +484,7 @@ fn kick_search(state: &mut AddonState, kind: SearchKind) {
                             }
                         }
                     }
-                    s.radio.results = list;
+                    s.radio.results = std::sync::Arc::new(list);
                 }
                 Err(err) => s.radio.last_error = Some(err),
             }

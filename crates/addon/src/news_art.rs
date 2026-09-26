@@ -218,19 +218,32 @@ fn hop_ok(url: &str) -> bool {
             .is_some_and(|u| !url_host_is_reserved(&u))
 }
 
-/// Loopback/private/link-local/unspecified/ULA - addresses no community-
-/// submitted URL (news image or radio stream) has any business dialing.
+/// Loopback/private/link-local/unspecified/ULA/multicast/broadcast/
+/// documentation/CGNAT/benchmarking - addresses no community-submitted URL
+/// (news image or radio stream) has any business dialing.
 pub(crate) fn ip_is_reserved(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v) => {
-            v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified()
+            v.is_loopback()
+                || v.is_private()
+                || v.is_link_local()
+                || v.is_unspecified()
+                || v.is_multicast()
+                || v.is_broadcast()
+                || v.is_documentation()
+                || is_cgnat(v)
+                || is_this_network(v)
+                || is_benchmarking_range(v)
         }
         std::net::IpAddr::V6(v) => {
             v.to_ipv4_mapped()
                 .is_some_and(|ip| ip_is_reserved(std::net::IpAddr::V4(ip)))
                 || v.is_loopback()
                 || v.is_unspecified()
+                || v.is_multicast()
                 || ipv6_unique_local_or_link_local(v)
+                || is_nat64(v)
+                || is_6to4(v)
         }
     }
 }
@@ -240,6 +253,47 @@ pub(crate) fn ip_is_reserved(ip: std::net::IpAddr) -> bool {
 fn ipv6_unique_local_or_link_local(v: std::net::Ipv6Addr) -> bool {
     let o = v.octets();
     (o[0] & 0xfe) == 0xfc || (o[0] == 0xfe && (o[1] & 0xc0) == 0x80)
+}
+
+/// RFC 6598 (Carrier-Grade NAT, `100.64.0.0/10`). `Ipv4Addr::is_shared` is the
+/// stdlib name for this but is unstable on the rustc this workspace pins.
+fn is_cgnat(v: std::net::Ipv4Addr) -> bool {
+    let o = v.octets();
+    o[0] == 100 && (o[1] & 0xC0) == 0x40
+}
+
+/// RFC 791 / RFC 1122 3.2.1.3 ("this network", `0.0.0.0/8`). Broader than
+/// `is_unspecified`, which only matches the single address `0.0.0.0`.
+fn is_this_network(v: std::net::Ipv4Addr) -> bool {
+    v.octets()[0] == 0
+}
+
+/// RFC 2544 (benchmarking, `198.18.0.0/15`). `Ipv4Addr::is_benchmarking` is
+/// the stdlib name for this but is unstable on the rustc this workspace pins.
+fn is_benchmarking_range(v: std::net::Ipv4Addr) -> bool {
+    let o = v.octets();
+    o[0] == 198 && (o[1] & 0xFE) == 18
+}
+
+/// RFC 6052 (NAT64, `64:ff9b::/96`): the tunnel itself is fine, but the
+/// embedded IPv4 gets the same screen a literal v4 URL would, so a tunneled
+/// loopback/private/etc. address can't hide behind the v6 form.
+fn is_nat64(v: std::net::Ipv6Addr) -> bool {
+    let o = v.octets();
+    o[0..12] == [0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0]
+        && ip_is_reserved(std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+            o[12], o[13], o[14], o[15],
+        )))
+}
+
+/// RFC 3056 (6to4, `2002::/16`): same reasoning as [`is_nat64`], embedded v4.
+fn is_6to4(v: std::net::Ipv6Addr) -> bool {
+    let o = v.octets();
+    o[0] == 0x20
+        && o[1] == 0x02
+        && ip_is_reserved(std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+            o[2], o[3], o[4], o[5],
+        )))
 }
 
 fn cache_id(url: &str) -> String {
@@ -839,6 +893,54 @@ mod tests {
 
     fn sa(s: &str) -> std::net::SocketAddr {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn ip_is_reserved_covers_additional_reserved_ranges() {
+        for ip in [
+            "224.0.0.1",          // RFC 1112 multicast
+            "255.255.255.255",    // RFC 919 broadcast
+            "192.0.2.1",          // RFC 5737 TEST-NET-1
+            "198.51.100.1",       // RFC 5737 TEST-NET-2
+            "203.0.113.1",        // RFC 5737 TEST-NET-3
+            "100.64.0.1",         // RFC 6598 CGNAT
+            "100.127.255.254",    // RFC 6598 CGNAT, top of range
+            "0.5.5.5",            // RFC 791 "this network"
+            "198.18.0.1",         // RFC 2544 benchmarking
+            "198.19.255.254",     // RFC 2544 benchmarking, top of range
+            "ff02::1",            // RFC 4291 v6 multicast
+            "64:ff9b::c000:0201", // RFC 6052 NAT64, embeds 192.0.2.1
+            "2002:c000:0201::",   // RFC 3056 6to4, embeds 192.0.2.1
+        ] {
+            let addr: std::net::IpAddr = ip.parse().expect(ip);
+            assert!(ip_is_reserved(addr), "{ip} must be reserved");
+        }
+    }
+
+    #[test]
+    fn ip_is_reserved_keeps_adjacent_public_ranges() {
+        for ip in [
+            "100.63.255.255",       // just below the CGNAT /10
+            "100.128.0.1",          // just above the CGNAT /10
+            "198.17.255.255",       // just below the benchmarking /15
+            "198.20.0.1",           // just above the benchmarking /15
+            "93.184.216.34",        // real public v4
+            "2606:4700:4700::1111", // real public v6
+        ] {
+            let addr: std::net::IpAddr = ip.parse().expect(ip);
+            assert!(!ip_is_reserved(addr), "{ip} must stay accepted");
+        }
+    }
+
+    /// The recursion into the embedded v4 must reject a tunneled reserved
+    /// address without over-rejecting every NAT64/6to4 host: a tunneled
+    /// PUBLIC v4 (93.184.216.34 = 5d:b8:d8:22) must pass.
+    #[test]
+    fn nat64_and_6to4_recurse_on_embedded_v4() {
+        assert!(ip_is_reserved("64:ff9b::c000:0201".parse().unwrap()));
+        assert!(ip_is_reserved("2002:c000:0201::".parse().unwrap()));
+        assert!(!ip_is_reserved("64:ff9b::5db8:d822".parse().unwrap()));
+        assert!(!ip_is_reserved("2002:5db8:d822::".parse().unwrap()));
     }
 
     #[test]

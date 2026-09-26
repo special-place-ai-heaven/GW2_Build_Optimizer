@@ -750,6 +750,10 @@ enum ConditionalKind {
         condition: String,
         max: u32,
     },
+    /// Holds while the player carries (`true`) or lacks (`false`) each boon,
+    /// re-read at every strike: the boon's own simulated uptime
+    /// ([`self_boon_gates`]; WvW Excessive Energy under Vigor).
+    SelfBoons(Vec<(String, bool)>),
 }
 
 /// The Necromancer in shroud (`specs/005-wvw-proc-sites`, US6): the weapon
@@ -885,6 +889,8 @@ struct Timeline<'a> {
     /// Records whose prerequisite refused at least once (end-of-fight
     /// `prerequisite never met` summary).
     prerequisite_refused: HashSet<String>,
+    /// Self-boon conditionals whose gate held at least once this fight.
+    self_boon_held: HashSet<String>,
     /// Last refusal reason traced per record, so the trace carries changes.
     last_prerequisite_skip: HashMap<String, String>,
     /// [`TRACE_CAP`] in production; a diagnostic test may widen it.
@@ -1128,6 +1134,7 @@ impl<'a> Timeline<'a> {
             trigger_status: None,
             status_trigger_depth: 0,
             prerequisite_refused: HashSet::new(),
+            self_boon_held: HashSet::new(),
             last_prerequisite_skip: HashMap::new(),
             trace_cap: TRACE_CAP,
             has_periodic: false,
@@ -1247,6 +1254,29 @@ impl<'a> Timeline<'a> {
                 self.conditional_specs.push(ConditionalSpec {
                     source_name: effect.source_name.clone(),
                     kind: ConditionalKind::PerFoeStack { condition, max },
+                    percent,
+                    crit_damage: crit_bonus,
+                    crit_chance,
+                    condition_damage: false,
+                    active: false,
+                    stacks: 0,
+                    expires_at_ms: 0,
+                    stack_expiries: Vec::new(),
+                    stacking_rule: effect.stacking_rule.clone(),
+                });
+                continue;
+            }
+            // Self-boon bonuses: active while the gating boons hold.
+            if let Some(boons) =
+                self_boon_gates(effect).filter(|_| strike_bonus || crit_bonus || crit_chance)
+            {
+                let Some(&percent) = resolved(&effect.value) else {
+                    self.note_unmodeled(format!("{} (unresolved value)", effect.source_name));
+                    continue;
+                };
+                self.conditional_specs.push(ConditionalSpec {
+                    source_name: effect.source_name.clone(),
+                    kind: ConditionalKind::SelfBoons(boons),
                     percent,
                     crit_damage: crit_bonus,
                     crit_chance,
@@ -3206,6 +3236,26 @@ impl<'a> Timeline<'a> {
                         ));
                     }
                 }
+                ConditionalKind::SelfBoons(ref boons) => {
+                    let holds = boons
+                        .iter()
+                        .all(|(boon, want)| prerequisite_holds.carries(boon) == *want);
+                    if holds {
+                        self.self_boon_held.insert(spec.source_name.clone());
+                    }
+                    if holds != spec.active {
+                        spec.active = holds;
+                        changes.push((
+                            spec.source_name.clone(),
+                            holds,
+                            if holds {
+                                "self-boon gate holds".to_string()
+                            } else {
+                                "self-boon gate lapsed".to_string()
+                            },
+                        ));
+                    }
+                }
                 ConditionalKind::PerFoeStack { ref condition, max } => {
                     let stacks = prerequisite_holds.foe_stacks(condition).min(max);
                     let holds = stacks > 0;
@@ -3277,6 +3327,7 @@ impl<'a> Timeline<'a> {
                 | ConditionalKind::InShroud
                 | ConditionalKind::Prerequisite(_)
                 | ConditionalKind::Timed { .. }
+                | ConditionalKind::SelfBoons(_)
                     if spec.active =>
                 {
                     1.0 + spec.percent / 100.0
@@ -3553,6 +3604,23 @@ impl<'a> Timeline<'a> {
                 &name,
                 "prerequisite never met",
             );
+        }
+        // A self-boon bonus whose boon was never raised read zero all fight:
+        // a gap in the simulated boon sources, not a measured 0% (W4).
+        let unraised: Vec<String> = self
+            .conditional_specs
+            .iter()
+            .filter(|spec| !self.self_boon_held.contains(&spec.source_name))
+            .filter_map(|spec| match &spec.kind {
+                ConditionalKind::SelfBoons(boons) => boons
+                    .iter()
+                    .find(|(_, want)| *want)
+                    .map(|(boon, _)| no_boon_source_note(&spec.source_name, boon)),
+                _ => None,
+            })
+            .collect();
+        for note in unraised {
+            self.note_unmodeled(note);
         }
         if self.shroud_entered_once {
             return;
@@ -4821,6 +4889,8 @@ pub(crate) fn foe_condition_name_eq(stored: &str, want: &str) -> bool {
 /// can evaluate foe prerequisites while it holds `&mut self.conditional_specs`.
 struct PrerequisiteView {
     in_shroud: bool,
+    /// Unexpired buffs on the player, by name.
+    self_boons: Vec<String>,
     foe_conditions: Vec<String>,
     foe_stacks: Vec<(String, u32)>,
     foe_ratio: Option<f64>,
@@ -4831,6 +4901,12 @@ impl PrerequisiteView {
     fn of(timeline: &Timeline<'_>) -> Self {
         Self {
             in_shroud: timeline.in_shroud.is_some(),
+            self_boons: timeline
+                .buffs
+                .iter()
+                .filter(|b| b.expires_at_ms > timeline.now_ms)
+                .map(|b| b.name.clone())
+                .collect(),
             foe_conditions: timeline
                 .target
                 .conditions
@@ -4852,6 +4928,11 @@ impl PrerequisiteView {
                 .map(|target| timeline.enemy_hp() / target),
             attunement: timeline.attunement.clone(),
         }
+    }
+
+    /// Whether the player carries `boon` now (as `Timeline::has_buff`).
+    fn carries(&self, boon: &str) -> bool {
+        self.self_boons.iter().any(|b| b.eq_ignore_ascii_case(boon))
     }
 
     /// Unexpired stacks of `condition` on the primary foe.
@@ -5007,6 +5088,37 @@ fn resource_kind_by_name(name: &str) -> Option<ResourceKind> {
         "flow" => Some(ResourceKind::Flow),
         _ => None,
     }
+}
+
+/// The coverage note for a self-boon bonus whose boon the simulation never
+/// raised: `"{source} (gated on {boon}: no simulated source)"`.
+pub(crate) fn no_boon_source_note(source: &str, boon: &str) -> String {
+    format!("{source} (gated on {boon}: no simulated source)")
+}
+
+/// A `Conditional` record held only by the player's own boons: no
+/// prerequisite, no stacks, and every gate `SelfBoon` / `SelfBoonAbsent`
+/// (WvW Excessive Energy: +10% strike while you have Vigor). Returns the
+/// `(boon, must carry)` pairs. Both simulators play such a record as a
+/// standing modifier live while the gates hold, and `engine` takes the fact
+/// parser's always-on share out when they do (UR-18).
+pub(crate) fn self_boon_gates(effect: &NormalizedEffect) -> Option<Vec<(String, bool)>> {
+    if effect.trigger_rule != TriggerRule::Conditional
+        || effect.prerequisite.is_some()
+        || effect.max_stacks.is_some()
+        || effect.gates.is_empty()
+    {
+        return None;
+    }
+    effect
+        .gates
+        .iter()
+        .map(|gate| match gate {
+            Gate::SelfBoon { boon } => Some((boon.clone(), true)),
+            Gate::SelfBoonAbsent { boon } => Some((boon.clone(), false)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Why `load_normalized_effects` cannot execute a record yet, worded so the
@@ -7536,6 +7648,108 @@ mod tests {
 
         assert_eq!(timeline.unmodeled_names.len(), 1);
         assert!(timeline.proc_specs.is_empty());
+    }
+
+    /// UR-18: a record held only by the player's own boon (WvW Excessive
+    /// Energy under Vigor, Hematic Focus's crit chance under Fury) holds
+    /// while that boon does, read from the timeline's own buffs.
+    #[test]
+    fn a_self_boon_gated_bonus_holds_only_under_its_boon() {
+        let data = crate::data::normalized_effects::effects();
+        let record = |id: &str| {
+            data.effects_for_mode("WvW")
+                .iter()
+                .find(|e| e.effect_id == id)
+                .unwrap_or_else(|| panic!("WvW {id}"))
+                .clone()
+        };
+        let excessive = record("trait:1936:0");
+        let hematic = record("trait:536:1");
+        let params = params();
+        let mut timeline = Timeline::new(
+            &[],
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[&excessive, &hematic],
+            &[],
+            true,
+            Vec::new(),
+        );
+        assert_eq!(timeline.conditional_specs.len(), 2);
+        assert!(
+            timeline.unmodeled_names.is_empty(),
+            "{:?}",
+            timeline.unmodeled_names
+        );
+
+        timeline.update_conditionals();
+        assert_eq!(timeline.strike_conditional_mult(), 1.0);
+        assert_eq!(timeline.crit_chance_conditional_pct(), 0.0);
+
+        for boon in ["Vigor", "Fury"] {
+            timeline.buffs.push(TimedBuff {
+                name: boon.into(),
+                stacks: 1,
+                expires_at_ms: 1_000,
+            });
+        }
+        timeline.update_conditionals();
+        assert!((timeline.strike_conditional_mult() - 1.10).abs() < 1e-9);
+        assert!((timeline.crit_chance_conditional_pct() - 5.0).abs() < 1e-9);
+
+        timeline.now_ms = 1_000;
+        timeline.update_conditionals();
+        assert_eq!(timeline.strike_conditional_mult(), 1.0);
+        assert_eq!(timeline.crit_chance_conditional_pct(), 0.0);
+    }
+
+    /// UR-18: every self-boon-gated `Conditional` record with no
+    /// prerequisite, in every mode file, is either gated on the live boon or
+    /// named on the coverage line; never neither, never both.
+    #[test]
+    fn every_self_boon_gated_conditional_is_gated_or_named() {
+        let data = crate::data::normalized_effects::effects();
+        let params = params();
+        let mut seen = 0;
+        for mode in ["PvE", "PvP", "WvW"] {
+            for effect in data.effects_for_mode(mode) {
+                let boon_gated = effect.gates.iter().any(|gate| {
+                    matches!(gate, Gate::SelfBoon { .. } | Gate::SelfBoonAbsent { .. })
+                });
+                if effect.trigger_rule != TriggerRule::Conditional
+                    || effect.prerequisite.is_some()
+                    || !boon_gated
+                {
+                    continue;
+                }
+                seen += 1;
+                let timeline = Timeline::new(
+                    &[],
+                    &params,
+                    profile(2_000, vec![]),
+                    open_enemy(false),
+                    &[effect],
+                    &[],
+                    true,
+                    Vec::new(),
+                );
+                let gated = timeline
+                    .conditional_specs
+                    .iter()
+                    .any(|spec| matches!(spec.kind, ConditionalKind::SelfBoons(_)));
+                let named = timeline
+                    .unmodeled_names
+                    .iter()
+                    .any(|name| name.starts_with(&effect.source_name));
+                assert!(
+                    gated != named,
+                    "{mode} {}: gated {gated}, named {named}",
+                    effect.effect_id
+                );
+            }
+        }
+        assert!(seen >= 9, "only {seen} self-boon-gated records");
     }
 
     fn test_proc_effect(

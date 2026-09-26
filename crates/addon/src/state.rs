@@ -200,26 +200,32 @@ struct TrackedWorker {
     handle: JoinHandle<()>,
 }
 
+/// The OS thread behind `handle` has ended.
+///
+/// A pinned thread leaves through `FreeLibraryAndExitThread` from inside the
+/// std closure, so std never releases its result slot and
+/// `JoinHandle::is_finished` stays false forever. The thread object's signal
+/// is what says the thread is gone. When this is true but
+/// `handle.is_finished()` is not, `join` would panic: drop the handle instead.
+pub(crate) fn thread_has_exited<T>(handle: &JoinHandle<T>) -> bool {
+    if handle.is_finished() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        // SAFETY: the handle is owned by `handle` and open; a zero timeout
+        // only polls. WAIT_OBJECT_0 (0) = the thread has exited.
+        unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) == 0 }
+    }
+    #[cfg(not(windows))]
+    false
+}
+
 impl TrackedWorker {
-    /// The OS thread has ended.
-    ///
-    /// A pinned worker leaves through `FreeLibraryAndExitThread` from inside the
-    /// std closure, so std never releases its result slot and
-    /// `JoinHandle::is_finished` stays false forever. The thread object's
-    /// signal is what says the thread is gone.
+    /// The OS thread has ended; see [`thread_has_exited`].
     fn is_finished(&self) -> bool {
-        if self.handle.is_finished() {
-            return true;
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::io::AsRawHandle;
-            // SAFETY: the handle is owned by `self.handle` and open; a zero
-            // timeout only polls. WAIT_OBJECT_0 (0) = the thread has exited.
-            unsafe { WaitForSingleObject(self.handle.as_raw_handle(), 0) == 0 }
-        }
-        #[cfg(not(windows))]
-        false
+        thread_has_exited(&self.handle)
     }
 
     /// Join a worker that has **already finished** and report whether it died panicking.
@@ -813,8 +819,9 @@ pub struct MainState {
     pub build_loading: bool,
     pub error: Option<String>,
     // Template selection
-    pub build_tabs: Vec<gw2_api::models::BuildTab>,
-    pub equipment_tabs: Vec<gw2_api::models::EquipmentTab>,
+    /// `Arc` (both tab lists) so the paint clone shares them.
+    pub build_tabs: Arc<Vec<gw2_api::models::BuildTab>>,
+    pub equipment_tabs: Arc<Vec<gw2_api::models::EquipmentTab>>,
     pub selected_build_tab: Option<usize>,
     pub selected_equipment_tab: Option<usize>,
     pub build_chat_code: Option<String>,
@@ -847,14 +854,16 @@ pub struct MainState {
     pub optimizing: bool,
     pub optimize_stage: String,
     /// Step feed of the run in flight (optimize or Choya), or the last one.
-    /// Written only by that run's worker, through `with_state`.
-    pub run_feed: crate::ui::run_feed::LiveFeed,
+    /// Written only by that run's worker, through `with_state`. `Arc` so the
+    /// paint clone shares it; the worker writes through `Arc::make_mut`.
+    pub run_feed: Arc<crate::ui::run_feed::LiveFeed>,
     /// 6-axis optimization weights (Power, Condition, Boon Support, Heal, Sustain, Control).
     /// Drives gear search, trait selection, and build scoring.
     pub weights: OptimizationWeights,
     /// Which radar chart axis is being dragged (None = no drag).
     pub radar_dragging: Option<usize>,
-    pub saved_builds: Vec<SavedBuild>,
+    /// `Arc` so the paint clone shares it; edits go through `Arc::make_mut`.
+    pub saved_builds: Arc<Vec<SavedBuild>>,
     pub saved_builds_loaded: bool,
     /// Basenames of `.json` files in the saves directory that failed to
     /// parse on the last load, so the Save/Load tab can warn the player
@@ -922,8 +931,8 @@ pub struct MainState {
     ///
     /// The whole row, not just id and name: the picker prunes on what a model
     /// can do and orders on how well it does it, and the request builder
-    /// sizes itself from the same data.
-    pub available_models: Vec<gw2_optimizer::llm::ModelInfo>,
+    /// sizes itself from the same data. `Arc` so the paint clone shares it.
+    pub available_models: Arc<Vec<gw2_optimizer::llm::ModelInfo>>,
     /// Published builds closest to the current proposal, one per site.
     ///
     /// Recomputed only when [`Self::provider_picks_key`] changes: matching
@@ -1180,7 +1189,7 @@ impl MainState {
             &base.optimize_stage,
             &paint.optimize_stage,
         );
-        keep_worker(&mut self.run_feed, &base.run_feed, &paint.run_feed);
+        // `run_feed`: paint never writes it (workers only), so live keeps its own.
         take_ui(&mut self.weights, &base.weights, &paint.weights);
         take_ui(
             &mut self.radar_dragging,
@@ -1288,7 +1297,7 @@ impl MainState {
             &base.copy_feedback_frames,
             &paint.copy_feedback_frames,
         );
-        keep_len(
+        keep_len_arc(
             &mut self.available_models,
             base.available_models.len(),
             &paint.available_models,
@@ -1623,7 +1632,7 @@ pub fn init(addon_dir: PathBuf) {
             main.weights = r.to_weights_for(&main.game_mode, main.combat_tier);
         }
     }
-    main.chat.history = crate::ui::chat_bar::load_history(&addon_dir);
+    main.chat.history = Arc::new(crate::ui::chat_bar::load_history(&addon_dir));
     main.hydrate_benchmarks_from_disk(&addon_dir);
     crate::ui::icons::set_graphics_dir(addon_dir.join("cache").join("graphics"));
     *lock_state() = Some(AddonState {
@@ -2248,6 +2257,26 @@ pub(crate) fn keep_len<T: Clone>(live: &mut Vec<T>, base_len: usize, paint: &[T]
     }
 }
 
+/// Same content, pointer first: an untouched `Arc` is shared by live, base
+/// and paint, so this rarely walks the items.
+pub(crate) fn same_arc<T: PartialEq>(a: &Arc<T>, b: &Arc<T>) -> bool {
+    Arc::ptr_eq(a, b) || a == b
+}
+
+/// [`keep_worker`] for a value shared with the paint copy: takes the pointer.
+pub(crate) fn keep_worker_arc<T: PartialEq>(live: &mut Arc<T>, base: &Arc<T>, paint: &Arc<T>) {
+    if same_arc(live, base) && !same_arc(paint, base) {
+        *live = Arc::clone(paint);
+    }
+}
+
+/// [`keep_len`] for a list shared with the paint copy: takes the pointer.
+pub(crate) fn keep_len_arc<T>(live: &mut Arc<Vec<T>>, base_len: usize, paint: &Arc<Vec<T>>) {
+    if live.len() == base_len && paint.len() != base_len {
+        *live = Arc::clone(paint);
+    }
+}
+
 fn merge_db(
     live: &mut Option<Arc<gw2_optimizer::gamedb::GameDb>>,
     base: &Option<Arc<gw2_optimizer::gamedb::GameDb>>,
@@ -2299,15 +2328,16 @@ fn merge_chat(live: &mut ChatBarState, base: &ChatBarState, paint: &ChatBarState
         live.names = paint.names.clone();
     }
     merge_busy(&mut live.waiting, base.waiting, paint.waiting);
-    if paint.history != base.history {
-        if live.history == base.history || paint.history.starts_with(&live.history) {
-            live.history = paint.history.clone();
+    if !same_arc(&paint.history, &base.history) {
+        if same_arc(&live.history, &base.history) || paint.history.starts_with(&live.history) {
+            live.history = Arc::clone(&paint.history);
         } else if live.history.starts_with(&base.history)
             && paint.history.starts_with(&base.history)
         {
+            let history = Arc::make_mut(&mut live.history);
             for msg in paint.history.iter().skip(base.history.len()) {
-                if !live.history.contains(msg) {
-                    live.history.push(msg.clone());
+                if !history.contains(msg) {
+                    history.push(msg.clone());
                 }
             }
         }
@@ -3317,6 +3347,62 @@ mod tests {
         }
     }
 
+    /// FCR-010: the paint copy and its baseline share the heavy lists with
+    /// live (a refcount bump, no deep copy per frame). A paint edit copies on
+    /// write and reaches live only at commit.
+    #[test]
+    fn paint_frame_shares_heavy_collections() {
+        let _serial = state_test_guard();
+        let _render = RenderThreadGuard::enter();
+        init_worker_test("paint_shared");
+        let src = gw2_core::config::NewsSource::Official;
+        with_state(|s| {
+            s.main.saved_builds = Arc::new(vec![saved("a", "old")]);
+            s.main.chat.history = Arc::new(vec![Default::default()]);
+            s.radio.results = Arc::new(vec![Default::default()]);
+            s.news.set_feed(
+                src,
+                "en",
+                vec![crate::news::NewsItem {
+                    source: src,
+                    title: "t".into(),
+                    url: "u".into(),
+                    published: String::new(),
+                    published_ts: 0,
+                    snippet: String::new(),
+                    body: "b".into(),
+                    image_url: None,
+                }],
+            );
+        });
+
+        let mut frame = paint_frame();
+        with_state(|live| {
+            for s in [&frame.state, &frame.baseline] {
+                let (m, l) = (&s.main, &live.main);
+                assert!(Arc::ptr_eq(&m.available_models, &l.available_models));
+                assert!(Arc::ptr_eq(&m.run_feed, &l.run_feed));
+                assert!(Arc::ptr_eq(&m.saved_builds, &l.saved_builds));
+                assert!(Arc::ptr_eq(&m.chat.history, &l.chat.history));
+                assert!(Arc::ptr_eq(&m.build_tabs, &l.build_tabs));
+                assert!(Arc::ptr_eq(&m.equipment_tabs, &l.equipment_tabs));
+                assert!(Arc::ptr_eq(&s.radio.results, &live.radio.results));
+                assert!(std::ptr::eq(
+                    s.news.items(src).as_ptr(),
+                    live.news.items(src).as_ptr()
+                ));
+            }
+        });
+
+        Arc::make_mut(&mut frame.state.main.saved_builds)[0].notes = "new".into();
+        let live_notes = || with_state(|s| s.main.saved_builds[0].notes.clone()).unwrap();
+        assert_eq!(live_notes(), "old");
+        assert_eq!(frame.baseline.main.saved_builds[0].notes, "old");
+        with_state(|s| frame.commit(s)).expect("commit");
+        assert_eq!(live_notes(), "new");
+        reset_state();
+    }
+
     /// FCR-022: a same-length Ranch edit (notes, overwrite in place) in a
     /// mismatch frame is kept.
     #[test]
@@ -3324,11 +3410,11 @@ mod tests {
         let _serial = state_test_guard();
         let _render = RenderThreadGuard::enter();
         init_worker_test("paint_ranch");
-        with_state(|s| s.main.saved_builds = vec![saved("a", "old"), saved("b", "")]);
+        with_state(|s| s.main.saved_builds = Arc::new(vec![saved("a", "old"), saved("b", "")]));
 
         let mut frame = paint_frame();
         publish_from_worker(|s| s.main.optimize_stage = "busy".into());
-        frame.state.main.saved_builds[0].notes = "new".into();
+        Arc::make_mut(&mut frame.state.main.saved_builds)[0].notes = "new".into();
         with_state(|s| frame.commit(s)).expect("commit");
         let notes = with_state(|s| {
             s.main
@@ -3351,7 +3437,7 @@ mod tests {
         init_worker_test("paint_mini");
         with_state(|s| {
             s.main.characters = vec!["Alt".into()];
-            s.main.saved_builds = vec![saved("a", "")];
+            s.main.saved_builds = Arc::new(vec![saved("a", "")]);
         });
 
         let mut frame = with_state(|s| PaintCapture::take_mini(s))

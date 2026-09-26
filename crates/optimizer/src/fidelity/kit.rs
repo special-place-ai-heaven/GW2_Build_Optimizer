@@ -258,6 +258,42 @@ pub struct ReconstructedKit {
 }
 
 impl ReconstructedKit {
+    /// Every item id the kit names: rune, relic, sigils, gear rows with
+    /// their upgrades, food and utility. The fidelity test GameDb keeps
+    /// exactly these items (`log_compare --gamedb`).
+    pub fn item_ids(&self) -> BTreeSet<u32> {
+        let p = &self.build.published;
+        p.rune_id
+            .into_iter()
+            .chain(p.relic_id)
+            .chain(p.sigil_ids.iter().copied())
+            .chain(
+                p.gear
+                    .iter()
+                    .flat_map(|g| g.item_id.into_iter().chain(g.upgrade_ids.iter().copied())),
+            )
+            .chain(self.food)
+            .chain(self.utility)
+            .collect()
+    }
+
+    /// Every trait the kit runs: each specialization's minor traits (from
+    /// `db`) and its chosen majors.
+    pub fn trait_ids(&self, db: &GameDb) -> BTreeSet<u32> {
+        let lines = &self.build.published.specs;
+        let minors = lines
+            .iter()
+            .filter_map(|l| db.specializations.get(&l.id))
+            .flat_map(|s| s.minor_traits.iter().copied());
+        let majors = lines.iter().flat_map(|l| l.trait_ids.iter().copied());
+        minors.chain(majors).collect()
+    }
+
+    /// The kit's bar: heal, utility and elite skill ids.
+    pub fn skill_ids(&self) -> BTreeSet<u32> {
+        self.build.published.skill_ids.iter().copied().collect()
+    }
+
     /// `Stated` when every group is stated, else
     /// `Stated(armor,weapons,trinkets)+Corpus(rune,relic)`.
     pub fn gear_label(&self) -> String {

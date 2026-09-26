@@ -157,8 +157,8 @@ fn apply_character_tabs(
     let bt_idx = build_tabs.iter().position(|t| t.is_active).unwrap_or(0);
     let et_idx = equipment_tabs.iter().position(|t| t.is_active).unwrap_or(0);
     state.main.resolve_rev = state.main.resolve_rev.wrapping_add(1);
-    state.main.build_tabs = build_tabs;
-    state.main.equipment_tabs = equipment_tabs;
+    state.main.build_tabs = std::sync::Arc::new(build_tabs);
+    state.main.equipment_tabs = std::sync::Arc::new(equipment_tabs);
     state.main.selected_build_tab = keep(
         state.main.selected_build_tab,
         state.main.build_tabs.len(),
@@ -296,10 +296,12 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
                             }
 
                             // Compare: only update UI if data actually changed
-                            let bt_changed = serde_json::to_string(&s.main.build_tabs).ok()
+                            let bt_changed = serde_json::to_string(s.main.build_tabs.as_slice())
+                                .ok()
                                 != serde_json::to_string(&fresh_bt).ok();
-                            let et_changed = serde_json::to_string(&s.main.equipment_tabs).ok()
-                                != serde_json::to_string(&fresh_et).ok();
+                            let et_changed =
+                                serde_json::to_string(s.main.equipment_tabs.as_slice()).ok()
+                                    != serde_json::to_string(&fresh_et).ok();
 
                             if bt_changed || et_changed {
                                 apply_character_tabs(s, fresh_bt, fresh_et);

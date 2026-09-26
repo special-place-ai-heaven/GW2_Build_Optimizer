@@ -624,27 +624,6 @@
       "cast_ms": 1290,
       "file": "build-cwb-sw-tor-sc-tor.json"
     },
-    "Whirling Wrath": {
-      "hits": 14,
-      "at": [
-        0.0714,
-        0.1427,
-        0.2141,
-        0.2855,
-        0.3568,
-        0.4282,
-        0.4995,
-        0.5714,
-        0.6427,
-        0.7141,
-        0.7855,
-        0.8568,
-        0.9282,
-        1.0
-      ],
-      "cast_ms": 2200,
-      "file": "build-dh-bgh.json"
-    },
     "Willbender Flames - Courage": {
       "hits": 5,
       "at": [

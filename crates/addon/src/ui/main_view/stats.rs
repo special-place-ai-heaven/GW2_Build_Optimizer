@@ -219,7 +219,7 @@ pub(super) fn start_fetch_models(state: &mut AddonState) {
                 s.main.models_loading = false;
                 match result {
                     Some(Ok(models)) => {
-                        s.main.available_models = models;
+                        s.main.available_models = std::sync::Arc::new(models);
                         s.main.models_error = None;
                     }
                     Some(Err(e)) => {
@@ -552,7 +552,8 @@ pub(super) fn load_game_db(state: &mut AddonState) {
             } else {
                 let cache = gw2_api::cache::DataCache::new(&cache_dir);
                 let r = gw2_optimizer::gamedb::GameDb::load(&cache);
-                // Read here, not under the state lock: it parses file headers.
+                // Read here, not under the state lock: it opens skills.json and
+                // traits.json and reads each header up to the first data row.
                 let outdated = r.is_ok() && cache.format_outdated();
                 if token.is_cancelled() {
                     None

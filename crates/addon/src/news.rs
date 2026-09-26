@@ -1,5 +1,6 @@
 //! Public RSS/Atom headlines for Setup (official GW2) and the News tab.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gw2_core::config::{NewsKind, NewsSource};
@@ -32,7 +33,8 @@ pub struct NewsItem {
 
 #[derive(Clone, Debug, Default)]
 pub struct NewsState {
-    feeds: [Option<Vec<NewsItem>>; 5],
+    /// `Arc` so the paint clone shares the article bodies.
+    feeds: [Option<Arc<Vec<NewsItem>>>; 5],
     pub loading: bool,
     /// Per-source success stamp. A sibling feed must not start another source's 30-min TTL.
     fetched_at: [Option<Instant>; 5],
@@ -48,17 +50,21 @@ pub struct NewsState {
     pub still_zoom: f32,
 }
 
-fn news_feeds_same(a: &[Option<Vec<NewsItem>>; 5], b: &[Option<Vec<NewsItem>>; 5]) -> bool {
+fn news_feeds_same(
+    a: &[Option<Arc<Vec<NewsItem>>>; 5],
+    b: &[Option<Arc<Vec<NewsItem>>>; 5],
+) -> bool {
     a.iter()
         .zip(b.iter())
         .all(|(left, right)| match (left, right) {
             (None, None) => true,
             (Some(left), Some(right)) => {
-                left.len() == right.len()
-                    && left
-                        .iter()
-                        .zip(right)
-                        .all(|(p, q)| p.url == q.url && p.title == q.title)
+                Arc::ptr_eq(left, right)
+                    || left.len() == right.len()
+                        && left
+                            .iter()
+                            .zip(right.iter())
+                            .all(|(p, q)| p.url == q.url && p.title == q.title)
             }
             _ => false,
         })
@@ -97,11 +103,13 @@ impl NewsState {
     }
 
     pub fn items(&self, src: NewsSource) -> &[NewsItem] {
-        self.feeds[src.index()].as_deref().unwrap_or(&[])
+        self.feeds[src.index()]
+            .as_deref()
+            .map_or(&[], Vec::as_slice)
     }
 
     pub fn set_feed(&mut self, src: NewsSource, lang: &str, items: Vec<NewsItem>) {
-        self.feeds[src.index()] = Some(items);
+        self.feeds[src.index()] = Some(Arc::new(items));
         self.failed_at[src.index()] = None;
         if src == NewsSource::Official {
             self.official_lang = lang.to_string();

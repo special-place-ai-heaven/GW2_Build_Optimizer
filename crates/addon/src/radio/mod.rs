@@ -99,7 +99,8 @@ pub struct RadioUiState {
     pub auto_kicked: bool,
     pub now_playing: NowPlayingCell,
     pub search_text: String,
-    pub results: Vec<RbStation>,
+    /// `Arc` so the paint clone shares it; the sort writes through `Arc::make_mut`.
+    pub results: Arc<Vec<RbStation>>,
     /// True while a directory search worker is in flight.
     pub searching: bool,
     /// Transient one-line error surfaced in the tab.
@@ -135,7 +136,7 @@ impl RadioUiState {
         crate::state::take_ui(&mut self.auto_kicked, &base.auto_kicked, &paint.auto_kicked);
         // `now_playing` is an `Arc` shared with the snapshot.
         crate::state::take_ui(&mut self.search_text, &base.search_text, &paint.search_text);
-        crate::state::keep_worker(&mut self.results, &base.results, &paint.results);
+        crate::state::keep_worker_arc(&mut self.results, &base.results, &paint.results);
         crate::state::merge_busy(&mut self.searching, base.searching, paint.searching);
         crate::state::merge_message(&mut self.last_error, &base.last_error, &paint.last_error);
         crate::state::take_ui(

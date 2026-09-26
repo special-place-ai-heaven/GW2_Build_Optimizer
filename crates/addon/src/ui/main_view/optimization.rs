@@ -187,8 +187,18 @@ pub(super) fn apply_referee_report(
     suggestion.combat_squad = Some(perf_to_combat_metrics(&report.combat_squad));
     suggestion.rotation = rotation;
     suggestion.viability = Some(report.viability.clone());
-    suggestion.data_quality = report.quality.clone();
-    for reason in report.quality_reasons.iter().map(|r| r.to_string()) {
+    apply_report_quality(suggestion, &report.quality, &report.quality_reasons);
+}
+
+/// The badge from a referee report: its quality, and its reasons beside the
+/// tab's own. Reference cards and reopened saves read their badge here.
+pub(super) fn apply_report_quality(
+    suggestion: &mut crate::ui::comparison::BuildSuggestion,
+    quality: &gw2_optimizer::data::DataQuality,
+    reasons: &[gw2_optimizer::data::DataQualityReason],
+) {
+    suggestion.data_quality = quality.clone();
+    for reason in reasons.iter().map(|r| r.to_string()) {
         if !suggestion.quality_reasons.contains(&reason) {
             suggestion.quality_reasons.push(reason);
         }
@@ -671,7 +681,13 @@ pub(super) fn simulate_suggestion_rotation(
     ctx: &BalanceContext,
     scenario: &gw2_optimizer::scenario::ScenarioSpec,
 ) {
+    use gw2_optimizer::data::DataQuality;
     if suggestion.skills.is_empty() && suggestion.weapons.is_empty() {
+        suggestion.data_quality = suggestion.data_quality.merge(&DataQuality::Provisional);
+        let text = "saved build not measured: no weapons or skills".to_string();
+        if !suggestion.quality_reasons.contains(&text) {
+            suggestion.quality_reasons.push(text);
+        }
         return;
     }
     let plate = super::chat_flow::plate_from_suggestion(suggestion);
@@ -679,8 +695,9 @@ pub(super) fn simulate_suggestion_rotation(
         gw2_optimizer::validation::validate_gemini_build(&plate, db, profession_name);
     // A save whose names no longer resolve keeps the numbers it was saved
     // with, and says what did not resolve, rather than being re-priced as a
-    // partial build.
+    // partial build. Blocked, as the referee grades a validator error.
     if !validated.errors.is_empty() {
+        suggestion.data_quality = suggestion.data_quality.merge(&DataQuality::Blocked);
         for error in &validated.errors {
             let text = format!("saved build no longer resolves: {}", error.detail);
             if !suggestion.quality_reasons.contains(&text) {
@@ -693,6 +710,8 @@ pub(super) fn simulate_suggestion_rotation(
     if let Some(slots) = &suggestion.slot_prefixes {
         validated.gear_slots = slots.clone();
     }
+    // A legacy save's map carries prefix names with itemstat id 0.
+    validated.resolve_slot_prefix_ids(db);
     measure_validated(
         suggestion,
         &validated,
@@ -702,6 +721,18 @@ pub(super) fn simulate_suggestion_rotation(
         ctx,
         scenario,
     );
+    // The badge is the referee's, as on every tab it judges; a save stores
+    // no quality of its own.
+    let report = gw2_optimizer::referee::evaluate_validated_build(
+        &validated,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+    );
+    apply_report_quality(suggestion, &report.quality, &report.quality_reasons);
+    suggestion.coverage_note = coverage_note_from(&report.quality_reasons);
 }
 
 /// A tab's measured half from its validated build: [`gw2_optimizer::engine::measure_plated`].
@@ -2208,7 +2239,7 @@ pub(super) mod tests {
         // Called from INSIDE a `with_state` closure — the exact shape that
         // deadlocked when this function reached for the global `STATE` itself.
         let observed = crate::state::with_state(|s| {
-            s.main.build_tabs = vec![
+            s.main.build_tabs = std::sync::Arc::new(vec![
                 BuildTab {
                     tab: 1,
                     is_active: false,
@@ -2219,7 +2250,7 @@ pub(super) mod tests {
                     is_active: true,
                     build: build_with_pets(20, 21),
                 },
-            ];
+            ]);
 
             s.main.selected_build_tab = Some(1);
             let selected = snapshot_ranger_pets(s);
@@ -2882,6 +2913,38 @@ pub(super) mod tests {
             );
             assert_eq!(measured(&optimized), measured(&chat), "{mode:?}");
         }
+    }
+
+    /// The badge mapping: a report with reasons is not Verified; an empty
+    /// Verified report is.
+    #[test]
+    fn report_quality_maps_onto_the_badge() {
+        use gw2_optimizer::data::{DataQuality, DataQualityReason};
+        let reason = DataQualityReason {
+            field: "wvw_timeline.effects".into(),
+            entity: "Necromancer".into(),
+            modes: vec!["WvW".into()],
+            explanation: "Not simulated: Onslaught".into(),
+        };
+        let mut shown = BuildSuggestion {
+            data_quality: DataQuality::Verified,
+            ..Default::default()
+        };
+        super::apply_report_quality(
+            &mut shown,
+            &DataQuality::Provisional,
+            std::slice::from_ref(&reason),
+        );
+        assert_eq!(shown.data_quality, DataQuality::Provisional);
+        assert_eq!(shown.quality_reasons, vec![reason.to_string()]);
+
+        let mut clean = BuildSuggestion {
+            data_quality: DataQuality::Provisional,
+            ..Default::default()
+        };
+        super::apply_report_quality(&mut clean, &DataQuality::Verified, &[]);
+        assert_eq!(clean.data_quality, DataQuality::Verified);
+        assert!(clean.quality_reasons.is_empty());
     }
 
     /// Stats reads a plated build through [`super::super::stats::plated_display`]

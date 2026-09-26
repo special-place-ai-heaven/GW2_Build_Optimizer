@@ -2,6 +2,18 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.52
+
+- The reserved/private-address screen used for redirect hops on radio and news downloads now also blocks CGNAT, multicast, broadcast, documentation, benchmarking, NAT64, and 6to4 ranges, closing gaps the earlier loopback/private/link-local check missed.
+- A cache file is now checked for staleness by reading only its header instead of the whole file. An empty game-data catalog or an empty language pack for the current game build is now picked up by a normal Refresh instead of needing Clear Cache, and a file truncated before its first data row is correctly read as stale.
+- Any heuristic data record or balance override equipped by a build now names itself as a Provisional reason instead of listing its fields. Sharpened Edges is corrected to the wiki and reads Factual; Phalanx Strength's might durations are corrected but stay Provisional; Path of Corruption, Relic of Isgarren, and Sigil of Concentration read Provisional with the mismatch named; the Reaper's Onslaught reason carries the measured gap against the committed WvW logs; a dead Whirling Wrath timing row is removed.
+- Radio: station switches no longer wait a full second, and unload no longer logs a false detach warning. A radio DNS lookup that stalls during unload can no longer crash the game after the addon unloads.
+- Reopening a saved build now shows the same Verified/Provisional badge the other tabs compute, instead of always showing Verified; a saved build that fails to resolve now shows Blocked.
+- Overlay frames no longer deep-copy the model list, run feed, saved builds, chat history, radio results, news, and character tabs on every paint, cutting a heavy session's frame snapshot cost sharply.
+- WvW: boon-gated trait bonuses (Excessive Energy, Bird of Prey, Furious Strength, Hematic Focus) now count only while the simulated boon is actually up, instead of for the whole fight. Energy Amplifier and Imbued Haste read as not modelled, and rotation gaps are always named in the quality reasons.
+- Internal: `actions/checkout` bumped to v7 in CI and the feedback-server workflow.
+- Internal: a fidelity budget gate runs in CI against a checked-in game-data subset frozen at build 207318, with a parity test against a synced cache.
+
 ## 1.14.51
 
 - Lost-update conflicts between the overlay frame and background workers fixed across the board: Stop no longer leaves the next run born cancelled, the feedback wizard no longer sticks on "Sending", the busy spinner no longer drops mid-run, switching build/equipment tabs or game mode no longer shows a stale build, news retries no longer skip their backoff, a config edit no longer reverts a worker's write, and an in-place saved-build overwrite no longer shows the old plate. The mini radio strip also no longer reads an unnecessarily wide state snapshot.

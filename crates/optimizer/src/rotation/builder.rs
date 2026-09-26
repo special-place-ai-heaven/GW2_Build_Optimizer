@@ -708,55 +708,29 @@ pub(crate) fn sourced_skill_value(ctx: &BalanceContext, skill_id: u32, field: &s
     }
 }
 
-/// The evidence level of a played override (`OverrideResult::Value`), which
-/// [`sourced_skill_value`] drops.
-fn sourced_skill_evidence(
-    ctx: &BalanceContext,
-    skill_id: u32,
-    field: &str,
-) -> Option<crate::data::EvidenceLevel> {
-    match overrides().lookup(
-        &ctx.patch_id,
-        ctx.game_mode.label(),
-        "Skill",
-        skill_id,
-        field,
-    ) {
-        Some(OverrideResult::Value { evidence_level, .. }) => Some(evidence_level),
-        Some(OverrideResult::Unknown { .. }) | None => None,
-    }
-}
-
-/// Bar skills that play a Heuristic balance override, as
-/// `"<skill> (heuristic <field>)"` for `CoverageHonesty::heuristic`: the
-/// value plays and the build reads Provisional by name (FCR-013, Whirling
-/// Wrath's `hit_count` 2 rounded from a logged 1.75).
-// ponytail: the statically named fields only; a Heuristic
-// `status_duration_ms:*` override would need its field listed here.
+/// Bar skills and equipped traits (`(id, db name)`) that play a Heuristic
+/// balance override in `o`, as `"<name> (heuristic <field>)"` for
+/// `CoverageHonesty::heuristic`: the value plays and the build reads
+/// Provisional by name (FCR-013, Whirling Wrath's `hit_count` 2 rounded from
+/// a logged 1.75). Any valued Heuristic field counts.
 pub(crate) fn heuristic_override_stamps(
+    o: &crate::data::balance_overrides::BalanceOverrides,
     skills: &[RotationSkill],
+    traits: &[(u32, &str)],
     ctx: &BalanceContext,
 ) -> Vec<String> {
-    const FIELDS: [&str; 8] = [
-        "hit_count",
-        "activation_ms",
-        "recharge_ms",
-        "initiative_cost",
-        "combo_field_duration_ms",
-        "damage_coefficient:above_50",
-        "damage_coefficient:below_50",
-        "damage_coefficient:below_25",
-    ];
-    let mut out: Vec<String> = skills
-        .iter()
-        .flat_map(|skill| {
-            FIELDS
-                .iter()
-                .filter(|field| {
-                    sourced_skill_evidence(ctx, skill.skill_id, field)
-                        == Some(crate::data::EvidenceLevel::Heuristic)
-                })
-                .map(|field| crate::data::quality::heuristic_entry(&skill.name, field).rendered())
+    let mut out: Vec<String> = o
+        .heuristic_entries(&ctx.patch_id, ctx.game_mode.label())
+        .filter_map(|(source_type, id, field)| {
+            let name = match source_type {
+                "Skill" => skills
+                    .iter()
+                    .find(|s| s.skill_id == id)
+                    .map(|s| s.name.as_str()),
+                "Trait" => traits.iter().find(|(t, _)| *t == id).map(|(_, n)| *n),
+                _ => None,
+            }?;
+            Some(crate::data::quality::heuristic_entry(name, field).rendered())
         })
         .collect();
     out.sort();
@@ -3411,7 +3385,7 @@ mod fact_selection_tests {
     /// 7 area projectiles per cast (sprint E23); `hit_count` is a whole
     /// strike, so the override is 2. The spin stays 7 x 0.35. The same facts
     /// on a skill with no override stay one projectile hit. Not area 7, and
-    /// not `hit_timing.json` hits 14.
+    /// not the 14 hits of the deleted `hit_timing.json` row.
     #[test]
     fn whirling_wrath_lands_sourced_projectile_hits_per_mode() {
         let factual = bar_skill(
@@ -3421,8 +3395,13 @@ mod fact_selection_tests {
             &[],
         );
         assert!(
-            crate::rotation::builder::heuristic_override_stamps(&[factual], &BalanceContext::pve())
-                .is_empty(),
+            crate::rotation::builder::heuristic_override_stamps(
+                overrides(),
+                &[factual],
+                &[],
+                &BalanceContext::pve()
+            )
+            .is_empty(),
             "a Factual hit_count override (9168: 4) is sourced, not heuristic"
         );
         let db = db_with(&[WHIRLING_WRATH]);
@@ -3447,7 +3426,9 @@ mod fact_selection_tests {
             // Provisional.
             let ctx = BalanceContext::new(mode.clone());
             let stamps = crate::rotation::builder::heuristic_override_stamps(
+                overrides(),
                 std::slice::from_ref(&skill),
+                &[],
                 &ctx,
             );
             assert_eq!(

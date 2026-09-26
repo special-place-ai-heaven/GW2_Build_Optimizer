@@ -2,15 +2,20 @@
 //! them.
 //!
 //! Plain CI: every fixture parses and is a fixed point of parse then
-//! serialize, `codes.json` names real fixture players, and the fight profile
-//! stays print-only. The db-backed tests are `#[ignore]`: comparing needs the
-//! synced game data and the published corpus.
+//! serialize, `codes.json` names real fixture players, the fight profile
+//! stays print-only, and the fidelity budget gate runs on the checked-in
+//! GameDb subset (`tests/fixtures/gamedb`) and fixture corpus. The
+//! `#[ignore]` tests need the synced game data: compare coverage over every
+//! squad player, and the parity check that the subset still reproduces the
+//! synced cache (run it before a release).
 //!
 //!   cargo test -p gw2-optimizer --test fidelity_logs -- --ignored
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+use gw2_api::cache::DataCache;
+use gw2_optimizer::benchmark::BenchmarkBuild;
 use gw2_optimizer::fidelity::compare::{self, PlayerComparison};
 use gw2_optimizer::fidelity::ei_log::{self, EiLog};
 use gw2_optimizer::fidelity::kit::CodeEntry;
@@ -119,10 +124,10 @@ fn nothing_outside_fidelity_reads_a_fight_profile() {
 /// Each budget is a cache p90 measured by
 /// `no_observable_exceeds_its_fidelity_budget` on 2026-09-25 (1.14.50 plus
 /// FCR-025), both rows n=1, rounded up by a margin inside [`stale_slack`].
-/// They are ratchet ceilings on today's engine, not accuracy claims. Only
-/// that `#[ignore]` gate reads simulator output: plain CI checks the table's
-/// shape and its log-side facts, so a regression here is caught only by a
-/// manual `--ignored` run with a synced cache. `skill_share` / boon uptimes /
+/// They are ratchet ceilings on today's engine, not accuracy claims. The
+/// gate runs in plain CI on the checked-in cache subset, frozen at a game
+/// build; `fixture_gamedb_reproduces_the_synced_cache` (`--ignored`) proves
+/// the subset still gives the synced cache's numbers. `skill_share` / boon uptimes /
 /// WvW DPS stay out: the documented ranges are too wide to ratchet.
 /// `kent_fidelity_fixture_budgets_ratchet` fails if this table is emptied.
 const EXPECTED_FIDELITY: &[(&str, &str, &str, &str, f64, &str)] = &[
@@ -311,13 +316,39 @@ fn cached_db() -> GameDb {
     GameDb::load(&cache).expect("game data cached \u{2014} sync it in-game first")
 }
 
-/// Every fixture compared, codes from `codes.json`.
-fn compare_all() -> Vec<PlayerComparison> {
-    let db = cached_db();
-    // The synced corpus lives in the addon's directory, beside its cache.
+/// The synced cache's subset the budget gate reads, frozen at a game build.
+const GAMEDB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/gamedb");
+const BENCHMARKS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/benchmarks");
+const REGENERATE: &str = "cargo run -p gw2-optimizer --example log_compare -- --gamedb crates/optimizer/tests/fixtures/gamedb";
+
+fn fixture_db() -> GameDb {
+    GameDb::load(&DataCache::new(GAMEDB))
+        .unwrap_or_else(|e| panic!("{GAMEDB}: {e}; regenerate: {REGENERATE}"))
+}
+
+fn fixture_corpus() -> Vec<BenchmarkBuild> {
+    let corpus = gw2_optimizer::scraper::load_benchmarks_from(Path::new(BENCHMARKS));
+    assert!(!corpus.is_empty(), "fixture corpus {BENCHMARKS}");
+    corpus
+}
+
+/// The synced corpus lives in the addon's directory, beside its cache.
+fn synced_corpus() -> Vec<BenchmarkBuild> {
     let cache = gw2_api::dev_config::cache_dir().expect("dev.cfg with addons_dir");
     let corpus = gw2_optimizer::scraper::load_benchmarks(cache.parent().expect("addon dir"));
     assert!(!corpus.is_empty(), "synced benchmark corpus");
+    corpus
+}
+
+/// Does an `EXPECTED_FIDELITY` row budget this player?
+fn budgeted(r: &PlayerComparison) -> bool {
+    EXPECTED_FIDELITY.iter().any(|&(p, s, m, ..)| {
+        (p, s, m) == (r.profession.as_str(), r.spec.as_str(), r.mode.as_str())
+    })
+}
+
+/// Every fixture compared, codes from `codes.json`.
+fn compare_all(db: &GameDb, corpus: &[BenchmarkBuild]) -> Vec<PlayerComparison> {
     let codes = codes();
     fixtures()
         .into_iter()
@@ -328,7 +359,7 @@ fn compare_all() -> Vec<PlayerComparison> {
                 .unwrap_or_default()
                 .into_iter()
                 .collect();
-            compare::compare_log(&name, &log, &for_log, None, &corpus, &db)
+            compare::compare_log(&name, &log, &for_log, None, corpus, db)
         })
         .collect()
 }
@@ -336,7 +367,7 @@ fn compare_all() -> Vec<PlayerComparison> {
 #[test]
 #[ignore = "needs a synced game-data cache; see dev.cfg"]
 fn every_fixture_squad_player_is_compared_or_named() {
-    let rows = compare_all();
+    let rows = compare_all(&cached_db(), &synced_corpus());
     // Compared = reconstructed, validator-clean and simulated. A failed
     // blocking gate is a finding about the kit, not a refusal to compare.
     let compared = rows.iter().filter(|r| r.refused.is_none()).count();
@@ -369,10 +400,137 @@ fn every_fixture_squad_player_is_compared_or_named() {
     );
 }
 
+/// A stale subset fails here by name (profession, player, missing ids), not
+/// in the gate as "nothing measured" or a moved number.
+#[test]
+fn fixture_gamedb_holds_every_id_the_budget_kits_name() {
+    let db = fixture_db();
+    let rows = compare_all(&db, &fixture_corpus());
+    // Real kit items the addon cache keep rule filters out, as the generator
+    // found them; the synced cache lacks them too.
+    let uncached: Vec<u32> = serde_json::from_str(
+        &std::fs::read_to_string(Path::new(GAMEDB).join("uncached_kit_items.json"))
+            .unwrap_or_else(|e| panic!("{GAMEDB}: {e}; regenerate: {REGENERATE}")),
+    )
+    .expect("uncached_kit_items.json is a list of ids");
+    for &(profession, spec, mode, ..) in EXPECTED_FIDELITY {
+        assert!(
+            db.professions.contains_key(profession),
+            "{GAMEDB} has no {profession}; regenerate: {REGENERATE}"
+        );
+        assert!(
+            rows.iter().any(
+                |r| (r.profession.as_str(), r.spec.as_str(), r.mode.as_str())
+                    == (profession, spec, mode)
+            ),
+            "no fixture squad player is {profession} · {spec} · {mode}"
+        );
+    }
+    for r in rows.iter().filter(|r| budgeted(r)) {
+        let kit = r.kit.as_ref().unwrap_or_else(|| {
+            panic!(
+                "{} / {}: no kit on {GAMEDB} ({:?}); regenerate: {REGENERATE}",
+                r.log, r.player, r.refused
+            )
+        });
+        let specs = kit.build.published.specs.iter().map(|l| l.id);
+        let missing = [
+            (
+                "specializations",
+                specs
+                    .filter(|id| !db.specializations.contains_key(id))
+                    .collect(),
+            ),
+            (
+                "traits",
+                kit.trait_ids(&db)
+                    .into_iter()
+                    .filter(|id| !db.traits.contains_key(id))
+                    .collect(),
+            ),
+            (
+                "skills",
+                kit.skill_ids()
+                    .into_iter()
+                    .filter(|id| !db.skills.contains_key(id))
+                    .collect(),
+            ),
+            (
+                "items",
+                kit.item_ids()
+                    .into_iter()
+                    .filter(|id| !db.items.contains_key(id) && !uncached.contains(id))
+                    .collect::<Vec<u32>>(),
+            ),
+        ];
+        for (what, ids) in missing {
+            assert!(
+                ids.is_empty(),
+                "{} / {}: kit {what} {ids:?} not in {GAMEDB}; regenerate: {REGENERATE}",
+                r.log,
+                r.player
+            );
+        }
+    }
+}
+
+/// Runs in plain CI on the checked-in subset; the parity test below runs
+/// the same gate on the synced cache.
+#[test]
+fn no_observable_exceeds_its_fidelity_budget() {
+    assert_within_budgets(&compare_all(&fixture_db(), &fixture_corpus()));
+}
+
+/// The subset is frozen at the build it was cut from. After a re-sync or an
+/// engine change that reads records outside it, the synced cache and the
+/// subset part ways; this catches that. Run it with the release checklist.
 #[test]
 #[ignore = "needs a synced game-data cache; see dev.cfg"]
-fn no_observable_exceeds_its_fidelity_budget() {
-    let bands = compare::bands(&compare_all());
+fn fixture_gamedb_reproduces_the_synced_cache() {
+    let corpus = fixture_corpus();
+    let synced = compare_all(&cached_db(), &corpus);
+    assert_within_budgets(&synced);
+    let budget_rows = |rows: &[PlayerComparison]| -> Vec<_> {
+        rows.iter()
+            .filter(|r| budgeted(r))
+            .map(|r| {
+                let rest = (r.unmapped_share, r.gates.clone(), r.refused.clone());
+                (
+                    r.log.clone(),
+                    r.player.clone(),
+                    r.diffs.clone(),
+                    r.share.clone(),
+                    rest,
+                )
+            })
+            .collect()
+    };
+    let cache = DataCache::new(gw2_api::dev_config::cache_dir().expect("dev.cfg"));
+    assert_eq!(
+        budget_rows(&compare_all(&fixture_db(), &corpus)),
+        budget_rows(&synced),
+        "subset (build {:?}) and synced cache (build {:?}) disagree: regenerate ({REGENERATE}), then re-measure the budgets",
+        DataCache::new(GAMEDB).cached_build("skills"),
+        cache.cached_build("skills"),
+    );
+}
+
+fn assert_within_budgets(rows: &[PlayerComparison]) {
+    for r in rows {
+        let key = (r.profession.as_str(), r.spec.as_str(), r.mode.as_str());
+        for d in &r.diffs {
+            if EXPECTED_FIDELITY
+                .iter()
+                .any(|&(p, s, m, o, ..)| ((p, s, m), o) == (key, d.observable))
+            {
+                println!(
+                    "{} / {} {}: error {:?}",
+                    r.log, r.player, d.observable, d.error
+                );
+            }
+        }
+    }
+    let bands = compare::bands(rows);
     let mut failures = Vec::new();
     for &(profession, spec, mode, observable, budget, _) in EXPECTED_FIDELITY {
         let key = (

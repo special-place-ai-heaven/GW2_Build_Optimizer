@@ -250,7 +250,7 @@ fn render_choya_identity(ui: &Ui, state: &mut AddonState) {
     if !state.main.chat.history.is_empty() && !state.main.chat.waiting {
         ui.same_line_with_spacing(0.0, 12.0);
         if ui.small_button(format!("{}##talk", t("btn.clear"))) {
-            state.main.chat.history.clear();
+            state.main.chat.history = Default::default();
             state.main.chat.copied_code = None;
             state.main.chat.copied_frames = 0;
             state.main.chat.dirty = true;

@@ -632,7 +632,9 @@ pub fn shutdown() {
     *lock_or_recover(&TAP) = None;
     let runtime = lock_or_recover(&RUNTIME).take();
     if let Some(runtime) = runtime {
-        runtime.shutdown_timeout(RUNTIME_SHUTDOWN_BUDGET);
+        shutdown_runtime(runtime, RUNTIME_SHUTDOWN_BUDGET, || {
+            let _kept_mapped = crate::state::pin_addon_module();
+        });
     }
 }
 
@@ -1461,6 +1463,11 @@ fn set_error(my_gen: u64, msg: String) {
 /// Lazily create the playback runtime and hand out a handle to it.
 fn runtime_handle() -> Result<tokio::runtime::Handle, String> {
     let mut guard = lock_or_recover(&RUNTIME);
+    // Under the RUNTIME lock: once `shutdown` has taken the runtime, a late
+    // caller would otherwise build a fresh one that nothing tears down.
+    if is_shut_down() {
+        return Err("radio is shutting down".to_string());
+    }
     if guard.is_none() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
@@ -1501,16 +1508,53 @@ fn block_on_cancellable<F: std::future::Future>(
 /// Poll-join a thread with a budget. On timeout the handle is dropped (the
 /// thread finishes on its own shortly after) and the abandonment is logged —
 /// a bounded hitch, never a deadlock.
+///
+/// The audio thread is pinned and leaves through `FreeLibraryAndExitThread`,
+/// so `JoinHandle::is_finished` never turns true for it in the DLL; the OS
+/// thread object is what says it is gone (same fix as `state::TrackedWorker`).
 fn join_bounded(handle: std::thread::JoinHandle<()>, budget: Duration) {
     let deadline = Instant::now() + budget;
-    while !handle.is_finished() {
+    while !crate::state::thread_has_exited(&handle) {
         if Instant::now() >= deadline {
             radio_log("radio audio thread outlived its join budget; detaching".to_string());
             return;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    let _ = handle.join(); // finished: reap; panics were caught inside
+    // Exited through ExitThread: std's result slot is still shared and `join`
+    // would panic. The thread is gone; dropping closes the handle.
+    if handle.is_finished() {
+        let _ = handle.join(); // finished: reap; panics were caught inside
+    }
+}
+
+/// Shut the playback runtime down within `budget`; call `keep_mapped` (leak
+/// one module pin) when it ran out.
+///
+/// On the in-budget path tokio joins every runtime and blocking-pool thread
+/// before returning. On timeout it detaches them, and none holds a module pin:
+/// a `getaddrinfo` stalled in the screened resolver's `spawn_blocking` would
+/// return into unmapped `.text` once Nexus frees the DLL (WER `a1d6`, CFG
+/// fast-fail). So a timeout leaks one pin and the image outlives the unload.
+/// A pin per runtime thread (`on_thread_start`) would cover the same threads
+/// but could never be released safely - the hook returns into DLL code - and
+/// would block every hot-reload after the first play.
+fn shutdown_runtime(
+    runtime: tokio::runtime::Runtime,
+    budget: Duration,
+    keep_mapped: impl FnOnce(),
+) {
+    let started = Instant::now();
+    runtime.shutdown_timeout(budget);
+    // tokio parks until the deadline before giving up, so a detach always
+    // shows as elapsed >= budget; a clean finish right at the edge only costs
+    // a needless (harmless) leak.
+    if started.elapsed() >= budget {
+        // ponytail: leaks the image until process exit on a stalled teardown;
+        // count live runtime threads (on_thread_start/stop) if this fires often.
+        keep_mapped();
+        radio_log("radio runtime outlived its shutdown budget; keeping the DLL mapped".to_string());
+    }
 }
 
 /// Recover a poisoned module mutex the same way `state::lock_state` does:
@@ -1734,8 +1778,17 @@ pub fn station_from_saved(saved: &SavedStation) -> RbStation {
 mod tests {
     use super::*;
 
+    /// Serializes tests that latch SHUT_DOWN (or need it clear): the flag and
+    /// RUNTIME are process-wide.
+    static SHUT_DOWN_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn shut_down_test_guard() -> MutexGuard<'static, ()> {
+        lock_or_recover(&SHUT_DOWN_TEST_LOCK)
+    }
+
     #[test]
     fn nothing_plays_after_shutdown_until_rearmed() {
+        let _l = shut_down_test_guard();
         shutdown();
         play(&RbStation {
             name: "late".into(),
@@ -1783,6 +1836,7 @@ mod tests {
     /// then fail the connect honestly — no sockets to real stream hosts.
     #[test]
     fn open_stream_off_runtime_thread_fails_cleanly_instead_of_panicking() {
+        let _l = shut_down_test_guard();
         let handle = runtime_handle().expect("test runtime");
         let stop = Arc::new(AtomicBool::new(false));
         let np: NowPlayingCell = Arc::new(Mutex::new(None));
@@ -2252,5 +2306,82 @@ mod tests {
         let station = station_from_saved(&saved);
         assert_eq!(station.stream_url(), "http://192.168.1.10:8000/live");
         assert!(station.stationuuid.is_empty());
+    }
+
+    /// In the DLL the audio thread ends in `FreeLibraryAndExitThread`, so
+    /// `JoinHandle::is_finished` stayed false and every station switch waited
+    /// the full STOP_JOIN_BUDGET, every unload SHUTDOWN_JOIN_BUDGET plus a
+    /// false "detaching" warning. The test exe cannot pin, so the thread exits
+    /// the same way itself.
+    #[cfg(windows)]
+    #[test]
+    fn join_bounded_sees_a_thread_that_left_through_exit_thread() {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn ExitThread(code: u32) -> !;
+        }
+        let handle = std::thread::spawn(|| unsafe { ExitThread(0) });
+        std::thread::sleep(Duration::from_millis(50));
+        let started = Instant::now();
+        join_bounded(handle, Duration::from_secs(5));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "an exited thread must not burn the join budget: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn shutdown_runtime_reports_a_blocking_thread_that_outlives_the_budget() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("runtime");
+        let release = Arc::new(AtomicBool::new(false));
+        let t_release = Arc::clone(&release);
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        // Stands in for a getaddrinfo stalled in the screened resolver.
+        runtime.spawn_blocking(move || {
+            let _ = started_tx.send(());
+            while !t_release.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("blocking task started");
+        let mut pins = 0;
+        shutdown_runtime(runtime, Duration::from_millis(100), || pins += 1);
+        release.store(true, Ordering::Release);
+        assert_eq!(
+            pins, 1,
+            "a stalled blocking thread must trigger the pin leak"
+        );
+    }
+
+    #[test]
+    fn shutdown_runtime_is_clean_when_every_thread_ends_in_budget() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .build()
+            .expect("runtime");
+        // Leave an idle blocking-pool thread behind, as a finished DNS lookup does.
+        runtime
+            .block_on(runtime.spawn_blocking(|| ()))
+            .expect("blocking task");
+        let mut pins = 0;
+        shutdown_runtime(runtime, Duration::from_secs(2), || pins += 1);
+        assert_eq!(pins, 0, "a clean teardown must not leak the image");
+    }
+
+    #[test]
+    fn no_runtime_is_built_after_shutdown() {
+        let _l = shut_down_test_guard();
+        shutdown();
+        let refused = runtime_handle().is_err();
+        let rebuilt = lock_or_recover(&RUNTIME).is_some();
+        arm();
+        assert!(refused, "runtime_handle must refuse once shut down");
+        assert!(!rebuilt, "nothing would tear a post-shutdown runtime down");
     }
 }
