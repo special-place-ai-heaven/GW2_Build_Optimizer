@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: windows-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'ci-hosted'))) && fromJSON('["self-hosted","Windows","X64","windows-host-interim"]') || 'windows-latest' }}
     steps:
       - uses: actions/checkout@v7
         with:
