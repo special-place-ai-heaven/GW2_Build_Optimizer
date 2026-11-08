@@ -12,13 +12,13 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: windows-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'ci-hosted'))) && fromJSON('["self-hosted","Windows","X64","windows-host-interim"]') || 'windows-latest' }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: commit actor
-        shell: bash
+        shell: '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -e -o pipefail {0}'
         env:
           EVENT: ${{ github.event_name }}
           ACTOR: ${{ github.actor }}
@@ -34,7 +34,7 @@ jobs:
             exit 1
           fi
       - name: identity gate script
-        shell: bash
+        shell: '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -e -o pipefail {0}'
         env:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -48,10 +48,10 @@ jobs:
           fi
           echo "IDENTITY_SCRIPT=$script" >> "$GITHUB_ENV"
       - name: commit identity selftest
-        shell: bash
+        shell: '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -e -o pipefail {0}'
         run: SELFTEST=1 bash "$IDENTITY_SCRIPT"
       - name: commit identity
-        shell: bash
+        shell: '"C:\Program Files\Git\bin\bash.exe" --noprofile --norc -e -o pipefail {0}'
         run: |
           set -euo pipefail
           zero=0000000000000000000000000000000000000000
